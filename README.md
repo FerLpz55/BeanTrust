@@ -7,9 +7,15 @@ Este proyecto busca mitigar la intermediación excesiva en zonas rurales mediant
 
 Este repositorio centraliza los componentes del ecosistema Bean Trust:
 
-* `/api`: Backend (FastAPI). Maneja la lógica de negocio central, la base de datos relacional y la exposición de endpoints.
-* `/mobile`: Aplicación móvil (React Native). Interfaz de usuario diseñada para registro de eventos en campo con soporte *offline*.
-* `/contracts`: Contratos inteligentes diseñados para la red Polygon.
+* `/backend`: Backend (FastAPI). Maneja la lógica de negocio central, la base de datos relacional (Supabase/PostgreSQL) y la exposición de endpoints.
+* `/mobile`: Aplicación móvil (React Native / Expo). Interfaz de usuario diseñada para registro de eventos en campo con soporte *offline*.
+* `/contracts`: Contratos inteligentes (Solidity) diseñados para la red Polygon.
+* `/db`: Migraciones SQL + seed.
+* `/docs`: Documentación técnica.
+
+## Documentación
+
+* [Arquitectura](docs/ARCHITECTURE.md) — qué hace cada pieza, por qué está diseñada así y cómo se relaciona entre sí.
 
 ## Stack Tecnológico
 
