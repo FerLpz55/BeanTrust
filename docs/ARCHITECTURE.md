@@ -84,16 +84,21 @@ BeanTrust/
 │   ├── 04-ui-flujo.md          # Wireframes + navegación (Issue 4)
 │   ├── 05-offline-sync.md      # Sincronización offline (Issue 5)
 │   └── adr/                    # Decisiones de arquitectura (ADR)
-├── backend/                    # FastAPI
+├── Backend/                     # FastAPI
 │   ├── app/
-│   │   ├── main.py             # Punto de inicio de FastAPI
-│   │   ├── core/               # config, seguridad (JWT Supabase), logger
-│   │   ├── api/v1/             # lotes, eventos, verificacion, pagos, auth, sync
-│   │   ├── models/             # Esquema de datos (SQLAlchemy / Supabase)
-│   │   ├── schemas/            # Pydantic → validación entrada/salida
-│   │   ├── services/           # maquina_estados, qr_service, blockchain_link
-│   │   └── dependencies.py     # Inyección de dependencias (DB, Auth)
+│   │   ├── main.py              # Punto de inicio: instancia FastAPI(), monta routers
+│   │   ├── core/                 # config, seguridad (JWT Supabase), logger
+│   │   ├── api/v1/
+│   │   │   └── endpoints/        # lotes, eventos, verificacion, pagos, auth, sync (1 router por dominio)
+│   │   ├── models/                # Esquema de datos (SQLAlchemy / Supabase)
+│   │   ├── schemas/               # Pydantic → validación entrada/salida
+│   │   ├── services/              # maquina_estados, qr_service, blockchain_link
+│   │   ├── repositories/          # RepositorioLote (interfaz) + SupabaseLoteRepo (impl.) — ver §4
+│   │   ├── utils/                 # helpers puros sin estado (hashing, formateo, etc.)
+│   │   └── dependencies.py        # Inyección de dependencias compartidas (DB, Auth) — ver §4
 │   ├── tests/
+│   │   ├── unit/
+│   │   └── integration/
 │   └── pyproject.toml
 ├── mobile/                     # React Native (Expo Router)
 │   ├── app/                    # Pantallas (registro, lote, QR, sync...)
@@ -882,7 +887,7 @@ Cada decisión se documenta en `docs/adr/README.md` con plantilla: Título · Co
 - **Tipos de retorno** en path operations (`-> LoteRead`): validan, filtran y serializan (evita exponer campos internos como la wallet o `hash_sha256` parcial).
 - Endpoints de E/S **blocking** (Supabase SDK) en `def` síncrono (se ejecutan en threadpool), no dentro de `async` — evita bloquear el event loop.
 - **Nunca** claves privadas en el código: solo variables de entorno (`.env` ignorado por git).
-- Linter: Ruff. Pruebas: pytest (en `backend/tests/`).
+- Linter: Ruff. Pruebas: pytest (en `Backend/tests/`).
 
 ### Diseño orientado a objetos (dominio)
 - El `Lote` es el **aggregate root**: toda modificación sobre él pasa por sus métodos (no se modifica por acceso directo).
@@ -938,7 +943,7 @@ Cada decisión se documenta en `docs/adr/README.md` con plantilla: Título · Co
 3. **API contrato**: rutas + schemas Pydantic + flujo → `docs/03-api-contrato.md` (Issue 3).
 4. **UI mobile**: wireframes + árbol de navegación → `docs/04-ui-flujo.md` (Issue 4).
 5. **Offline-sync**: diseño completo → `docs/05-offline-sync.md` (Issue 5).
-6. **Backend**: montar `backend/` (FastAPI) empezando por el corazón (máquina de estados + QR público).
+6. **Backend**: montar `Backend/` (FastAPI) empezando por el corazón (máquina de estados + QR público).
 7. **Móvil**: `mobile/` con Expo (registro + QR funcional).
 8. **Contracts**: `CoffeePayments.sol` + pruebas + deploy en testnet.
 
