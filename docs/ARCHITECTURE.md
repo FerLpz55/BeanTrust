@@ -1,5 +1,7 @@
 # Arquitectura de Bean Trust
 
+> **English translation:** [`ARCHITECTURE.en.md`](./ARCHITECTURE.en.md).
+
 > Documento de referencia para desarrollo autónomo del equipo.
 > Objetivo: que cualquier integrante entienda **qué hace cada pieza** y **por qué está diseñada así**, antes de escribir código.
 

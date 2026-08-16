@@ -1,4 +1,7 @@
 # BeanTrust
+
+*English translation: [`README.en.md`](./README.en.md).*
+
 Ecosistema Integral para la trazabilidad y comercio Justo en la cadena de suministro del Café mediante API y BlockChain 
 
 Este proyecto busca mitigar la intermediación excesiva en zonas rurales mediante la asignación de una identidad digital al grano de café. El sistema registra de forma inmutable los eventos clave de la cadena (siembra, cosecha, beneficio y tostado) para certificar el origen del producto y facilitar el acceso a mercados de especialidad.
