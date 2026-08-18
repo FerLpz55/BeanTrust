@@ -1,13 +1,16 @@
 [project]
 name = "beantrust-backend"
 version = "0.1.0"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
     "uvicorn[standard]>=0.52.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.2",
+    "supabase>=2.31.0",
+    "pyjwt[crypto]>=2.13.0",
+    "argon2-cffi>=25.1.0",
 ]
 
 [dependency-groups]
@@ -17,8 +20,16 @@ dev = [
     "ruff>=0.16.2",
 ]
 
+[tool.fastapi]
+entrypoint = "app.main:app"
+
 [tool.ruff]
 line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "I", "PT", "FAST", "ASYNC", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: tests de integración/E2E (TestClient con almacén en memoria)"]

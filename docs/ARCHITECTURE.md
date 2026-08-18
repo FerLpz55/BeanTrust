@@ -308,6 +308,8 @@ classDiagram
     LoteService ..> GatewayPagos : usa
 ```
 
+> **Nota de implementación:** este diagrama es **conceptual** (CamelCase). En el código los nombres son snake_case (`LoteService` = `LoteService`, `RepositorioLote` = `lote_repo`, `QrService` = `qr_service`), los repos son protocolos en `app/repositories/` y la entidad `Productor` es la columna `rol`/FK de `Usuario` (véase la nota del ERD en §5).
+
 **Por qué cada elemento:**
 
 | Clase | Por qué existe | Principio OOP |
@@ -441,6 +443,14 @@ erDiagram
     }
 ```
 
+> **Desviaciones implementadas en el v1 MVP (vs. ERD completo):**
+> - No existen tablas `PRODUCTOR`, `COOPERATIVA`, `COMPRADOR` ni `PRODUCTOR_COOPERATIVA` como tablas propias. El rol y la entidad vinculada viven en `USUARIOS` (columna `rol` + FK `finca_id`/`cooperativa_id`/`comprador_id`); `FINCA.productor_id` referencia directamente `USUARIOS`. Se simplifica el modelo para el MVP y se documenta la migración futura (B7/B11).
+> - `USUARIOS.public_address` (wallet) **no se persiste aún**: depende del milestone de contratos (B11) y de la integración web3 (pausada).
+> - `VERIFICACION` usa `lote_id` + `verificado_en` en vez de `qr_id` + `fecha`: un QR certifica un lote 1-1, por lo que el escaneo se ancla al lote directamente.
+> - `LOTE.codigo_publico` no existe como columna: el código público de verificación vive en `QR_CERTIFICADO.codigo`.
+> - Las PK UUID se generan en el cliente (offline-first), no con `gen_random_uuid()`.
+> - El índice real es `idx_lote_eventos_lote` (véase `001_esquema_inicial.sql`).
+
 ### Diagrama Entidad-Relación conceptual (notación Chen)
 
 > Versión **didáctica** del modelo (como la del ejemplo de referencia): destaca *entidades* (rectángulo), *relaciones* (rombo) y *cardinalidades* (1:1, 1:N, N:M) **sin** detallar columnas. Su objetivo es validar la lógica de negocio (¿quién se relaciona con quién y cuántos?) antes de aterrizar en el modelo físico de la § anterior.
@@ -489,7 +499,7 @@ flowchart LR
 > - Cada `LOTE` **emite como mucho un** `QR_CERTIFICADO` y **liquida como mucho un** `PAGO` (1:1 "baja": 0 o 1) — coincide con el ERD.
 > - `LOTE_EVENTOS`, `QR_CERTIFICADO`, `VERIFICACION` y `PAGO` son **entidades débiles**: solo tienen sentido ligadas a su lote/origen.
 
-> **De lo conceptual a lo físico (`erDiagram` de arriba):** las relaciones 1:1/1:N se resuelven con una **FK** en la entidad del lado "N"; las N:M requieren una **tabla intermedia** (`PRODUCTOR_COOPERATIVA`). Este paso se documenta también en `docs/02-modelo-datos.md` (Issue 2).
+> **De lo conceptual a lo físico (`erDiagram` de arriba):** las relaciones 1:1/1:N se resuelven con una **FK** en la entidad del lado "N"; las N:M requieren una **tabla intermedia** (`PRODUCTOR_COOPERATIVA`). Los diseños por Issue 1–5 se consolidaron en este documento y en `docs/06-contratos.md`.
 
 ### Diagrama de flujo de datos (DFD) — de dónde viene cada dato
 
@@ -554,7 +564,7 @@ flowchart LR
 | ¿Cuánto paga al productor? | `monto_total`, `monto_productor`, `comision_pct` | PAGO |
 | ¿Quién compró el lote? | `comprador_id` en el evento `VENTA` | LOTE_EVENTOS |
 | ¿El pago llegó on-chain? | `tx_hash`, `estado_pago` | PAGO |
-| ¿Es una persona/org con credenciales? | `email`, `rol`, `public_address` (wallet) | USUARIOS |
+| ¿Es una persona/org con credenciales? | `email`, `rol`, `public_address` (wallet) | USUARIOS (wallet pendiente, B11) |
 | ¿El QR es auténtico? | `hash_sha256` | QR_CERTIFICADO |
 
 ---
@@ -564,10 +574,10 @@ flowchart LR
 - **ENUM** para `estado` y `tipo` (no VARCHAR suelto) → evita estados inválidos en BD.
 - **`TIMESTAMPTZ`** en todas las fechas (UTC): nunca `TIMESTAMP` sin zona.
 - **CHECK constraints**: `merma_pct >= 0`, `peso_kg > 0`, `comision_pct BETWEEN 0 AND 100` → la integridad se valida también en la base, no solo en la API.
-- **UUID** como PK con `gen_random_uuid()` → admite ids generados offline sin colisiones.
+- **UUID** como PK (generado en cliente) → admite ids generados offline sin colisiones; el servidor nunca asume que el id llega "vacío".
 - **`lote_eventos` inmutable**: sin UPDATE/DELETE, solo INSERT.
-- Índice compuesto para consultar la historia en orden:
-  `CREATE INDEX idx_lote_eventos_lote_time ON lote_eventos (lote_id, registrado_en DESC);`
+- Índice para consultar la historia en orden:
+  `CREATE INDEX idx_lote_eventos_lote ON lote_eventos (lote_id, registrado_en DESC);`
 - **RLS**: las políticas se anclan a `auth.uid()` → `USUARIOS` (rol + entidad vinculada), nunca a un ID enviado por el cliente.
 
 ---
@@ -659,6 +669,31 @@ sequenceDiagram
 ```
 
 > La app **nunca** escribe directo a la BD: todo pasa por FastAPI, que valida JWT y la máquina de estados. La app en modo offline guarda en su SQLite local y sincroniza después (ver §7).
+
+### Idempotencia y append-only (diagrama)
+
+Los eventos y pagos usan la cabecera `Idempotency-Key` (UUID generado por el móvil). Ese UUID **es el PK** del evento en `lote_eventos`, de modo que reenviar la misma operación (retry offline, doble tap) **no duplica** el historial: el servidor detecta la clave y devuelve el lote tal como quedó.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor M as Móvil (productor)
+    participant API as Backend FastAPI
+    participant DB as Supabase
+
+    M->>API: POST /v1/lotes/{id}/eventos + Idempotency-Key: K
+    API->>DB: ¿existe evento con id=K?
+    alt No existe (primera vez)
+        API->>DB: INSERT lote_eventos (id=K) · UPDATE lotes.estado
+        API-->>M: 201 Created
+    else Ya existe (retry)
+        API-->>M: 201 Created (mismo estado final, sin re-aplicar)
+    end
+```
+
+- `lote_eventos` es **append-only**: su repositorio solo expone `insert`/`select` y la BD bloquea `update`/`delete` con trigger (migración 003).
+- El mismo mecanismo aplica a `POST /v1/pagos`: la columna `pago.idempotency_key` es `UNIQUE` (§9), de modo que reenviar una venta no dispara dos pagos on-chain.
+- En el sync (`POST /v1/sync`) cada operación lleva su propio `id`; por eso es seguro reenviar el batch completo (202) aunque algunas ya se hayan aplicado. Si alguna operación del batch no se pudo aplicar (conflicto de estados, error de dominio o error interno) se responde `207` con el detalle por `op_id`; el cliente solo reenvía las no aplicadas.
 
 ### Validación de entrada / salida (Pydantic)
 
@@ -798,9 +833,38 @@ sequenceDiagram
   - **Inválido/tampered** → HTTP 409.
 - El `hash_sha256` permite verificar de forma independiente de la plataforma y, opcionalmente, dejar constancia on-chain (guardar el hash dentro del contrato, ver §9).
 
+### Flujo de verificación (diagrama de secuencia)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Consumidor (móvil/cámara)
+    participant API as Backend FastAPI
+    participant DB as Supabase
+
+    C->>C: Escanea el QR (codigo + hash en el código)
+    C->>API: GET /v1/verificar/{codigo} (sin auth)
+    API->>DB: SELECT qr_certificado WHERE codigo=?
+    alt No existe
+        API-->>C: 404 Código no encontrado
+    end
+    API->>DB: SELECT lotes + lote_eventos (historial)
+    API->>API: Recalcula hash_sha256 del historial real
+    alt hash coincide con el del certificado
+        API->>DB: INSERT verificacion (auditoría de consulta)
+        API-->>C: 200 Certificado de Origen (productor, finca, historial, estado)
+    else hash no coincide (tampered)
+        API-->>C: 409 Certificado inválido / manipulada
+    end
+```
+
+> El QR en sí solo porta `codigo` + `hash_sha256`; el historial lo devuelve la API. Cualquier edición de `lote_eventos` rompería el hash → 409. El anclaje opcional del hash on-chain se documenta en `docs/06-contratos.md`.
+
 ---
 
 ## 9. Blockchain y pagos (Solidity / Polygon)
+
+> **Estado v1 MVP**: el flujo on-chain está **diseñado** aquí y en `docs/06-contratos.md`, pero la integración web3 está **en pausa** (falta proyecto Supabase real y wallet del backend). En el código se ejecuta `FakeGatewayPagos` (tx determinista `0x<pago.id>` y confirmación simulada) que ya implementa el patrón 3%/97% y el poller `PENDIENTE → CONFIRMADO`. La wallet del productor (`public_address` en `USUARIOS`) se persistirá cuando se retome B11.
 
 ### Responsabilidad del Smart Contract `CoffeePayments.sol`
 
@@ -824,6 +888,10 @@ Responsabilidad exclusiva: el pago y la inmutabilidad de la transacción (*únic
 - Deploy desde `contracts/script/` con **Foundry** (`forge script ... --rpc-url ...`).
 - Fondos de prueba: faucet de Amoy (MATIC de prueba, gratis).
 - En producción se evalúa Mainnet; Polygon (L2) mantiene gas bajo porque hereda seguridad de Ethereum.
+
+> La especificación completa del contrato, el flujo y el estado de la
+> implementación viven en **`docs/06-contratos.md`**. La implementación web3
+> está **en pausa** (B7): el MVP corre con `FakeGatewayPagos`.
 
 ### Flujo de pago por el backend (diagrama de secuencia)
 
@@ -865,6 +933,45 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 - **Autenticación**: Supabase Auth (email/contraseña, o *magic link* para productores sin email). El `auth.uid()` de Supabase **es** el `USUARIOS.id` (mismo UUID vinculado al registrarse).
 - **Autorización**: RLS en PostgreSQL — las políticas resuelven el rol desde `USUARIOS` y restringen por pertenencia (`PRODUCTOR` de la finca, `COOPERATIVA` de la finca) **sin confiar en IDs enviados por el cliente**; adicionalmente la dependencia `get_current_user` en FastAPI fuerza el mismo chequeo a nivel de API.
 
+### Flujo de autenticación (diagrama de secuencia)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor M as Móvil
+    participant API as Backend FastAPI
+    participant AUTH as Supabase Auth / LocalAuth
+    participant DB as Supabase (usuarios)
+
+    M->>API: POST /v1/auth/login (email + password)
+    API->>AUTH: Valida credenciales
+    AUTH-->>API: tokens (access + refresh)
+    API-->>M: 200 TokenResponse
+
+    Note over M,DB: Cada request autenticado:
+    M->>API: GET /v1/lotes + Authorization: Bearer <jwt>
+    API->>AUTH: Verifica firma/exp (HS256 local o JWKS)
+    API->>DB: Resuelve rol REAL desde usuarios WHERE id = auth.uid()
+    API->>API: require_rol(...) → 401/403 o CurrentUser
+```
+
+> El rol de negocio **jamás** se lee del claim `role` del JWT (Supabase siempre dice `authenticated`): se resuelve desde la tabla `usuarios` por el `sub`. Los tokens del proveedor local (desarrollo) son HS256; en producción se valida con JWKS (RS256/ES256) del proyecto real y el proveedor local queda bloqueado por configuración.
+
+### Matriz de permisos RLS (por tabla)
+
+| Tabla | productor | cooperativa | comprador | admin |
+|---|---|---|---|---|
+| `usuarios` | propia (lectura) | propia (lectura) | propia (lectura) | todo |
+| `cooperativa` | — | — | — | lectura |
+| `finca` | propias (lectura) | propias + de sus productores (lectura) | — | todo |
+| `lotes` | de sus fincas | de sus fincas | — (solo `/verificar`) | todo |
+| `lote_eventos` | de sus lotes (append-only) | de sus lotes (append-only) | — | todo |
+| `qr_certificado` | de sus lotes | de sus lotes | — | todo |
+| `pago` | de sus lotes (lectura) | propias (escritura) | — | todo |
+| `verificacion` | de sus lotes | de sus lotes | — | todo |
+
+La matriz está implementada en `Backend/db/migrations/002_rls.sql` y es la misma regla que replica la capa de servicio en FastAPI (doble control, §12).
+
 ---
 
 ## 11. Decisiones de arquitectura (ADR) ya tomadas
@@ -875,8 +982,10 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 4. **QR con hash (sin estado frágil en BD)**: rápido y comprobable para el consumidor.
 5. **Contrato separado del backend**: inmutabilidad de los pagos y auditoría independiente.
 6. **`USUARIOS` como tabla central de identidad**: credenciales y wallet viven en `USUARIOS`; `PRODUCTOR`/`COOPERATIVA`/`COMPRADOR` solo agregan el rol de negocio (RLS se ancla a `USUARIOS`, no a la entidad concreta).
+7. **Web3 en pausa en el MVP** (B7): el contrato `CoffeePayments.sol` se especifica en `docs/06-contratos.md` pero no se implementa en este milestone; el MVP usa `FakeGatewayPagos`. Evita deuda: la interfaz y la idempotencia (`idempotency_key UNIQUE`) ya están resueltas.
+8. **Dinero como `real`/`float` con CHECK** según ERD; migrar a `NUMERIC`/`Decimal` es una mejora futura documentada (no bloquea el MVP).
 
-Cada decisión se documenta en `docs/adr/README.md` con plantilla: Título · Contexto · Decisión · Consecuencias.
+Cada decisión se documenta en esta misma sección (ADR 1–8) con plantilla: Título · Contexto · Decisión · Consecuencias.
 
 ---
 
@@ -940,11 +1049,11 @@ Cada decisión se documenta en `docs/adr/README.md` con plantilla: Título · Co
 
 ## 14. Flujo de desarrollo propuesto (equipo pequeño)
 
-1. **Dominio**: definir y documentar la máquina de estados + reglas → `docs/01-dominio-cafe.md` (Issue 1).
-2. **Modelo de datos**: ERD + migración inicial → `docs/02-modelo-datos.md` + `db/migrations/` (Issue 2).
-3. **API contrato**: rutas + schemas Pydantic + flujo → `docs/03-api-contrato.md` (Issue 3).
-4. **UI mobile**: wireframes + árbol de navegación → `docs/04-ui-flujo.md` (Issue 4).
-5. **Offline-sync**: diseño completo → `docs/05-offline-sync.md` (Issue 5).
+1. **Dominio**: definir y documentar la máquina de estados + reglas (consolidado en este documento, §6; Issue 1).
+2. **Modelo de datos**: ERD + migración inicial → §5 + `db/migrations/` (Issue 2).
+3. **API contrato**: rutas + schemas Pydantic + flujo → §6–§8 + `docs/06-contratos.md` (Issue 3).
+4. **UI mobile**: wireframes + árbol de navegación → `mobile/` (Issue 4, pendiente).
+5. **Offline-sync**: diseño completo → §7.5 (Issue 5).
 6. **Backend**: montar `Backend/` (FastAPI) empezando por el corazón (máquina de estados + QR público).
 7. **Móvil**: `mobile/` con Expo (registro + QR funcional).
 8. **Contracts**: `CoffeePayments.sol` + pruebas + deploy en testnet.
