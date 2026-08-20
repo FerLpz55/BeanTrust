@@ -19,10 +19,12 @@ from app.models.dominio import (
     Cooperativa,
     Estado,
     EstadoPago,
+    EstadoPropina,
     Finca,
     Lote,
     LoteEvento,
     Pago,
+    Propina,
     RepoError,
     Rol,
     TipoEvento,
@@ -58,6 +60,10 @@ def lote_a_fila(lote: Lote) -> dict[str, Any]:
         "estado": lote.estado.value,
         "peso_actual_kg": lote.peso_actual_kg,
         "fecha_cosecha": lote.fecha_cosecha.isoformat(),
+        "variedad": lote.variedad,
+        "metodo_beneficiado": lote.metodo_beneficiado,
+        "evidencia_url": lote.evidencia_url,
+        "evidencia_sha256": lote.evidencia_sha256,
         "creado_en": lote.creado_en.isoformat(),
         "actualizado_en": lote.actualizado_en.isoformat(),
     }
@@ -71,6 +77,10 @@ def fila_a_lote(fila: dict[str, Any]) -> Lote:
         fecha_cosecha=_dia(fila["fecha_cosecha"]),
         estado=Estado(fila["estado"]),
         peso_actual_kg=float(fila["peso_actual_kg"]),
+        variedad=_o_none(fila.get("variedad")),
+        metodo_beneficiado=_o_none(fila.get("metodo_beneficiado")),
+        evidencia_url=_o_none(fila.get("evidencia_url")),
+        evidencia_sha256=_o_none(fila.get("evidencia_sha256")),
         creado_en=_dt(fila["creado_en"]),
         actualizado_en=_dt(fila["actualizado_en"]),
     )
@@ -87,6 +97,18 @@ def evento_a_fila(evento: LoteEvento) -> dict[str, Any]:
         "peso_kg": evento.peso_kg,
         "merma_pct": evento.merma_pct,
         "comprador_id": str(evento.comprador_id) if evento.comprador_id else None,
+        "metodo_beneficiado": evento.metodo_beneficiado,
+        "metodo_fermentacion": evento.metodo_fermentacion,
+        "fermentacion_horas": evento.fermentacion_horas,
+        "humedad_inicial_pct": evento.humedad_inicial_pct,
+        "humedad_final_pct": evento.humedad_final_pct,
+        "metodo_secado": evento.metodo_secado,
+        "dias_reposo": evento.dias_reposo,
+        "puntaje_sca": evento.puntaje_sca,
+        "defectos": evento.defectos,
+        "densidad": evento.densidad,
+        "tamiz": evento.tamiz,
+        "hash_etapa": evento.hash_etapa,
         "registrado_en": evento.registrado_en.isoformat(),
     }
 
@@ -102,6 +124,30 @@ def fila_a_evento(fila: dict[str, Any]) -> LoteEvento:
         peso_kg=float(fila["peso_kg"]) if fila.get("peso_kg") is not None else None,
         merma_pct=float(fila["merma_pct"]) if fila.get("merma_pct") is not None else None,
         comprador_id=_uuid(fila["comprador_id"]) if fila.get("comprador_id") else None,
+        metodo_beneficiado=_o_none(fila.get("metodo_beneficiado")),
+        metodo_fermentacion=_o_none(fila.get("metodo_fermentacion")),
+        fermentacion_horas=(
+                float(fila["fermentacion_horas"])
+                if fila.get("fermentacion_horas") is not None
+                else None
+            ),
+            humedad_inicial_pct=(
+                float(fila["humedad_inicial_pct"])
+                if fila.get("humedad_inicial_pct") is not None
+                else None
+            ),
+            humedad_final_pct=(
+                float(fila["humedad_final_pct"])
+                if fila.get("humedad_final_pct") is not None
+                else None
+            ),
+        metodo_secado=_o_none(fila.get("metodo_secado")),
+        dias_reposo=float(fila["dias_reposo"]) if fila.get("dias_reposo") is not None else None,
+        puntaje_sca=float(fila["puntaje_sca"]) if fila.get("puntaje_sca") is not None else None,
+        defectos=_o_none(fila.get("defectos")),
+        densidad=float(fila["densidad"]) if fila.get("densidad") is not None else None,
+        tamiz=_o_none(fila.get("tamiz")),
+        hash_etapa=_o_none(fila.get("hash_etapa")),
         registrado_en=_dt(fila["registrado_en"]),
     )
 
@@ -346,6 +392,126 @@ class SupabasePagoRepo:
         except APIError as exc:
             raise RepoError("No se pudo consultar el pago.") from exc
         return fila_a_pago(resp.data) if resp.data else None
+
+
+def propina_a_fila(propina: Propina) -> dict[str, Any]:
+    return {
+        "id": str(propina.id),
+        "lote_id": str(propina.lote_id),
+        "comprador_id": str(propina.comprador_id),
+        "productor_id": str(propina.productor_id),
+        "monto": propina.monto,
+        "moneda": propina.moneda,
+        "estado_propina": propina.estado_propina.value,
+        "clave_idempotencia": propina.clave_idempotencia,
+        "tx_hash": propina.tx_hash,
+        "creado_en": propina.creado_en.isoformat(),
+        "actualizado_en": propina.actualizado_en.isoformat(),
+    }
+
+
+def fila_a_propina(fila: dict[str, Any]) -> Propina:
+    return Propina(
+        id=_uuid(fila["id"]),
+        lote_id=_uuid(fila["lote_id"]),
+        comprador_id=_uuid(fila["comprador_id"]),
+        productor_id=_uuid(fila["productor_id"]),
+        monto=float(fila["monto"]),
+        moneda=fila["moneda"],
+        estado_propina=EstadoPropina(fila["estado_propina"]),
+        clave_idempotencia=_o_none(fila.get("clave_idempotencia")),
+        tx_hash=_o_none(fila.get("tx_hash")),
+        creado_en=_dt(fila["creado_en"]),
+        actualizado_en=_dt(fila["actualizado_en"]),
+    )
+
+
+class SupabasePropinaRepo:
+    def __init__(self, cliente) -> None:
+        self._cliente = cliente
+
+    def guardar_propina(self, propina: Propina) -> Propina:
+        try:
+            self._cliente.table("propina").upsert(propina_a_fila(propina)).execute()
+        except APIError as exc:
+            raise RepoError("No se pudo guardar la propina.") from exc
+        return propina
+
+    def buscar_por_lote(self, lote_id: uuid.UUID) -> list[Propina]:
+        try:
+            resp = (
+                self._cliente.table("propina")
+                .select("*")
+                .eq("lote_id", str(lote_id))
+                .order("creado_en", desc=True)
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudo consultar las propinas.") from exc
+        return [fila_a_propina(fila) for fila in (resp.data or [])]
+
+    def buscar_por_idempotencia(self, clave: str) -> Propina | None:
+        try:
+            resp = (
+                self._cliente.table("propina")
+                .select("*")
+                .eq("clave_idempotencia", clave)
+                .maybe_single()
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudo consultar la propina.") from exc
+        return fila_a_propina(resp.data) if resp.data else None
+
+    def buscar_por_productor(
+        self, productor_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Propina], Cursor | None]:
+        try:
+            query = (
+                self._cliente.table("propina")
+                .select("*")
+                .eq("productor_id", str(productor_id))
+                .order("creado_en", desc=True)
+                .order("id", desc=True)
+                .limit(limit)
+            )
+            if cursor is not None:
+                query = query.lt("creado_en", cursor.ts.isoformat())
+            resp = query.execute()
+        except APIError as exc:
+            raise RepoError("No se pudo listar las propinas.") from exc
+        filas = resp.data or []
+        propinas = [fila_a_propina(fila) for fila in filas]
+        siguiente: Cursor | None = None
+        if len(propinas) == limit and propinas:
+            ultimo = propinas[-1]
+            siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
+        return propinas, siguiente
+
+    def buscar_por_comprador(
+        self, comprador_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Propina], Cursor | None]:
+        try:
+            query = (
+                self._cliente.table("propina")
+                .select("*")
+                .eq("comprador_id", str(comprador_id))
+                .order("creado_en", desc=True)
+                .order("id", desc=True)
+                .limit(limit)
+            )
+            if cursor is not None:
+                query = query.lt("creado_en", cursor.ts.isoformat())
+            resp = query.execute()
+        except APIError as exc:
+            raise RepoError("No se pudo listar las propinas.") from exc
+        filas = resp.data or []
+        propinas = [fila_a_propina(fila) for fila in filas]
+        siguiente: Cursor | None = None
+        if len(propinas) == limit and propinas:
+            ultimo = propinas[-1]
+            siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
+        return propinas, siguiente
 
 
 class SupabaseFincaRepo:

@@ -18,6 +18,7 @@ from app.models.dominio import (
     Lote,
     LoteEvento,
     Pago,
+    Propina,
     Usuario,
 )
 from app.utils.cursor import Cursor
@@ -32,6 +33,8 @@ class Memoria:
     qr: dict[str, CertificadoQR] = field(default_factory=dict)
     pagos: dict[uuid.UUID, Pago] = field(default_factory=dict)
     pagos_idempotencia: dict[uuid.UUID, Pago] = field(default_factory=dict)
+    propinas: dict[uuid.UUID, Propina] = field(default_factory=dict)
+    propinas_idempotencia: dict[str, Propina] = field(default_factory=dict)
     fincas: dict[uuid.UUID, Finca] = field(default_factory=dict)
     usuarios: dict[uuid.UUID, Usuario] = field(default_factory=dict)
     verificaciones: list[tuple[uuid.UUID, str | None]] = field(default_factory=list)
@@ -148,6 +151,65 @@ class InMemoryUsuarioRepo:
             for usuario in self._memoria.usuarios.values()
             if usuario.rol.value == "cooperativa"
         ]
+
+
+class InMemoryPropinaRepo:
+    def __init__(self, memoria: Memoria) -> None:
+        self._memoria = memoria
+
+    def guardar_propina(self, propina: Propina) -> Propina:
+        self._memoria.propinas[propina.id] = propina
+        if propina.clave_idempotencia is not None:
+            self._memoria.propinas_idempotencia[propina.clave_idempotencia] = propina
+        return propina
+
+    def buscar_por_lote(self, lote_id: uuid.UUID) -> list[Propina]:
+        return [p for p in self._memoria.propinas.values() if p.lote_id == lote_id]
+
+    def buscar_por_idempotencia(self, clave: str) -> Propina | None:
+        return self._memoria.propinas_idempotencia.get(clave)
+
+    def buscar_por_productor(
+        self, productor_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Propina], Cursor | None]:
+        propinas = [
+            p for p in self._memoria.propinas.values()
+            if p.productor_id == productor_id
+        ]
+        propinas.sort(key=lambda p: (p.creado_en, p.id), reverse=True)
+        pagina: list[Propina] = []
+        for p in propinas:
+            if cursor is not None and (p.creado_en, p.id) >= (cursor.ts, cursor.id):
+                continue
+            pagina.append(p)
+            if len(pagina) == limit:
+                break
+        siguiente: Cursor | None = None
+        if len(pagina) == limit and len(propinas) > limit:
+            ultimo = pagina[-1]
+            siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
+        return pagina, siguiente
+
+    def buscar_por_comprador(
+        self, comprador_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Propina], Cursor | None]:
+        propinas = [
+            p for p in self._memoria.propinas.values()
+            if p.comprador_id == comprador_id
+        ]
+        propinas.sort(key=lambda p: (p.creado_en, p.id), reverse=True)
+        pagina: list[Propina] = []
+        for p in propinas:
+            if cursor is not None and (p.creado_en, p.id) >= (cursor.ts, cursor.id):
+                continue
+            pagina.append(p)
+            if len(pagina) == limit:
+                break
+        siguiente: Cursor | None = None
+        if len(pagina) == limit and len(propinas) > limit:
+            ultimo = pagina[-1]
+            siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
+        return pagina, siguiente
 
 
 class FakeGatewayPagos:

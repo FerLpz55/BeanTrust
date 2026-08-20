@@ -1,4 +1,4 @@
-"""Schema de respuesta pública del certificado de origen (§8)."""
+"""Schema de respuesta pública del Pasaporte de Café (§8)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ from app.schemas.lote import LoteEventoPublico
 
 
 class VerificarRead(ORMModel):
-    """Lo que ve el consumidor al escanear el QR (público, sin auth)."""
+    """Lo que ve el consumidor al escanear el QR (público, sin auth).
+
+    Pasaporte de Café: verificación rica con variedad, método, humedad, SCA
+    y timeline con hash por etapa (ADR-11).
+    """
 
     codigo: str
     lote_id: uuid.UUID
@@ -22,9 +26,14 @@ class VerificarRead(ORMModel):
     hash_sha256: str
     emitido_en: datetime
     historial: list[LoteEventoPublico]
+    # Datos enriquecidos del Pasaporte de Café
+    variedad: str | None = None
+    metodo_beneficiado: str | None = None
+    altitud_min: float | None = None
+    altitud_max: float | None = None
+    humedad_final_pct: float | None = None
+    puntaje_sca: float | None = None
     productor_nombre: str | None = None
     finca_nombre: str | None = None
     municipio: str | None = None
     organica: bool | None = None
-    altitud_min: float | None = None
-    altitud_max: float | None = None

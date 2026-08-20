@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.dependencies import AuthProviderDep, limitar_login
-from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse
+from app.dependencies import AuthProviderDep, CurrentUserDep, limitar_login
+from app.schemas.auth import CurrentUser, LoginRequest, RefreshRequest, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -18,3 +18,9 @@ def login(body: LoginRequest, provider: AuthProviderDep) -> TokenResponse:
 @router.post("/refresh", dependencies=[Depends(limitar_login)])
 def refresh(body: RefreshRequest, provider: AuthProviderDep) -> TokenResponse:
     return provider.refresh(body.refresh_token)
+
+
+@router.get("/me")
+def perfil_usuario(usuario: CurrentUserDep) -> CurrentUser:
+    """Perfil del usuario autenticado (incluye rol y finca si productor)."""
+    return usuario

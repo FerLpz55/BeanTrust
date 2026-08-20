@@ -72,8 +72,19 @@ class LoteService:
             finca_id=datos.finca_id,
             codigo_publico=self._qr_service.generar_codigo_publico(),
             fecha_cosecha=datos.fecha_cosecha,
+            variedad=datos.variedad,
+            metodo_beneficiado=datos.metodo_beneficiado,
+            evidencia_url=datos.evidencia_url,
+            evidencia_sha256=datos.evidencia_sha256,
         )
-        evento = lote.registrar_cosecha(usuario.id, datos.peso_kg)
+        evento = lote.registrar_cosecha(
+            usuario.id,
+            datos.peso_kg,
+            variedad=datos.variedad,
+            metodo_beneficiado=datos.metodo_beneficiado,
+            evidencia_url=datos.evidencia_url,
+            evidencia_sha256=datos.evidencia_sha256,
+        )
         self._repo_lote.guardar(lote)
         self._repo_lote.adjuntar_evento(evento)
         return lote
@@ -102,6 +113,17 @@ class LoteService:
             peso_kg=evento.peso_kg,
             merma_pct=evento.merma_pct,
             comprador_id=evento.comprador_id,
+            metodo_beneficiado=evento.metodo_beneficiado,
+            metodo_fermentacion=evento.metodo_fermentacion,
+            fermentacion_horas=evento.fermentacion_horas,
+            humedad_inicial_pct=evento.humedad_inicial_pct,
+            humedad_final_pct=evento.humedad_final_pct,
+            metodo_secado=evento.metodo_secado,
+            dias_reposo=evento.dias_reposo,
+            puntaje_sca=evento.puntaje_sca,
+            defectos=evento.defectos,
+            densidad=evento.densidad,
+            tamiz=evento.tamiz,
         )
         self._repo_lote.adjuntar_evento(nuevo_evento)
         self._emitir_certificado_si_corresponde(lote)
@@ -153,7 +175,12 @@ class LoteService:
         return False
 
     def verificar(self, codigo: str, dispositivo: str | None = None):
-        """Verificación pública del certificado (§8): 200 / 404 / 409."""
+        """Verificación pública del Pasaporte de Café (§8): 200 / 404 / 409.
+
+        La integridad se corta por `emitido_en` (eventos posteriores a la
+        emisión NO forman parte del hash canónico). Verificación con
+        hash por etapa (ADR-11).
+        """
         qr = self._repo_qr.buscar_por_codigo(codigo)
         if qr is None:
             raise CertificadoNoEncontrado("Código de verificación no encontrado.")
@@ -161,7 +188,8 @@ class LoteService:
         if lote is None:
             raise CertificadoInvalido("El certificado no corresponde a ningún lote.")
         lote.historial = self._repo_lote.listar_eventos(lote.id)
-        hash_actual = self._qr_service.hash_lote(lote)
+        # Verificación con corte por emitido_en (ADR-11, ADR-13)
+        hash_actual = self._qr_service.hash_lote(lote, hasta_emitido_en=True)
         if hash_actual != qr.hash_sha256:
             raise CertificadoInvalido("El certificado no coincide con el historial del lote.")
         finca = self._repo_finca.buscar_por_id(lote.finca_id)

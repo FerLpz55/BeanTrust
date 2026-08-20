@@ -31,11 +31,20 @@ class Estado(StrEnum):
 
 
 class TipoEvento(StrEnum):
-    """Eventos que disparan una transición de estado (§4)."""
+    """Eventos que disparan una transición de estado (§4).
+
+    Cadena completa con autotransiciones para sub-etapas.
+    """
 
     COSECHA = "COSECHA"
+    LIMPIEZA = "LIMPIEZA"
     DESPULPADO = "DESPULPADO"
+    FERMENTACION = "FERMENTACION"
+    LAVADO = "LAVADO"
+    SECADO = "SECADO"
+    REPOSO = "REPOSO"
     DESCASCARADO = "DESCASCARADO"
+    CLASIFICACION = "CLASIFICACION"
     TOSTADO = "TOSTADO"
     VENTA = "VENTA"
     RECHAZADO = "RECHAZADO"
@@ -56,6 +65,14 @@ class EstadoPago(StrEnum):
     PENDIENTE = "PENDIENTE"
     CONFIRMADO = "CONFIRMADO"
     FALLIDO = "FALLIDO"
+
+
+class EstadoPropina(StrEnum):
+    """Ciclo de vida de una propina al productor (ADR-10). Bivalente off-chain/on-chain."""
+
+    REGISTRADA = "REGISTRADA"
+    PENDIENTE = "PENDIENTE"
+    CONFIRMADA = "CONFIRMADA"
 
 
 class ErrorDeDominio(Exception):
@@ -108,7 +125,10 @@ class RepoError(ErrorDeDominio):
 
 @dataclass(frozen=True)
 class LoteEvento:
-    """Value object inmutable: la historia del lote jamás se reescribe (§4)."""
+    """Value object inmutable: la historia del lote jamás se reescribe (§4).
+
+    Incluye campos por etapa (ADR-12) y `hash_etapa` para la cadena lineal (ADR-11).
+    """
 
     id: uuid.UUID
     lote_id: uuid.UUID
@@ -119,6 +139,20 @@ class LoteEvento:
     peso_kg: float | None = None
     merma_pct: float | None = None
     comprador_id: uuid.UUID | None = None
+    # Campos por sub-etapa (ADR-12)
+    metodo_beneficiado: str | None = None  # DESPULPADO: lavado/semilavado/honey/natural
+    metodo_fermentacion: str | None = None  # DESPULPADO/FERMENTACION
+    fermentacion_horas: float | None = None  # FERMENTACION
+    humedad_inicial_pct: float | None = None  # SECADO
+    humedad_final_pct: float | None = None  # SECADO
+    metodo_secado: str | None = None  # SECADO
+    dias_reposo: float | None = None  # REPOSO
+    puntaje_sca: float | None = None  # CLASIFICACION
+    defectos: str | None = None  # CLASIFICACION
+    densidad: float | None = None  # CLASIFICACION
+    tamiz: str | None = None  # CLASIFICACION
+    # Hash por etapa (ADR-11): cadena lineal hash_etapa[i] = HASH(hash_etapa[i-1] || datos)
+    hash_etapa: str | None = None
     registrado_en: datetime = field(default_factory=ahora_utc)
 
 
@@ -149,6 +183,27 @@ class Pago:
     idempotency_key: uuid.UUID | None = None
     creado_en: datetime = field(default_factory=ahora_utc)
     confirmado_en: datetime | None = None
+
+
+@dataclass
+class Propina:
+    """Propina del comprador al productor (ADR-10): 100% directa, idempotente, bivalente."""
+
+    id: uuid.UUID
+    lote_id: uuid.UUID
+    comprador_id: uuid.UUID
+    productor_id: uuid.UUID
+    monto: float
+    moneda: str = "MXN"
+    estado_propina: EstadoPropina = EstadoPropina.REGISTRADA
+    clave_idempotencia: str | None = None
+    tx_hash: str | None = None
+    creado_en: datetime = field(default_factory=ahora_utc)
+    actualizado_en: datetime = field(default_factory=ahora_utc)
+
+    def confirmar(self) -> None:
+        self.estado_propina = EstadoPropina.CONFIRMADA
+        self.actualizado_en = ahora_utc()
 
 
 @dataclass
@@ -190,19 +245,36 @@ class Cooperativa:
 class MaquinaEstados:
     """Mapa declarativo de transiciones permitidas (patrón State, §4).
 
-    Solo se permite avanzar a estados adyacentes: no se puede saltar de
-    CEREZA a ORO, ni retroceder después de TOSTADO, ni vender un lote que
-    no esté tostado.
+    Estados (hitos): CEREZA → PERGAMINO → ORO → TOSTADO → VENDIDO (+ RECHAZADO).
+    Sub-etapas registradas como AUTOTRANSICIONES (de_estado == a_estado):
+    - LIMPIEZA (CEREZA→CEREZA)
+    - FERMENTACION, LAVADO, SECADO, REPOSO (PERGAMINO→PERGAMINO)
+    - CLASIFICACION (ORO→ORO)
+    
+    No se puede saltar hitos. No hay retroceso tras TOSTADO. RECHAZADO es absorbente.
     """
 
     _TRANSICIONES: ClassVar[dict[tuple[Estado, TipoEvento], Estado]] = {
+        # Hito CEREZA
+        (Estado.CEREZA, TipoEvento.LIMPIEZA): Estado.CEREZA,           # autotransición
         (Estado.CEREZA, TipoEvento.DESPULPADO): Estado.PERGAMINO,
+        # Hito PERGAMINO
+        (Estado.PERGAMINO, TipoEvento.FERMENTACION): Estado.PERGAMINO,  # autotransición
+        (Estado.PERGAMINO, TipoEvento.LAVADO): Estado.PERGAMINO,        # autotransición
+        (Estado.PERGAMINO, TipoEvento.SECADO): Estado.PERGAMINO,        # autotransición
+        (Estado.PERGAMINO, TipoEvento.REPOSO): Estado.PERGAMINO,        # autotransición
         (Estado.PERGAMINO, TipoEvento.DESCASCARADO): Estado.ORO,
+        # Hito ORO
+        (Estado.ORO, TipoEvento.CLASIFICACION): Estado.ORO,             # autotransición
         (Estado.ORO, TipoEvento.TOSTADO): Estado.TOSTADO,
+        # Hito TOSTADO
         (Estado.TOSTADO, TipoEvento.VENTA): Estado.VENDIDO,
+        # Rechazo (absorbente desde cualquier estado no terminal)
         (Estado.CEREZA, TipoEvento.RECHAZADO): Estado.RECHAZADO,
         (Estado.PERGAMINO, TipoEvento.RECHAZADO): Estado.RECHAZADO,
         (Estado.ORO, TipoEvento.RECHAZADO): Estado.RECHAZADO,
+        (Estado.TOSTADO, TipoEvento.RECHAZADO): Estado.RECHAZADO,
+        (Estado.VENDIDO, TipoEvento.RECHAZADO): Estado.RECHAZADO,
     }
 
     @classmethod
@@ -230,13 +302,28 @@ class Lote:
     fecha_cosecha: date
     estado: Estado = Estado.CEREZA
     peso_actual_kg: float = 0.0
+    # Nuevos campos enriquecidos (ADR-12, ADR-14)
+    variedad: str | None = None
+    metodo_beneficiado: str | None = None  # lavado/semilavado/honey/natural
+    evidencia_url: str | None = None
+    evidencia_sha256: str | None = None
     creado_en: datetime = field(default_factory=ahora_utc)
     actualizado_en: datetime = field(default_factory=ahora_utc)
     historial: list[LoteEvento] = field(default_factory=list)
     certificado: CertificadoQR | None = None
     pago: Pago | None = None
+    propinas: list[Propina] = field(default_factory=list)
 
-    def registrar_cosecha(self, actor_id: uuid.UUID, peso_kg: float) -> LoteEvento:
+    def registrar_cosecha(
+        self,
+        actor_id: uuid.UUID,
+        peso_kg: float,
+        *,
+        variedad: str | None = None,
+        metodo_beneficiado: str | None = None,
+        evidencia_url: str | None = None,
+        evidencia_sha256: str | None = None,
+    ) -> LoteEvento:
         """Registra la cosecha inicial y crea el lote en estado CEREZA."""
         if self.historial:
             raise TransicionInvalida("El lote ya tiene una cosecha registrada.")
@@ -244,6 +331,10 @@ class Lote:
             raise ErrorDeDominio("El peso de cosecha debe ser mayor que cero.")
         self.estado = Estado.CEREZA
         self.peso_actual_kg = peso_kg
+        self.variedad = variedad
+        self.metodo_beneficiado = metodo_beneficiado
+        self.evidencia_url = evidencia_url
+        self.evidencia_sha256 = evidencia_sha256
         evento = LoteEvento(
             id=uuid.uuid4(),
             lote_id=self.id,
@@ -257,6 +348,47 @@ class Lote:
         self.actualizado_en = ahora_utc()
         return evento
 
+    def _calcular_hash_etapa(self, evento: LoteEvento) -> str:
+        """Calcula el hash de la etapa en la cadena lineal (ADR-11).
+
+        hash_i = SHA256(hash_{i-1} || datos_evento)
+        El orden es por registrado_en, id. Si no hay etapa anterior, usa hash vacío.
+        """
+        import hashlib
+        import json
+
+        # Obtener el hash anterior (última etapa registrada)
+        hash_anterior = ""
+        if self.historial:
+            # La historia ya está ordenada por registrado_en
+            ultima_etapa = self.historial[-1]
+            hash_anterior = ultima_etapa.hash_etapa or ""
+
+        # Serializar los datos del evento de forma determinista
+        payload = {
+            "tipo": evento.tipo.value,
+            "de_estado": evento.de_estado.value if evento.de_estado else None,
+            "a_estado": evento.a_estado.value,
+            "actor_id": str(evento.actor_id),
+            "peso_kg": evento.peso_kg,
+            "merma_pct": evento.merma_pct,
+            "metodo_beneficiado": evento.metodo_beneficiado,
+            "metodo_fermentacion": evento.metodo_fermentacion,
+            "fermentacion_horas": evento.fermentacion_horas,
+            "humedad_inicial_pct": evento.humedad_inicial_pct,
+            "humedad_final_pct": evento.humedad_final_pct,
+            "metodo_secado": evento.metodo_secado,
+            "dias_reposo": evento.dias_reposo,
+            "puntaje_sca": evento.puntaje_sca,
+            "defectos": evento.defectos,
+            "densidad": evento.densidad,
+            "tamiz": evento.tamiz,
+            "comprador_id": str(evento.comprador_id) if evento.comprador_id else None,
+            "registrado_en": evento.registrado_en.isoformat(),
+        }
+        datos = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256((hash_anterior + datos).encode("utf-8")).hexdigest()
+
     def avanzar(
         self,
         tipo: TipoEvento,
@@ -266,6 +398,18 @@ class Lote:
         peso_kg: float | None = None,
         merma_pct: float | None = None,
         comprador_id: uuid.UUID | None = None,
+        # Campos por sub-etapa (ADR-12)
+        metodo_beneficiado: str | None = None,
+        metodo_fermentacion: str | None = None,
+        fermentacion_horas: float | None = None,
+        humedad_inicial_pct: float | None = None,
+        humedad_final_pct: float | None = None,
+        metodo_secado: str | None = None,
+        dias_reposo: float | None = None,
+        puntaje_sca: float | None = None,
+        defectos: str | None = None,
+        densidad: float | None = None,
+        tamiz: str | None = None,
     ) -> LoteEvento:
         """Aplica una transición validada por la máquina de estados."""
         de = self.estado
@@ -284,6 +428,32 @@ class Lote:
         self.estado = a
         if peso_kg is not None:
             self.peso_actual_kg = peso_kg
+        # Crear evento temporal para calcular hash
+        evento_temp = LoteEvento(
+            id=evento_id or uuid.uuid4(),
+            lote_id=self.id,
+            tipo=tipo,
+            de_estado=de,
+            a_estado=a,
+            actor_id=actor_id,
+            peso_kg=peso_kg,
+            merma_pct=merma_pct,
+            comprador_id=comprador_id,
+            metodo_beneficiado=metodo_beneficiado,
+            metodo_fermentacion=metodo_fermentacion,
+            fermentacion_horas=fermentacion_horas,
+            humedad_inicial_pct=humedad_inicial_pct,
+            humedad_final_pct=humedad_final_pct,
+            metodo_secado=metodo_secado,
+            dias_reposo=dias_reposo,
+            puntaje_sca=puntaje_sca,
+            defectos=defectos,
+            densidad=densidad,
+            tamiz=tamiz,
+        )
+        # Calcular hash_etapa (cadena lineal, ADR-11) ANTES de crear el objeto final
+        hash_etapa = self._calcular_hash_etapa(evento_temp)
+        # Crear el evento final con el hash ya calculado
         evento = LoteEvento(
             id=evento_id or uuid.uuid4(),
             lote_id=self.id,
@@ -294,6 +464,18 @@ class Lote:
             peso_kg=peso_kg,
             merma_pct=merma_pct,
             comprador_id=comprador_id,
+            metodo_beneficiado=metodo_beneficiado,
+            metodo_fermentacion=metodo_fermentacion,
+            fermentacion_horas=fermentacion_horas,
+            humedad_inicial_pct=humedad_inicial_pct,
+            humedad_final_pct=humedad_final_pct,
+            metodo_secado=metodo_secado,
+            dias_reposo=dias_reposo,
+            puntaje_sca=puntaje_sca,
+            defectos=defectos,
+            densidad=densidad,
+            tamiz=tamiz,
+            hash_etapa=hash_etapa,
         )
         self.historial.append(evento)
         self.actualizado_en = ahora_utc()
@@ -315,4 +497,9 @@ class Lote:
     def asociar_pago(self, pago: Pago) -> None:
         """Vincula el pago al lote (§9)."""
         self.pago = pago
+        self.actualizado_en = ahora_utc()
+
+    def asociar_propina(self, propina: Propina) -> None:
+        """Vincula la propina al lote (ADR-10)."""
+        self.propinas.append(propina)
         self.actualizado_en = ahora_utc()

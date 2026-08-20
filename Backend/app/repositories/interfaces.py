@@ -11,7 +11,16 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Protocol, runtime_checkable
 
-from app.models.dominio import CertificadoQR, Cooperativa, Finca, Lote, LoteEvento, Pago, Usuario
+from app.models.dominio import (
+    CertificadoQR,
+    Cooperativa,
+    Finca,
+    Lote,
+    LoteEvento,
+    Pago,
+    Propina,
+    Usuario,
+)
 from app.utils.cursor import Cursor
 
 
@@ -46,6 +55,23 @@ class RepositorioPago(Protocol):
     def buscar_por_lote(self, lote_id: uuid.UUID) -> Pago | None: ...
 
     def buscar_por_idempotencia(self, clave: uuid.UUID) -> Pago | None: ...
+
+
+@runtime_checkable
+class RepositorioPropina(Protocol):
+    def guardar_propina(self, propina: Propina) -> Propina: ...
+
+    def buscar_por_lote(self, lote_id: uuid.UUID) -> list[Propina]: ...
+
+    def buscar_por_idempotencia(self, clave: str) -> Propina | None: ...
+
+    def buscar_por_productor(
+        self, productor_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Propina], Cursor | None]: ...
+
+    def buscar_por_comprador(
+        self, comprador_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Propina], Cursor | None]: ...
 
 
 @runtime_checkable

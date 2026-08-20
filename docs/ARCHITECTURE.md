@@ -19,7 +19,7 @@ Resuelve dos problemas de la memoria técnica:
 El sistema da al grano de café una **identidad digital** mediante tecnología blockchain:
 
 - Registra eventos clave de la cadena (cosecha, beneficio, tostado) de forma **inmutable**.
-- Emite un **Certificado de Origen**: un **Código QR** único que el consumidor escanea para verificar el origen orgánico certificado (productor, finca, altitud, historia de procesos).
+- Emite un **Pasaporte de Café**: un **Código QR** único que el consumidor escanea para verificar el origen orgánico certificado (productor, finca, altitud, variedad, método, historia de procesos con hash por etapa).
 - Ejecuta **pagos justos y automáticos** al productor mediante **Smart Contracts**.
 
 Modelo de negocio (B2B2C): el productor **no paga**. Pagan las cooperativas (suscripción) y los compradores de especialidad (3% de comisión transaccional ejecutada por el Smart Contract). El consumidor final solo escanea el QR; su demanda de transparencia es lo que le da valor a toda la cadena.
@@ -91,7 +91,7 @@ BeanTrust/
 │   │   ├── main.py              # Punto de inicio: instancia FastAPI(), monta routers
 │   │   ├── core/                 # config, seguridad (JWT Supabase), logger
 │   │   ├── api/v1/
-│   │   │   └── endpoints/        # lotes, eventos, verificacion, pagos, auth, sync (1 router por dominio)
+│   │   │   └── endpoints/        # lotes, eventos, verificacion, pagos, propinas, mercado, me, auth, sync (1 router por dominio)
 │   │   ├── models/                # Esquema de datos (SQLAlchemy / Supabase)
 │   │   ├── schemas/               # Pydantic → validación entrada/salida
 │   │   ├── services/              # maquina_estados, qr_service, blockchain_link
@@ -132,21 +132,26 @@ stateDiagram-v2
     direction TB
 
     [*] --> CEREZA
-    CEREZA --> PERGAMINO : despulpado + secado\n(merma de peso)
-    PERGAMINO --> ORO : limpieza + descascarado\n(kg oro)
-    ORO --> TOSTADO : tostado\n(habilita QR)
-    TOSTADO --> VENDIDO : VENTA_REGISTRADA\n(dispara pago on-chain)
-    CEREZA --> [*] : rechazo
-    PERGAMINO --> [*] : rechazo
-    ORO --> [*] : rechazo
+    CEREZA --> CEREZA : LIMPIEZA
+    CEREZA --> PERGAMINO : DESPULPADO
+    PERGAMINO --> PERGAMINO : FERMENTACION / LAVADO\nSECADO / REPOSO
+    PERGAMINO --> ORO : DESCASCARADO
+    ORO --> ORO : CLASIFICACION
+    ORO --> TOSTADO : TOSTADO\n(habilita QR del pasaporte)
+    TOSTADO --> VENDIDO : VENTA\n(dispara pago on-chain)
+    CEREZA --> RECHAZADO
+    PERGAMINO --> RECHAZADO
+    ORO --> RECHAZADO
+    TOSTADO --> RECHAZADO
+    VENDIDO --> RECHAZADO
     VENDIDO --> [*]
 
     note right of CEREZA
-       Registro inicial de cosecha:
+       COSECHA crea el lote:
        - Productor, finca
-       - Altitud
+       - Variedad
        - Peso (kg)
-       - Fecha de cosecha
+       - Evidencia (url + sha256)
        - Genera CÓDIGO ÚNICO del lote
     end note
     note right of VENDIDO
@@ -155,22 +160,41 @@ stateDiagram-v2
        que paga el 97% al productor y
        retiene la comisión (3%).
     end note
+    note left of PERGAMINO
+       Sub-etapas sin orden estricto:
+       fermentación, lavado, secado, reposo.
+       Se registran como autotransiciones
+       (PERGAMINO → PERGAMINO).
+    end note
 ```
 
-### Reglas de negocio de transición (resumen)
+### Reglas de negocio de transición (tabla de transiciones)
 
-| Transición | Acción obligatoria | Campos que se verifican |
-|---|---|---|
-| `CEREZA → PERGAMINO` | Despulpado + secado | `merma_pct`, `peso_kg`, `actor_id` |
-| `PERGAMINO → ORO` | Limpieza + descascarado | `peso_kg`, `merma_pct` |
-| `ORO → TOSTADO` | Tostado en planta | fecha de tostado (`registrado_en`) |
-| `TOSTADO → VENDIDO` | Registro de precio/venta | `monto_total`, `comprador_id`, `tx_hash` |
+> **Cadena completa con autotransiciones.** Los **hitos** (estados) son `CEREZA → PERGAMINO → ORO → TOSTADO → VENDIDO` (+ `RECHAZADO`). Cada **hito** admite **sub-etapas** que se registran como **autotransiciones** (el estado no cambia, pero queda evidencia en el historial).
+
+| Transición | TipoEvento | Acción obligatoria | Campos verificados |
+|---|---|---|---|
+| `→ CEREZA` | `COSECHA` | Crea el lote (agregado) | `variedad`, `peso_kg`, `evidencia_url`, `evidencia_sha256`, `actor_id` |
+| `CEREZA → CEREZA` | `LIMPIEZA` | Limpieza en fruta | `peso_kg`, `actor_id` |
+| `CEREZA → PERGAMINO` | `DESPULPADO` | Despulpado del fruto | `merma_pct`, `peso_kg`, `metodo_beneficiado` (lavado/semilavado/honey/natural), `metodo_fermentacion`, `actor_id` |
+| `PERGAMINO → PERGAMINO` | `FERMENTACION` | Fermentación controlada | `metodo_fermentacion`, `horas`, `pH`/`Brix` (opcional), `actor_id` |
+| `PERGAMINO → PERGAMINO` | `LAVADO` | Lavado del pergamino | `peso_kg`, `actor_id` |
+| `PERGAMINO → PERGAMINO` | `SECADO` | Secado (patio/mecánico) | `humedad_inicial_pct`, `humedad_final_pct`, `metodo_secado`, `actor_id` |
+| `PERGAMINO → PERGAMINO` | `REPOSO` | Reposo/descanso del pergamino | `dias`, `actor_id` |
+| `PERGAMINO → ORO` | `DESCASCARADO` | Descascarado → café verde | `peso_kg`, `merma_pct`, `actor_id` |
+| `ORO → ORO` | `CLASIFICACION` | Clasificación y control de calidad | `puntaje_sca`, `defectos`, `densidad`, `tamiz`, `actor_id` |
+| `ORO → TOSTADO` | `TOSTADO` | Tostado en planta | fecha de tostado (`registrado_en`), `actor_id` |
+| `TOSTADO → VENDIDO` | `VENTA` | Registro de precio/venta | `monto_total`, `comprador_id`, `tx_hash` |
+| `cualquier → RECHAZADO` | `RECHAZADO` | Descarte del lote | motivo, `actor_id` |
 
 **Invariantes de negocio (prohibiciones)**:
-- No se puede avanzar dos estados de golpe (`CEREZA → ORO` = error).
-- No hay retroceso después de `TOSTADO` (irreversible físicamente).
+- No se puede **saltar hitos** (`CEREZA → ORO` = error): cada cambio de hito debe pasar por el intermedio.
+- Las **sub-etapas** solo se registran dentro de **su hito** (`CLASIFICACION` solo en `ORO`, `SECADO` solo en `PERGAMINO`, etc.) pero **sin orden estricto** entre ellas.
+- **No hay retroceso después de `TOSTADO`** (irreversible físicamente): `VENDIDO` es terminal y `RECHAZADO` es absorbente.
 - La merma nunca puede ser negativa.
 - Cada evento registra quién lo hizo (`actor_id`) y un `timestamp` con zona horaria (UTC).
+- **Append-only**: la historia no se reescribe jamás.
+- **Hash determinista**: el hash de la cadena se calcula en orden (`registrado_en`, `id`) — ver §8 y ADR-11.
 
 ### Diseño orientado a objetos (OOP) — el corazón del dominio
 
@@ -206,6 +230,7 @@ classDiagram
         -Estado estado
         -float peso_actual_kg
         -Date fecha_cosecha
+        -String variedad
         +registrar(EventoCosecha) LoteEvento
         +avanzar(tipo: TipoEvento) LoteEvento
         +generarCertificado() CertificadoQR
@@ -219,8 +244,16 @@ classDiagram
         -UUID lote_id
         -Estado de_estado
         -Estado a_estado
-        -float merma_pct
+        -TipoEvento tipo
         -float peso_kg
+        -float merma_pct
+        -String metodo_beneficiado
+        -String metodo_fermentacion
+        -float humedad_inicial_pct
+        -float humedad_final_pct
+        -String metodo_secado
+        -float puntaje_sca
+        -String hash_etapa
         -UUID actor_id
         -Instant registrado_en
     }
@@ -244,6 +277,19 @@ classDiagram
         -float monto_productor
         -String tx_hash
         -EstadoPago estado_pago
+        +confirmar() void
+    }
+
+    class Propina {
+        <<entidad bivalente>>
+        -UUID id
+        -UUID lote_id
+        -UUID comprador_id
+        -UUID productor_id
+        -float monto
+        -Moneda moneda
+        -EstadoPropina estado_propina  // REGISTRADA|PENDIENTE|CONFIRMADA
+        -String clave_idempotencia
         +confirmar() void
     }
 
@@ -301,12 +347,15 @@ classDiagram
     Lote "1" --> "0..*" LoteEvento : registra
     Lote "1" --> "0..1" CertificadoQR : emite
     Lote "1" --> "0..1" Pago : liquida
+    Lote "1" --> "0..*" Propina : recibe
     Lote "0..*" --> "1" Finca : pertenece
     Finca "0..*" --> "1" Productor : dueño
     Lote --> MaquinaEstados : valida
     LoteService ..> RepositorioLote : usa
     LoteService ..> GatewayPagos : usa
 ```
+
+> **`TipoEvento` (enum ampliado):** `COSECHA` · `LIMPIEZA` · `DESPULPADO` · `FERMENTACION` · `LAVADO` · `SECADO` · `REPOSO` · `DESCASCARADO` · `CLASIFICACION` · `TOSTADO` · `VENTA` · `RECHAZADO` (12 valores: 11 transiciones + rechazo). Las sub-etapas (`LIMPIEZA`, `FERMENTACION`, `LAVADO`, `SECADO`, `REPOSO`, `CLASIFICACION`) son **autotransiciones**: `de_estado == a_estado`.
 
 > **Nota de implementación:** este diagrama es **conceptual** (CamelCase). En el código los nombres son snake_case (`LoteService` = `LoteService`, `RepositorioLote` = `lote_repo`, `QrService` = `qr_service`), los repos son protocolos en `app/repositories/` y la entidad `Productor` es la columna `rol`/FK de `Usuario` (véase la nota del ERD en §5).
 
@@ -320,6 +369,7 @@ classDiagram
 | `MaquinaEstados` | Define la tabla de transiciones como **declarativa** (un mapa, no if/case) | OCP (abierto a extensión) |
 | `RepositorioLote` (interfaz) | El dominio no depende de la BD (Supabase es un detalle) | Dependency Inversion |
 | `GatewayPagos` (interfaz) | El dominio no sabe cómo se paga (Polygon es un detalle) | Dependency Inversion |
+| `Propina` | Comprador → productor, 100% directo, idempotente y bivalente | Entidad + Idempotencia (ADR-10) |
 | `Finca`, `Productor` | Entidades de contexto on-farm que el Certificado de Origen debe exhibir | Bounded Context (origen) |
 | Services | Separación: los rout​ers no hacen lógica; los services deciden el "qué" | Single Responsibility |
 
@@ -353,6 +403,7 @@ erDiagram
     LOTE |o--o| QR_CERTIFICADO : "emite (0-1)"
     QR_CERTIFICADO ||--o{ VERIFICACION : "escaneos (1-N)"
     LOTE |o--o| PAGO : "liquida (0-1)"
+    LOTE ||--o{ PROPINA : "recibe (1-N)"
 
     USUARIOS {
         uuid id PK
@@ -405,24 +456,39 @@ erDiagram
         enum estado "CEREZA|PERGAMINO|ORO|TOSTADO|VENDIDO|RECHAZADO"
         real peso_actual_kg
         date fecha_cosecha
+        text variedad
+        enum metodo_beneficiado "lavado|semilavado|honey|natural"
+        text evidencia_url
+        text evidencia_sha256
     }
     LOTE_EVENTOS {
         uuid id PK
         uuid lote_id FK
         uuid actor_id FK "USUARIOS"
         uuid comprador_id FK "solo en VENTA"
-        enum tipo "COSECHA|DESPULPADO|DESCASCARADO|TOSTADO|VENTA|RECHAZADO"
+        enum tipo "COSECHA|LIMPIEZA|DESPULPADO|FERMENTACION|LAVADO|SECADO|REPOSO|DESCASCARADO|CLASIFICACION|TOSTADO|VENTA|RECHAZADO"
         enum de_estado
         enum a_estado
         real peso_kg
         real merma_pct
+        text metodo_beneficiado "DESPULPADO"
+        text metodo_fermentacion "DESPULPADO|FERMENTACION"
+        real humedad_pct "SECADO"
+        text metodo_secado "SECADO"
+        real dias_reposo "REPOSO"
+        real puntaje_sca "CLASIFICACION"
+        text defectos "CLASIFICACION"
+        real densidad "CLASIFICACION"
+        text tamiz "CLASIFICACION"
+        real fermentacion_horas "FERMENTACION"
+        text hash_etapa
         timestamptz registrado_en
     }
     QR_CERTIFICADO {
         uuid id PK
         uuid lote_id FK "unique"
         text codigo
-        text hash_sha256
+        text hash_sha256 "raíz de la cadena de hash por etapa"
         timestamptz emitido_en
     }
     VERIFICACION {
@@ -440,6 +506,18 @@ erDiagram
         real monto_productor
         enum estado_pago "PENDIENTE|CONFIRMADO|FALLIDO"
         text tx_hash
+    }
+    PROPINA {
+        uuid id PK
+        uuid lote_id FK
+        uuid comprador_id FK "USUARIOS"
+        uuid productor_id FK "USUARIOS"
+        real monto
+        text moneda "MXN|USDC|MATIC"
+        enum estado_propina "REGISTRADA|PENDIENTE|CONFIRMADA"
+        text clave_idempotencia "UNIQUE"
+        timestamptz creado_en
+        timestamptz actualizado_en
     }
 ```
 
@@ -519,12 +597,14 @@ flowchart LR
         A --> EVEN[LOTE_EVENTOS]
         A --> QR[QR_CERTIFICADO]
         A --> PAG[PAGOS]
+        A --> PROP[PROPINA]
     end
 
     subgraph Consumidor [🔎 Consumidores]
         B1[Cooperativa - panel] --> LOT
         B2[Consumidor - escanea QR] --> QR
-        B3[Polygon - confirma pago] --> PAG
+        B3[Comprador - propina] --> PROP
+        B4[Polygon - confirma pago] --> PAG
     end
 
     style A fill:#bbdefb
@@ -536,13 +616,16 @@ flowchart LR
 
 | Clase (dominio §4) | Tabla(s) | Mapeo |
 |---|---|---|
-| `Lote` | `LOTE` | 1 fila = 1 lote (estado denormalizado) |
-| `LoteEvento` | `LOTE_EVENTOS` | 1 evento = 1 transición (append-only) |
-| `CertificadoQR` | `QR_CERTIFICADO` | emitido al llegar a `TOSTADO` (0–1 por lote) |
+| `Lote` | `LOTE` | 1 fila = 1 lote (estado denormalizado + variedad + evidencia) |
+| `LoteEvento` | `LOTE_EVENTOS` | 1 evento = 1 transición/sub-etapa (append-only, `hash_etapa`) |
+| `CertificadoQR` | `QR_CERTIFICADO` | emitido al llegar a `TOSTADO` (0–1 por lote); `hash_sha256` = raíz de la cadena |
 | `Pago` | `PAGO` | creado al vender (0–1 por lote) |
+| `Propina` | `PROPINA` | 0–N por lote; bivalente off-chain/on-chain |
 | `Finca` / `Productor` | `FINCA` / `PRODUCTOR` | contexto de origen del lote |
 | `SupabaseLoteRepo` | infraestructura | lee/escribe las tablas anteriores |
 | `LoteService`, `MaquinaEstados` | servicios (no tablas) | reglas de negocio |
+
+> **Hash por etapa (cadena lineal).** Cada `LOTE_EVENTOS.hash_etapa` se calcula como `HASH(etapa_anterior.hash_etapa ‖ datos_del_evento)` en orden `(registrado_en, id)`. El último hash de la cadena **es la raíz** guardada en `QR_CERTIFICADO.hash_sha256`. Si se edita un evento, la raíz deja de coincidir → 409 (ver §8 y ADR-11).
 
 > Reglas de cardinalidad alineadas entre §4 y este ERD: un lote **tiene como mucho un** QR y **un** pago, porque la certificación (`TOSTADO`) y la venta (`VENDIDO`) solo ocurren una vez terminalmente.
 
@@ -552,20 +635,27 @@ flowchart LR
 
 | Pregunta de negocio | Dato que guardamos | Tabla |
 |---|---|---|
-| ¿Quién cultivo este lote? | `productores.*`, `fincas.*` | PRODUCTOR / FINCA |
+| ¿Quién cultivó este lote? | `productores.*`, `fincas.*` | PRODUCTOR / FINCA |
 | ¿Dónde creció? (certificar origen) | `municipio`, `altitud_min/max`, `organica` | FINCA |
+| ¿Qué variedad es? | `variedad` | LOTE |
 | ¿Cuánto café se registró? | `fecha_cosecha`, `peso_kg` | LOTE |
+| ¿Cómo se benefició? | `metodo_beneficiado` (lavado/semilavado/honey/natural) | LOTE / LOTE_EVENTOS |
 | ¿En qué etapa está? | `estado` → `LOTE` (denorm) | LOTE |
-| ¿Cómo fue su historia? (trazabilidad) | `LOTE_EVENTOS` record con de/a estado | LOTE_EVENTOS |
+| ¿Cómo fue su historia? (trazabilidad) | `LOTE_EVENTOS` record con de/a estado + sub-etapas | LOTE_EVENTOS |
 | ¿Se perdió peso en cada proceso? | `merma_pct` | LOTE_EVENTOS |
+| ¿Cuánto fermentó / se secó / reposó? | `fermentacion_horas`, `humedad_pct`, `dias_reposo` | LOTE_EVENTOS |
+| ¿Qué calificación de taza tiene? | `puntaje_sca`, `defectos`, `densidad`, `tamiz` | LOTE_EVENTOS |
+| ¿La evidencia fotográfica existe? | `evidencia_url` + `evidencia_sha256` | LOTE |
+| ¿La cadena es íntegra? | `hash_etapa` por evento; raíz en `hash_sha256` | LOTE_EVENTOS / QR_CERTIFICADO |
 | ¿Toda la información es inmutable? | `registrado_en` + solo INSERT | LOTE_EVENTOS |
 | ¿Quién hizo cada transición? | `actor_id` → `USUARIOS` | LOTE_EVENTOS / USUARIOS |
 | ¿Quién escaneó el QR? | `VERIFICACION` (fecha, dispositivo) | VERIFICACION |
 | ¿Cuánto paga al productor? | `monto_total`, `monto_productor`, `comision_pct` | PAGO |
 | ¿Quién compró el lote? | `comprador_id` en el evento `VENTA` | LOTE_EVENTOS |
 | ¿El pago llegó on-chain? | `tx_hash`, `estado_pago` | PAGO |
+| ¿El comprador dejó una propina? | `monto`, `moneda`, `estado_propina`, `clave_idempotencia` | PROPINA |
 | ¿Es una persona/org con credenciales? | `email`, `rol`, `public_address` (wallet) | USUARIOS (wallet pendiente, B11) |
-| ¿El QR es auténtico? | `hash_sha256` | QR_CERTIFICADO |
+| ¿El QR es auténtico? | `hash_sha256` (raíz de la cadena por etapa) | QR_CERTIFICADO |
 
 ---
 
@@ -627,16 +717,24 @@ flowchart LR
 
 | Método | Ruta | Qué hace | Idempotencia | Códigos |
 |---|---|---|---|---|
-| `POST` | `/v1/lotes` | Crear lote en estado CEREZA | No (da id) | `201` · `400` · `422` |
-| `POST` | `/v1/lotes/{id}/eventos` | Registrar transición de estado | `Idempotency-Key` | `201` · `409` · `422` |
+| `POST` | `/v1/lotes` | Crear lote en estado CEREZA (variedad, método, peso, evidencia) | No (da id) | `201` · `400` · `422` |
+| `POST` | `/v1/lotes/{id}/eventos` | Registrar transición/sub-etapa (11 tipos) | `Idempotency-Key` | `201` · `409` · `422` |
 | `GET` | `/v1/lotes/{id}` | Consultar lote + historial | Sí | `200` · `404` |
 | `GET` | `/v1/lotes` | Listar lotes (paginado por cursor) | Sí | `200` · `400` |
-| `GET` | `/v1/verificar/{qr_codigo}` | Verificación pública (sin auth) | Sí | `200` · `404` · `409` |
-| `POST` | `/v1/pagos` | Disparar pago on-chain (cooperativa) | `Idempotency-Key` | `202` · `409` · `422` |
+| `GET` | `/v1/verificar/{codigo}` | **Pasaporte de Café** público (sin auth) | Sí | `200` · `404` · `409` |
+| `GET` | `/v1/pagos` | Consultar pagos (lectura) | Sí | `200` |
+| `GET` | `/v1/pagos/saldo` | Saldo/estado del productor | Sí | `200` |
+| `POST` | `/v1/propinas` | Registrar propina del comprador (idempotente, bivalente) | `Idempotency-Key` | `201` · `409` · `422` |
+| `GET` | `/v1/me` | Perfil del usuario autenticado | Sí | `200` |
 | `POST` | `/v1/sync` | Batch de operaciones offline | Sí (reusa ids) | `202` · `207` |
 | `POST` | `/v1/auth/login` | Login (JWT de Supabase) | No | `200` · `401` |
 | `POST` | `/v1/auth/refresh` | Renovar token | No | `200` · `401` |
 | `GET` | `/v1/cooperativas` | Listar cooperativas (admin) | Sí | `200` · `403` |
+
+**Notas de alcance:**
+- **Estado del Día** es un widget **decorativo** del dashboard: se computa en el cliente desde datos ya disponibles; **no tiene endpoint** propio (ADR-13).
+- **Mercado** es una **proyección de solo lectura** (`GET`): se materializa desde el backend, la app nunca lo escribe (ADR-9).
+- El comprador lee pagos/propinas (`GET /v1/pagos`, `POST /v1/propinas`) y el productor ve su saldo (`GET /v1/pagos/saldo`); `GET /v1/me` resuelve el rol real desde `USUARIOS` por `auth.uid()`.
 
 **Reglas aplicadas:**
 - Recursos en plural (`/lotes`, `/eventos`); anidamiento solo en jerarquías reales (`/lotes/{id}/eventos`).
@@ -692,7 +790,7 @@ sequenceDiagram
 ```
 
 - `lote_eventos` es **append-only**: su repositorio solo expone `insert`/`select` y la BD bloquea `update`/`delete` con trigger (migración 003).
-- El mismo mecanismo aplica a `POST /v1/pagos`: la columna `pago.idempotency_key` es `UNIQUE` (§9), de modo que reenviar una venta no dispara dos pagos on-chain.
+- El mismo mecanismo aplica a los pagos y propinas: `pago.idempotency_key` y `propina.clave_idempotencia` son `UNIQUE` (§5), de modo que reenviar una venta o una propina no dispara dos efectos.
 - En el sync (`POST /v1/sync`) cada operación lleva su propio `id`; por eso es seguro reenviar el batch completo (202) aunque algunas ya se hayan aplicado. Si alguna operación del batch no se pudo aplicar (conflicto de estados, error de dominio o error interno) se responde `207` con el detalle por `op_id`; el cliente solo reenvía las no aplicadas.
 
 ### Validación de entrada / salida (Pydantic)
@@ -722,18 +820,23 @@ sequenceDiagram
 
 ```
 ┌───────────────────────────────────────────────┐
-│ Pantallas (expo-router)                        │
-│   - index: lista de lotes (con estado actual)  │
-│   - registro: captura de cosecha/evento        │
-│   - detalle: historial del lote                │
-│   - qr: escanear / verificar                   │
+│ Pantallas (expo-router, 4 tabs + stacks)       │
+│   Cosecha (tab): lotes/ (lista) + stack        │
+│   Dashboard (tab): Mi Finca (bento grid)       │
+│   Trazabilidad (tab): historial de mis lotes      │
+│     (el escáner público vive en verificar/)       │
+│   Mercado (tab): ofertas + mercado/[loteId]     │
+│   Ajustes (tab): perfil, sync, sesión           │
+│   Grupo PÚBLICO verificar/: index (escáner)     │
+│     + [codigo] (Pasaporte de Café, sin auth)    │
 ├───────────────────────────────────────────────┤
 │ Estado de UI (Zustand / Jotai)                 │
 │   - loteStore (estado actual del lote en cache)│
 │   - syncStore (contador, pendientes, errores)  │
+│   - offlineStore (lecturas cacheadas + alerta) │
 ├───────────────────────────────────────────────┤
 │ Repositorio local (SQLite)                     │
-│   - lecturas SIEMPRE desde el local            │
+│   - lecturas SIEMPRE desde el local (caché)    │
 │   - cola de operaciones pendientes (sync_queue)│
 ├───────────────────────────────────────────────┤
 │ Cliente de red (HTTP a FastAPI)              │
@@ -745,20 +848,31 @@ sequenceDiagram
 ### 7.3 Navegación y flujo de pantallas
 
 - **Navegación nativa** (expo-router con native stack/tabs) según la skill Vercel (evitar JS navigators por rendimiento y comportamiento de plataforma).
-- Rutas de la app: Home → Detalle de lote → Registro de evento → QR. Verificación QR es público (sin login).
+- **4 tabs autenticadas**: **Cosecha** (registro + detalle), **Dashboard Mi Finca** (resumen bento), **Mercado** (ofertas/proyección), **Ajustes** (perfil y sync).
+- **Stack por tab**:
+  - `lotes/` (lista) → `lotes/nuevo` (**wizard de 3 pasos**: 1) variedad + método → 2) peso → 3) evidencia fotográfica) → `lotes/[id]` (detalle con **timeline hash por etapa**).
+  - `mercado/` → `mercado/[loteId]` (**Panel Comercio Justo**: donut 97/3 + propina).
+- **Grupo PÚBLICO `verificar/` fuera del auth**: `verificar/` (escáner) → `verificar/[codigo]` (Pasaporte de Café). El consumidor final no inicia sesión.
+- **Dashboard Mi Finca** (tab): layout **bento** con tarjetas (lotes activos, saldo, Estado del Día decorativo) + **alerta offline** persistente cuando no hay conexión + **FAB** flotante que lleva al wizard `lotes/nuevo`.
 
 ```mermaid
 flowchart LR
-    A[Login] --> B[Home: lista de lotes]
-    B --> C[Registrar cosecha CEREZA]
-    B --> D[Detalle de lote]
-    D --> E[Historial de eventos]
-    D --> F[Generar QR]
-    D --> G[Registrar evento/transición]
-    C --> B
-    F --> H[Verificación pública QR]
-    G --> D
+    subgraph AUTH["🔐 Autenticadas (4 tabs)"]
+        T1[Cosecha] --> W[Wizard nuevo lote<br/>1 variedad+método → 2 peso → 3 evidencia]
+        T1 --> D[Detalle lote [id]<br/>timeline hash por etapa]
+        T2[Dashboard Mi Finca<br/>bento + alerta offline + FAB]
+        T3[Mercado] --> P[Panel Comercio Justo<br/>donut 97/3 + propina]
+        T4[Ajustes]
+    end
+    subgraph PUB["🌐 Público (sin auth)"]
+        S[verificar/ escáner] --> PAS[verificar/[codigo]<br/>Pasaporte de Café]
+    end
+    Login --> AUTH
+    T1 --> Login
+    S --> PAS
 ```
+
+**Paleta "Copa de cata"** (identidad visual): espresso `#3A1D0C` (fondos/acentos fuertes), crema `#8A5A00` (CTAs y acentos), cereza `#8A2E3D` (alertas y destinos), superficie `#F7EBDD` (fondos claros y tarjetas).
 
 ### 7.4 Rendimiento y experiencia en campo (skills oficiales)
 
@@ -820,18 +934,18 @@ sequenceDiagram
 
 ---
 
-## 8. Certificado de Origen (QR público)
+## 8. Pasaporte de Café (verificación pública QR)
 
-> Todo este sistema converge en un único artefacto para el consumidor: el **Certificado de Origen** emitido a través de un código QR. "Verificar el café" significa comprobar que el origen y los procesos declarados realmente ocurrieron.
+> Todo este sistema converge en un único artefacto para el consumidor: el **Pasaporte de Café** (evolución del Certificado de Origen) emitido a través de un código QR. "Verificar el café" significa comprobar que el origen y los procesos declarados realmente ocurrieron.
 
-- El QR codifica el `codigo` + `hash_sha256` del lote (no expone todo el historial en el propio QR; lo trae la API al validar).
-- El certificado exhibe: productor, finca (municipio + altitud), fecha de cosecha, historial de procesos (CEREZA → PERGAMINO → ORO → TOSTADO) y la etapa actual.
+- El QR codifica el `codigo` + `hash_sha256` raíz del lote (no expone todo el historial en el propio QR; lo trae la API al validar).
+- El pasaporte exhibe **datos ricos de trazabilidad**: productor, finca (municipio + altitud), **variedad**, **método de beneficiado**, fecha de cosecha, **humedad final**, **puntaje SCA**, estado actual e historial de procesos como **timeline con hash por etapa** (CEREZA → PERGAMINO → ORO → TOSTADO, incluyendo sub-etapas).
 - Al escanear → `GET /v1/verificar/{codigo}` (sin autenticación).
 - Respuestas:
-  - **Válido**: el Certificado de Origen con datos del lote + historial de eventos renderizado.
+  - **Válido**: el Pasaporte de Café con datos del lote + timeline de eventos con su `hash_etapa`.
   - **No encontrado** → HTTP 404.
   - **Inválido/tampered** → HTTP 409.
-- El `hash_sha256` permite verificar de forma independiente de la plataforma y, opcionalmente, dejar constancia on-chain (guardar el hash dentro del contrato, ver §9).
+- La **integridad se corta por `emitido_en`**: los eventos posteriores a la emisión del certificado **no** forman parte del hash canónico verificado (el pasaporte es una foto del lote al emitirse). El hash por etapa permite además el anclaje on-chain (§9, ADR-11).
 
 ### Flujo de verificación (diagrama de secuencia)
 
@@ -848,17 +962,47 @@ sequenceDiagram
     alt No existe
         API-->>C: 404 Código no encontrado
     end
-    API->>DB: SELECT lotes + lote_eventos (historial)
-    API->>API: Recalcula hash_sha256 del historial real
-    alt hash coincide con el del certificado
+    API->>DB: SELECT lotes + lote_eventos (timeline, hasta emitido_en)
+    API->>API: Recalcula cadena hash_etapa del historial real
+    alt hash coincide con la raíz del certificado
         API->>DB: INSERT verificacion (auditoría de consulta)
-        API-->>C: 200 Certificado de Origen (productor, finca, historial, estado)
+        API-->>C: 200 Pasaporte de Café (variedad, método, altitud, humedad, SCA, timeline con hash por etapa)
     else hash no coincide (tampered)
-        API-->>C: 409 Certificado inválido / manipulada
+        API-->>C: 409 Pasaporte inválido / manipulada
     end
 ```
 
-> El QR en sí solo porta `codigo` + `hash_sha256`; el historial lo devuelve la API. Cualquier edición de `lote_eventos` rompería el hash → 409. El anclaje opcional del hash on-chain se documenta en `docs/06-contratos.md`.
+### Escaneo móvil → Pasaporte (grupo público, sin auth)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Con as Consumidor
+    participant App as App RN (grupo PÚBLICO verificar/)
+    participant API as Backend FastAPI
+    participant DB as Supabase
+
+    Con->>App: Abre verificar/ (sin login)
+    App->>App: Cámara escanea QR (codigo + hash)
+    App->>API: GET /v1/verificar/{codigo}
+    API->>DB: SELECT qr_certificado WHERE codigo=?
+    alt No existe
+        API-->>App: 404
+        App-->>Con: "Código no encontrado"
+    else Existe
+        API->>DB: SELECT lotes + lote_eventos (hasta emitido_en)
+        API->>API: Recalcula cadena de hash por etapa
+        alt raíz coincide
+            API-->>App: 200 Pasaporte de Café (variedad, método, altitud, humedad, SCA, timeline)
+            App-->>Con: Renderiza pasaporte con hash por etapa
+        else raíz difiere (tampered)
+            API-->>App: 409
+            App-->>Con: Alerta de pasaporte manipulada
+        end
+    end
+```
+
+> El grupo `verificar/` vive **fuera del auth** en el router: el consumidor final escanea sin crear cuenta (§7.3).
 
 ---
 
@@ -916,6 +1060,22 @@ sequenceDiagram
 > Si el productor todavía no tiene wallet, se le asigna/genera una al registrarse: su `public_address` vive en la tabla **`USUARIOS`** (única fuente de verdad de la wallet). En campo (offline) la dirección se puede crear localmente y validarse al sincronizar.
 > El pago se dispara desde la cuenta de la **cooperativa** (autor de la venta); el contrato envía el 97% a la wallet del productor y retiene el 3% hacia la tesorería de la cooperativa.
 
+### Panel Comercio Justo (proyección read-only)
+
+- El **Panel Comercio Justo** de `mercado/[loteId]` (donut **97/3** + desglose de comisión) es una **proyección de solo lectura** materializada por el backend desde `PAGO`/`PROPINA`; **no tiene escritura propia** (ADR-9).
+- Es visible para **comprador** (lee comercio justo/propinas) y productor (su saldo); nunca expone la wallet del backend ni datos ajenos (RLS §10).
+
+### Propina al productor (ADR-10)
+
+- El comprador puede dejar una **propina** `POST /v1/propinas` con `clave_idempotencia` `UNIQUE` → **100% directo** al productor (sin comisión).
+- **Bivalente off-chain/on-chain**: `PROPINA.estado_propina` (`REGISTRADA → PENDIENTE → CONFIRMADA`) avanza según la confirmación on-chain, igual que `PAGO`. Cuando la integración web3 se retome, la propina se liquida con el mismo mecanismo de firma.
+- La interfaz de pago actual (`GatewayPagos` + `FakeGatewayPagos`) ya soporta la idempotencia; la propina reutiliza el patrón.
+
+### Anclaje por etapa on-chain (ADR-11)
+
+- Cada `LOTE_EVENTOS.hash_etapa` se puede anclar on-chain **reusando `anclarHash(hash)`** (función de anclaje del contrato): se ancla la **raíz** (`QR_CERTIFICADO.hash_sha256`) y opcionalmente hitos intermedios (PERGAMINO, ORO) para prueba de no-manipulación por etapa.
+- Mismo mecanismo de la nota previa: **web3 en pausa** (B7) — se documenta y se retoma con la integración real.
+
 ---
 
 ## 10. Roles y permisos (Supabase RLS + JWT)
@@ -924,9 +1084,9 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 
 | Rol | Lectura | Escritura | ¿Cuenta? |
 |---|---|---|---|
-| **productor** | Sus fincas y sus lotes | Eventos de sus lotes | Sí |
+| **productor** | Sus fincas, sus lotes y su saldo (`/pagos/saldo`) | Eventos de sus lotes | Sí |
 | **cooperativa** | Todos los lotes de sus fincas | Gestión de lotes, productores, pagos | Sí |
-| **comprador** | Lotes verificables (QR público) | — | Sí |
+| **comprador** | Lotes verificables (QR público) **+ comercio justo/propinas** | Propinas sobre lotes vendidos | Sí |
 | **consumidor** | Solo QR `/verificar` (público) | — | No |
 | **admin** | Todo | Configuración, cooperativas | Sí |
 
@@ -967,8 +1127,11 @@ sequenceDiagram
 | `lotes` | de sus fincas | de sus fincas | — (solo `/verificar`) | todo |
 | `lote_eventos` | de sus lotes (append-only) | de sus lotes (append-only) | — | todo |
 | `qr_certificado` | de sus lotes | de sus lotes | — | todo |
-| `pago` | de sus lotes (lectura) | propias (escritura) | — | todo |
+| `pago` | de sus lotes (lectura) | propias (escritura) | lectura (comercio justo del lote) | todo |
+| `propina` | de sus lotes (lectura) | de sus lotes (lectura) | propias (escritura) + lectura | todo |
 | `verificacion` | de sus lotes | de sus lotes | — | todo |
+
+**Aislamiento de tenant:** toda política RLS se resuelve **siempre** desde `auth.uid()` → `USUARIOS.id` del JWT (nunca desde un ID enviado por el cliente). La política de `PROPINA` es **propia** de su tabla: insertar solo si el JWT corresponde a `comprador_id`, y leer solo si el usuario es `comprador_id`, `productor_id`, cooperativa del lote o admin.
 
 La matriz está implementada en `Backend/db/migrations/002_rls.sql` y es la misma regla que replica la capa de servicio en FastAPI (doble control, §12).
 
@@ -986,6 +1149,50 @@ La matriz está implementada en `Backend/db/migrations/002_rls.sql` y es la mism
 8. **Dinero como `real`/`float` con CHECK** según ERD; migrar a `NUMERIC`/`Decimal` es una mejora futura documentada (no bloquea el MVP).
 
 Cada decisión se documenta en esta misma sección (ADR 1–8) con plantilla: Título · Contexto · Decisión · Consecuencias.
+
+A continuación, los ADR 9–14 en el formato estándar **Contexto → Decisión → Opciones Consideradas → Consecuencias** (consistente con los ADR 1–8):
+
+### ADR-9 — Mercado como proyección de solo lectura
+
+- **Contexto:** la app y el pasaporte necesitan mostrar ofertas/comercio justo del café; escribir esa vista desde el móvil rompería la fuente de verdad y el aislamiento por tenant.
+- **Decisión:** el mercado es una **proyección read-only** materializada por el backend (a partir de `LOTE`, `PAGO`, `PROPINA`); no existe `POST /mercado`.
+- **Opciones consideradas:** (a) escritura directa desde el móvil al mercado — descartada por romper RLS; (b) vista SQL materializada con refresh — descartada por complejidad en MVP; (c) **proyección calculada en el servicio** — elegida.
+- **Consecuencias:** vistas de oferta y Panel Comercio Justo siempre consistentes; ningún rol escribe el mercado; latencia mínima al ser un cálculo simple.
+
+### ADR-10 — Propina al productor (100% directo, idempotente, bivalente)
+
+- **Contexto:** el comprador quiere reconocer el trabajo del productor más allá de la venta; la comisión 3% de la venta no debe aplicarse a la propina.
+- **Decisión:** tabla `PROPINA` con `clave_idempotencia UNIQUE`; el monto va **100%** al productor; `estado_propina` (`REGISTRADA → PENDIENTE → CONFIRMADA`) es **bivalente off-chain/on-chain** (igual que `PAGO`).
+- **Opciones consideradas:** (a) propina dentro de `PAGO` — descartada: mezcla comisión; (b) propina solo on-chain — descartada: web3 en pausa (B7); (c) **tabla propia bivalente** — elegida.
+- **Consecuencias:** el productor recibe el 100%; la idempotencia evita dobles envíos; cuando web3 se retome, la propina se liquida con el mismo mecanismo de firma.
+
+### ADR-11 — Hash por etapa (cadena lineal + ancla raíz on-chain)
+
+- **Contexto:** el pasaporte muestra el historial completo; un solo hash no demuestra que *cada etapa* no fue manipulada.
+- **Decisión:** cada `LOTE_EVENTOS` lleva `hash_etapa` en **cadena lineal** (`hash_i = HASH(hash_{i-1} ‖ datos)` orden `registrado_en, id`); la raíz es `QR_CERTIFICADO.hash_sha256`, verificable con el QR y anclable on-chain **reusando `anclarHash()`**.
+- **Opciones consideradas:** (a) hash único del lote — descartado: no aísla la etapa adulterada; (b) Merkle tree — descartado por complejidad en MVP; (c) **cadena lineal** — elegida por simplicidad y suficiente para el caso.
+- **Consecuencias:** la verificación corta por `emitido_en`; editar cualquier evento rompe la raíz → 409; anclaje por etapa opcional cuando web3 se retome (B7).
+
+### ADR-12 — Proceso del café ampliado (cadena completa con autotransiciones)
+
+- **Contexto:** la memoria describe sub-etapas (fermentación, lavado, secado, reposo, clasificación) que no existían en la máquina original de 4 estados.
+- **Decisión:** se conservan los **hitos** `CEREZA → PERGAMINO → ORO → TOSTADO → VENDIDO` (+ `RECHAZADO`) y se registran las sub-etapas como **autotransiciones** (mismo estado) con `TipoEvento` ampliado a **11 tipos** (`COSECHA`, `LIMPIEZA`, `DESPULPADO`, `FERMENTACION`, `LAVADO`, `SECADO`, `REPOSO`, `DESCASCARADO`, `CLASIFICACION`, `TOSTADO`, `VENTA`, `RECHAZADO`). **Aditiva, no destructiva**: los eventos viejos siguen siendo válidos.
+- **Opciones consideradas:** (a) estados nuevos por sub-etapa — descartado: infla la máquina y rompe compatibilidad; (b) autotransiciones — elegido; (c) campos sueltos en el lote — descartado: pierde evidencia temporal.
+- **Consecuencias:** no se saltan hitos; las sub-etapas solo se registran en su hito sin orden estricto; no hay retroceso tras `TOSTADO`; el historial completo queda en `lote_eventos`.
+
+### ADR-13 — Estado del Día decorativo (sin contrato)
+
+- **Contexto:** el dashboard quiere un "Estado del Día" motivacional; no tiene valor de trazabilidad ni lógica de dominio.
+- **Decisión:** es un widget **decorativo** calculado en el cliente desde datos ya disponibles (lotes activos, última sincronización, clima local). **No tiene endpoint, tabla ni contrato.**
+- **Opciones consideradas:** (a) endpoint propio — descartado: costo sin valor; (b) cálculo en cliente — elegido.
+- **Consecuencias:** cero superficie de error; el backend nunca guarda UI decorativa (§12).
+
+### ADR-14 — Evidencia fotográfica (Storage, url + sha256, fuera del hash canónico)
+
+- **Contexto:** la trazabilidad pide respaldo visual (fotos del lote en campo).
+- **Decisión:** la evidencia sube a **Supabase Storage**; `LOTE` guarda `evidencia_url` + `evidencia_sha256`. La evidencia **queda fuera del hash canónico** por etapa: el hash cubre los datos estructurales del evento, no los binarios.
+- **Opciones consideradas:** (a) dentro del hash canónico — descartado: hace el hash frágil a re-uploads y pesado; (b) url + sha256 fuera del hash — elegido; (c) sin evidencia — descartado: no cumple la memoria.
+- **Consecuencias:** la foto es verificable por su `sha256` (integridad del binario) sin inflar la cadena; el pasaporte puede enlazarla al mostrar el lote.
 
 ---
 
@@ -1012,6 +1219,12 @@ Cada decisión se documenta en esta misma sección (ADR 1–8) con plantilla: T�
 - `lote_eventos` como **append-only** (nada de UPDATE/DELETE).
 - Índices para las consultas más usadas (búsqueda por código QR, historial por lote).
 - RLS por cooperativa; la app nunca ve filas ajenas (skill Supabase best practices).
+- **Read-model / proyección**: el mercado y el Panel Comercio Justo se materializan en el servicio (read-only) — nunca se escriben desde el móvil (ADR-9).
+- **Hash por etapa**: `lote_eventos.hash_etapa` en cadena lineal; la raíz vive en `qr_certificado.hash_sha256` y se recalcula al verificar (ADR-11).
+- **Evidencia fotográfica**: `evidencia_url` + `evidencia_sha256` en `LOTE` (Storage); fuera del hash canónico (ADR-14).
+
+### Backend (FastAPI / Python)
+- **No persistir UI decorativa**: el Estado del Día se computa en el cliente; el backend jamás guarda campos de presentación (ADR-13).
 
 ### Blockchain (Solidity)
 - 0.8.0+, OpenZeppelin, `ReentrancyGuard`, *pull-over-push*, custom errors.
@@ -1044,19 +1257,32 @@ Cada decisión se documenta en esta misma sección (ADR 1–8) con plantilla: T�
 | **Offline-first** | La app funciona sin internet y sincroniza después |
 | **LWW** | Last-Write-Wins: el último cambio gana los conflictos de sync |
 | **Aggregate root** | Entidad (el Lote) que garantiza consistencia sobre su historia |
+| **Variedad** | Cultivar de café (ej. Borbón, Caturra, Gesha, Típica) registrado en el lote |
+| **Beneficiado húmedo** | Proceso con agua: despulpado + fermentación + lavado (producción de café lavado) |
+| **Beneficiado seco** | Proceso sin agua: el fruto se seca entero y se descascara después (café natural) |
+| **Lavado** | Método húmedo: se remueve el mucílago con agua tras la fermentación |
+| **Natural** | Método seco: el fruto se seca completo con el grano dentro (notas afrutadas) |
+| **Honey** | Método intermedio: se despulpa pero el mucílago se seca pegado al grano (semi-lavado con miel) |
+| **Fermentación** | Sub-etapa (PERGAMINO) que desarrolla sabor; se registra método y horas |
+| **Humedad %MC** | Contenido de humedad del grano (*moisture content*) en %; óptimo de exportación ~10–12% |
+| **Puntaje SCA** | Calificación de taza 0–100 de la *Specialty Coffee Association*; ≥80 = café especial |
+| **Reposo** | Sub-etapa (PERGAMINO) de descanso del grano (días) antes de descascarar |
+| **Pasaporte de Café** | Evolución del Certificado de Origen: verificación pública con variedad, método, altitud, humedad, SCA y timeline con hash por etapa (§8) |
+| **Propina** | Pago voluntario del comprador al productor, 100% directo, idempotente y bivalente (ADR-10) |
+| **Autotransición** | Evento que no cambia de estado (ej. CEREZA → CEREZA): registra sub-etapas sin mover el hito |
 
 ---
 
 ## 14. Flujo de desarrollo propuesto (equipo pequeño)
 
-1. **Dominio**: definir y documentar la máquina de estados + reglas (consolidado en este documento, §6; Issue 1).
-2. **Modelo de datos**: ERD + migración inicial → §5 + `db/migrations/` (Issue 2).
+1. **Dominio**: definir y documentar la máquina de estados (hitos + autotransiciones) + reglas → §4 (consolidado; Issue 1).
+2. **Modelo de datos**: ERD + migración inicial (incluye `PROPINA` y columnas por etapa) → §5 + `db/migrations/` (Issue 2).
 3. **API contrato**: rutas + schemas Pydantic + flujo → §6–§8 + `docs/06-contratos.md` (Issue 3).
-4. **UI mobile**: wireframes + árbol de navegación → `mobile/` (Issue 4, pendiente).
+4. **UI mobile**: wireframes + árbol de navegación (4 tabs + grupo público `verificar/`) → `mobile/` (Issue 4).
 5. **Offline-sync**: diseño completo → §7.5 (Issue 5).
-6. **Backend**: montar `Backend/` (FastAPI) empezando por el corazón (máquina de estados + QR público).
-7. **Móvil**: `mobile/` con Expo (registro + QR funcional).
-8. **Contracts**: `CoffeePayments.sol` + pruebas + deploy en testnet.
+6. **Backend**: montar `Backend/` (FastAPI) empezando por el corazón (máquina de estados + hash por etapa + Pasaporte público).
+7. **Móvil**: `mobile/` con Expo — pasos: **dashboard Mi Finca** (bento + alerta offline + FAB) → **wizard de 3 pasos** (`lotes/nuevo`) → **escáner/pasaporte** (`verificar/` + `verificar/[codigo]`) → **comercio justo** (`mercado/[loteId]` con donut 97/3 + propina).
+8. **Contracts**: `CoffeePayments.sol` + pruebas + deploy en testnet (anclaje `anclarHash` por etapa).
 
 Cada integrante trabaja en su rama por feature; `docs/ARCHITECTURE.md` es la fuente única de verdad del diseño.
 

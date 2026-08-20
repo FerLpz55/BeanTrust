@@ -19,7 +19,7 @@ It solves two problems documented in the project's technical memory:
 The system gives each coffee bean a **digital identity** through blockchain technology:
 
 - Records key events in the chain (harvest, processing, roasting) **immutably**.
-- Issues a **Certificate of Origin**: a unique **QR code** the consumer scans to verify certified organic origin (producer, farm, altitude, process history).
+- Issues a **Coffee Passport**: a unique **QR code** the consumer scans to verify certified organic origin (producer, farm, altitude, variety, process history, per-stage hash).
 - Executes **fair, automatic payments** to the producer via **Smart Contracts**.
 
 Business model (B2B2C): the producer **does not pay**. Cooperatives (subscription) and specialty buyers (3% transaction fee executed by the Smart Contract) pay. The end consumer just scans the QR; their demand for transparency is what gives value to the whole chain.
@@ -132,46 +132,70 @@ BeanTrust/
 stateDiagram-v2
     direction TB
 
-    [*] --> CHERRY
-    CHERRY --> PARCHMENT : pulping + drying\n(weight loss)
-    PARCHMENT --> GREEN : cleaning + hulling\n(green weight, kg)
-    GREEN --> ROASTED : roasting\n(enables QR)
-    ROASTED --> SOLD : SALE_REGISTERED\n(triggers on-chain payment)
-    CHERRY --> [*] : rejected
-    PARCHMENT --> [*] : rejected
-    GREEN --> [*] : rejected
-    SOLD --> [*]
+    [*] --> CEREZA
+    CEREZA --> CEREZA : LIMPIEZA
+    CEREZA --> PERGAMINO : DESPULPADO
+    PERGAMINO --> PERGAMINO : FERMENTACION / LAVADO\nSECADO / REPOSO
+    PERGAMINO --> ORO : DESCASCARADO
+    ORO --> ORO : CLASIFICACION
+    ORO --> TOSTADO : TOSTADO\n(enables Coffee Passport QR)
+    TOSTADO --> VENDIDO : VENTA\n(triggers on-chain payment)
+    CEREZA --> RECHAZADO
+    PERGAMINO --> RECHAZADO
+    ORO --> RECHAZADO
+    TOSTADO --> RECHAZADO
+    VENDIDO --> RECHAZADO
+    VENDIDO --> [*]
 
-    note right of CHERRY
-       Initial harvest record:
+    note right of CEREZA
+       COSECHA creates the lot:
        - Producer, farm
-       - Altitude
+       - Variety
        - Weight (kg)
-       - Harvest date
+       - Evidence (url + sha256)
        - Generates UNIQUE lot code
     end note
-    note right of SOLD
+    note right of VENDIDO
        When the sale is registered, the backend
        signs and executes the Smart Contract
        that pays 97% to the producer and
        withholds the commission (3%).
     end note
+    note left of PERGAMINO
+       Sub-stages with no strict order:
+       fermentation, washing, drying, resting.
+       Recorded as auto-transitions
+       (PERGAMINO → PERGAMINO).
+    end note
 ```
 
-### Transition business rules (summary)
+### Transition business rules (full chain with auto-transitions)
 
-| Transition | Required action | Fields checked |
-|---|---|---|
-| `CHERRY → PARCHMENT` | Pulping + drying | `loss_pct`, `weight_kg`, `actor_id` |
-| `PARCHMENT → GREEN` | Cleaning + hulling | `weight_kg`, `loss_pct` |
-| `GREEN → ROASTED` | Roasting at the plant | roasting date (`registered_at`) |
-| `ROASTED → SOLD` | Price/sale registration | `total_amount`, `buyer_id`, `tx_hash` |
+> **Full chain with auto-transitions.** The **milestones** (states) are `CEREZA → PERGAMINO → ORO → TOSTADO → VENDIDO` (+ `RECHAZADO`). Each **milestone** accepts **sub-stages** recorded as **auto-transitions** (the state doesn't change, but evidence is left in history).
+
+| Transition | EventType | Required action | Fields checked |
+|---|---|---|---|
+| `→ CEREZA` | `COSECHA` | Creates the lot (aggregate) | `variedad`, `peso_kg`, `evidencia_url`, `evidencia_sha256`, `actor_id` |
+| `CEREZA → CEREZA` | `LIMPIEZA` | Cherry cleaning | `peso_kg`, `actor_id` |
+| `CEREZA → PERGAMINO` | `DESPULPADO` | Pulping | `merma_pct`, `peso_kg`, `metodo_beneficiado` (lavado/semilavado/honey/natural), `metodo_fermentacion`, `actor_id` |
+| `PERGAMINO → PERGAMINO` | `FERMENTACION` | Controlled fermentation | `metodo_fermentacion`, `horas`, `pH`/`Brix` (optional), `actor_id` |
+| `PERGAMINO → PERGAMINO` | `LAVADO` | Parchment washing | `peso_kg`, `actor_id` |
+| `PERGAMINO → PERGAMINO` | `SECADO` | Drying (patio/mechanical) | `humedad_inicial_pct`, `humedad_final_pct`, `metodo_secado`, `actor_id` |
+| `PERGAMINO → PERGAMINO` | `REPOSO` | Resting the parchment | `dias`, `actor_id` |
+| `PERGAMINO → ORO` | `DESCASCARADO` | Hulling → green coffee | `peso_kg`, `merma_pct`, `actor_id` |
+| `ORO → ORO` | `CLASIFICACION` | Grading and quality control | `puntaje_sca`, `defectos`, `densidad`, `tamiz`, `actor_id` |
+| `ORO → TOSTADO` | `TOSTADO` | Roasting at the plant | roasting date (`registrado_en`), `actor_id` |
+| `TOSTADO → VENDIDO` | `VENTA` | Price/sale registration | `monto_total`, `comprador_id`, `tx_hash` |
+| `any → RECHAZADO` | `RECHAZADO` | Lot rejection | reason, `actor_id` |
 
 **Business invariants (prohibitions)**:
-- Cannot skip two states at once (`CHERRY → GREEN` = error).
-- No going back after `ROASTED` (physically irreversible).
+- Cannot skip **milestones** (`CEREZA → ORO` = error): every milestone change must pass through the intermediate.
+- **Sub-stages** are only recorded within **their milestone** (`CLASIFICACION` only in `ORO`, `SECADO` only in `PERGAMINO`, etc.) but **with no strict order** among them.
+- **No going back after `TOSTADO`** (physically irreversible): `VENDIDO` is terminal and `RECHAZADO` is absorbing.
 - Weight loss can never be negative.
 - Every event records who did it (`actor_id`) and a timezone-aware `timestamp` (UTC).
+- **Append-only**: history is never rewritten.
+- **Deterministic hash**: the chain hash is computed in order (`registrado_en`, `id`) — see §8 and ADR-11.
 
 ### Object-oriented design (OOP) — the heart of the domain
 
@@ -179,7 +203,7 @@ stateDiagram-v2
 
 Concrete benefits we get from OOP here (based on the Python skill + DDD domain pattern):
 
-1. **Encapsulation**: `Lot` knows its history and *can't be tricked* into jumping from CHERRY straight to GREEN. The caller simply asks to "advance"; the object validates or raises an error.
+1. **Encapsulation**: `Lot` knows its history and *can't be tricked* into jumping from CEREZA straight to ORO. The caller simply asks to "advance"; the object validates or raises an error.
 2. **Event immutability**: `LotEvent` is an **immutable value object**: it's created and never modified. This is what makes traceability verifiable (same principle as append-only in the DB).
 3. **Controlled polymorphism** for states: each state (`CherryState`, `ParchmentState`, …) can have its own exit-validation logic. It's managed with the **StateMachine** (State pattern), not with giant `if/case` blocks in the API.
 4. **Dependency Inversion (DI)**: the application service depends on **interfaces** (`LotRepository`, `PaymentGateway`), not directly on Supabase or Polygon → infrastructure changes don't touch business logic.
@@ -207,6 +231,7 @@ classDiagram
         -State state
         -float current_weight_kg
         -Date harvest_date
+        -String variety
         +register(HarvestEvent) LotEvent
         +advance(type: EventType) LotEvent
         +generateCertificate() QRCertificate
@@ -220,8 +245,16 @@ classDiagram
         -UUID lot_id
         -State from_state
         -State to_state
+        -EventType type
         -float loss_pct
         -float weight_kg
+        -String processing_method
+        -String fermentation_method
+        -float initial_humidity_pct
+        -float final_humidity_pct
+        -String drying_method
+        -float sca_score
+        -String stage_hash
         -UUID actor_id
         -Instant registered_at
     }
@@ -245,6 +278,19 @@ classDiagram
         -float producer_amount
         -String tx_hash
         -PaymentStatus payment_status
+        +confirm() void
+    }
+
+    class Tip {
+        <<bivalent entity>>
+        -UUID id
+        -UUID lot_id
+        -UUID buyer_id
+        -UUID producer_id
+        -float amount
+        -Currency currency
+        -TipStatus tip_status  // REGISTERED|PENDING|CONFIRMED
+        -String idempotency_key
         +confirm() void
     }
 
@@ -302,12 +348,17 @@ classDiagram
     Lot "1" --> "0..*" LotEvent : records
     Lot "1" --> "0..1" QRCertificate : issues
     Lot "1" --> "0..1" Payment : settles
+    Lot "1" --> "0..*" Tip : receives
     Lot "0..*" --> "1" Farm : belongs to
     Farm "0..*" --> "1" Producer : owner
     Lot --> StateMachine : validates against
     LotService ..> LotRepository : uses
     LotService ..> PaymentGateway : uses
 ```
+
+> **`EventType` (expanded enum):** `COSECHA` · `LIMPIEZA` · `DESPULPADO` · `FERMENTACION` · `LAVADO` · `SECADO` · `REPOSO` · `DESCASCARADO` · `CLASIFICACION` · `TOSTADO` · `VENTA` · `RECHAZADO` (12 values: 11 transitions + rejection). Sub-stages (`LIMPIEZA`, `FERMENTACION`, `LAVADO`, `SECADO`, `REPOSO`, `CLASIFICACION`) are **auto-transitions**: `from_state == to_state`.
+
+> **Implementation note:** this diagram is **conceptual** (CamelCase). In code names are snake_case (`LotService` = `lote_service`, `LotRepository` = `lote_repo`, `QrService` = `qr_service`), repos are protocols in `app/repositories/`, and the `Producer` entity is the `rol`/FK column of `User` (see ERD note in §5).
 
 **Why each element exists:**
 
@@ -319,7 +370,8 @@ classDiagram
 | `StateMachine` | Defines the transition table **declaratively** (a map, not if/case) | OCP (open for extension) |
 | `LotRepository` (interface) | The domain doesn't depend on the DB (Supabase is a detail) | Dependency Inversion |
 | `PaymentGateway` (interface) | The domain doesn't know how payment happens (Polygon is a detail) | Dependency Inversion |
-| `Farm`, `Producer` | On-farm context entities that the Certificate of Origin must display | Bounded Context (origin) |
+| `Tip` | Buyer → producer, 100% direct, idempotent and bivalent | Entity + Idempotency (ADR-10) |
+| `Farm`, `Producer` | On-farm context entities that the Coffee Passport must display | Bounded Context (origin) |
 | Services | Separation: routers hold no logic; services decide "what" | Single Responsibility |
 
 > **`HarvestEvent` and `Sale` are not domain entities**: they are **Pydantic schemas** (input DTOs) that cross the API boundary; the domain receives them, validates them, and converts them into `LotEvent` / `Payment`. They don't have their own table.
@@ -352,6 +404,7 @@ erDiagram
     LOT |o--o| QR_CERTIFICATE : "issues (0-1)"
     QR_CERTIFICATE ||--o{ VERIFICATION : "scans (1-N)"
     LOT |o--o| PAYMENT : "settles (0-1)"
+    LOT ||--o{ TIP : "receives (1-N)"
 
     USERS {
         uuid id PK
@@ -401,27 +454,42 @@ erDiagram
         uuid id PK
         uuid farm_id FK
         text public_code
-        enum state "CHERRY|PARCHMENT|GREEN|ROASTED|SOLD|REJECTED"
+        enum state "CEREZA|PERGAMINO|ORO|TOSTADO|VENDIDO|RECHAZADO"
         real current_weight_kg
         date harvest_date
+        text variety
+        enum processing_method "lavado|semilavado|honey|natural"
+        text evidence_url
+        text evidence_sha256
     }
     LOT_EVENTS {
         uuid id PK
         uuid lot_id FK
         uuid actor_id FK "USERS"
-        uuid buyer_id FK "SALE only"
-        enum type "HARVEST|PULPING|HULLING|ROASTING|SALE|REJECTED"
+        uuid buyer_id FK "VENTA only"
+        enum type "COSECHA|LIMPIEZA|DESPULPADO|FERMENTACION|LAVADO|SECADO|REPOSO|DESCASCARADO|CLASIFICACION|TOSTADO|VENTA|RECHAZADO"
         enum from_state
         enum to_state
         real weight_kg
         real loss_pct
+        text processing_method "DESPULPADO"
+        text fermentation_method "DESPULPADO|FERMENTACION"
+        real humidity_pct "SECADO"
+        text drying_method "SECADO"
+        real resting_days "REPOSO"
+        real sca_score "CLASIFICACION"
+        text defects "CLASIFICACION"
+        real density "CLASIFICACION"
+        text screen_size "CLASIFICACION"
+        real fermentation_hours "FERMENTACION"
+        text stage_hash
         timestamptz registered_at
     }
     QR_CERTIFICATE {
         uuid id PK
         uuid lot_id FK "unique"
         text code
-        text sha256_hash
+        text sha256_hash "root of the per-stage hash chain"
         timestamptz issued_at
     }
     VERIFICATION {
@@ -439,6 +507,18 @@ erDiagram
         real producer_amount
         enum payment_status "PENDING|CONFIRMED|FAILED"
         text tx_hash
+    }
+    TIP {
+        uuid id PK
+        uuid lot_id FK
+        uuid buyer_id FK "USERS"
+        uuid producer_id FK "USERS"
+        real amount
+        text currency "MXN|USDC|MATIC"
+        enum tip_status "REGISTERED|PENDING|CONFIRMED"
+        text idempotency_key "UNIQUE"
+        timestamptz created_at
+        timestamptz updated_at
     }
 ```
 
@@ -458,6 +538,7 @@ flowchart LR
     QR[QR_CERTIFICATE]
     VER[VERIFICATION]
     PAY[PAYMENT]
+    TIP[TIP]
 
     R1{{OWNS 1:N}}
     R2{{AFFILIATED N:M}}
@@ -467,6 +548,7 @@ flowchart LR
     R6{{ISSUES 1:1}}
     R7{{RECEIVES 1:N}}
     R8{{SETTLES 1:1}}
+    R9{{TIPS 1:N}}
 
     USR ---|1:1| PROD
     USR ---|1:1| COOP
@@ -479,6 +561,7 @@ flowchart LR
     LOT --- R6 --- QR
     QR --- R7 --- VER
     LOT --- R8 --- PAY
+    LOT --- R9 --- TIP
 ```
 
 > **Reading the conceptual model:**
@@ -510,12 +593,14 @@ flowchart LR
         A --> EVEN[LOT_EVENTS]
         A --> QR[QR_CERTIFICATE]
         A --> PAY[PAYMENTS]
+        A --> TIP[TIPS]
     end
 
     subgraph Consumers [🔎 Consumers]
         B1[Cooperative - dashboard] --> LOT
         B2[Consumer - scans QR] --> QR
-        B3[Polygon - confirms payment] --> PAY
+        B3[Buyer - tip] --> TIP
+        B4[Polygon - confirms payment] --> PAY
     end
 
     style A fill:#bbdefb
@@ -527,15 +612,18 @@ flowchart LR
 
 | Class (domain §4) | Table(s) | Mapping |
 |---|---|---|
-| `Lot` | `LOT` | 1 row = 1 lot (denormalized state) |
-| `LotEvent` | `LOT_EVENTS` | 1 event = 1 transition (append-only) |
-| `QRCertificate` | `QR_CERTIFICATE` | issued when reaching `ROASTED` (0–1 per lot) |
+| `Lot` | `LOT` | 1 row = 1 lot (denormalized state + variety + evidence) |
+| `LotEvent` | `LOT_EVENTS` | 1 event = 1 transition/sub-stage (append-only, `stage_hash`) |
+| `QRCertificate` | `QR_CERTIFICATE` | issued when reaching `TOSTADO` (0–1 per lot); `sha256_hash` = root of the chain |
 | `Payment` | `PAYMENT` | created on sale (0–1 per lot) |
+| `Tip` | `TIP` | 0–N per lot; bivalente off-chain/on-chain |
 | `Farm` / `Producer` | `FARM` / `PRODUCER` | lot's origin context |
 | `SupabaseLotRepo` | infrastructure | reads/writes the tables above |
 | `LotService`, `StateMachine` | services (no tables) | business rules |
 
-> Cardinality rules are aligned between §4 and this ERD: a lot **has at most one** QR and **one** payment, because certification (`ROASTED`) and sale (`SOLD`) each only happen once, terminally.
+> **Per-stage hash (linear chain).** Each `LOT_EVENTS.stage_hash` is computed as `HASH(previous_stage.hash ‖ event_data)` in order `(registered_at, id)`. The last hash of the chain **is the root** stored in `QR_CERTIFICATE.sha256_hash`. If an event is edited, the root no longer matches → 409 (see §8 and ADR-11).
+
+> Cardinality rules are aligned between §4 and this ERD: a lot **has at most one** QR and **one** payment, because certification (`TOSTADO`) and sale (`VENDIDO`) each only happen once, terminally.
 
 ### Why do we store each piece of data? (Business question → Data)
 
@@ -545,18 +633,25 @@ flowchart LR
 |---|---|---|
 | Who grew this lot? | `producers.*`, `farms.*` | PRODUCER / FARM |
 | Where did it grow? (certify origin) | `municipality`, `min_altitude/max_altitude`, `organic` | FARM |
+| What variety is it? | `variety` | LOT |
 | How much coffee was registered? | `harvest_date`, `weight_kg` | LOT |
+| How was it processed? | `processing_method` (washed/semilavado/honey/natural) | LOT / LOT_EVENTS |
 | What stage is it in? | `state` → `LOT` (denorm) | LOT |
-| What was its history? (traceability) | `LOT_EVENTS` record with from/to state | LOT_EVENTS |
+| What was its history? (traceability) | `LOT_EVENTS` record with from/to state + sub-stages | LOT_EVENTS |
 | Was weight lost in each process? | `loss_pct` | LOT_EVENTS |
+| How long did it ferment / dry / rest? | `fermentation_hours`, `humidity_pct`, `resting_days` | LOT_EVENTS |
+| What is its cupping score? | `sca_score`, `defects`, `density`, `screen_size` | LOT_EVENTS |
+| Does the photographic evidence exist? | `evidence_url` + `evidence_sha256` | LOT |
+| Is the chain intact? | `stage_hash` per event; root in `sha256_hash` | LOT_EVENTS / QR_CERTIFICATE |
 | Is all the information immutable? | `registered_at` + INSERT only | LOT_EVENTS |
 | Who performed each transition? | `actor_id` → `USERS` | LOT_EVENTS / USERS |
 | Who scanned the QR? | `VERIFICATION` (date, device) | VERIFICATION |
 | How much is paid to the producer? | `total_amount`, `producer_amount`, `commission_pct` | PAYMENT |
 | Who bought the lot? | `buyer_id` in the `SALE` event | LOT_EVENTS |
 | Did the payment land on-chain? | `tx_hash`, `payment_status` | PAYMENT |
-| Is it a person/org with credentials? | `email`, `role`, `public_address` (wallet) | USERS |
-| Is the QR authentic? | `sha256_hash` | QR_CERTIFICATE |
+| Did the buyer leave a tip? | `amount`, `currency`, `tip_status`, `idempotency_key` | TIP |
+| Is it a person/org with credentials? | `email`, `role`, `public_address` (wallet) | USERS (wallet pending, B11) |
+| Is the QR authentic? | `sha256_hash` (root of the per-stage hash chain) | QR_CERTIFICATE |
 
 ---
 
@@ -614,25 +709,35 @@ flowchart LR
 
 ### Entry points (endpoints)
 
+**Scope notes:**
+- **Weather/Status of the Day** is a **decorative** dashboard widget: computed on the client from already available data; **it has no dedicated endpoint** (ADR-13).
+- **Market** is a **read-only projection** (`GET`): materialized by the backend; the app never writes to it (ADR-9).
+- The buyer reads payments/tips (`GET /v1/payments`, `POST /v1/tips`) and the producer sees their balance (`GET /v1/payments/saldo`); `GET /v1/me` resolves the real role from `USERS` via `auth.uid()`.
+
 **API design (REST best practices applied with the FastAPI skill):**
 
 | Method | Route | What it does | Idempotency | Codes |
 |---|---|---|---|---|
-| `POST` | `/v1/lots` | Create a lot in CHERRY state | No (returns id) | `201` · `400` · `422` |
-| `POST` | `/v1/lots/{id}/events` | Register a state transition | `Idempotency-Key` | `201` · `409` · `422` |
+| `POST` | `/v1/lots` | Create a lot in CEREZA state (variety, method, weight, evidence) | No (returns id) | `201` · `400` · `422` |
+| `POST` | `/v1/lots/{id}/events` | Register a transition/sub-stage (11 types) | `Idempotency-Key` | `201` · `409` · `422` |
 | `GET` | `/v1/lots/{id}` | Query lot + history | Yes | `200` · `404` |
 | `GET` | `/v1/lots` | List lots (cursor-paginated) | Yes | `200` · `400` |
-| `GET` | `/v1/verify/{qr_code}` | Public verification (no auth) | Yes | `200` · `404` · `409` |
-| `POST` | `/v1/payments` | Trigger on-chain payment (cooperative) | `Idempotency-Key` | `202` · `409` · `422` |
+| `GET` | `/v1/verify/{qr_code}` | **Coffee Passport** public verification (no auth) | Yes | `200` · `404` · `409` |
+| `GET` | `/v1/payments` | Query payments (read) | Yes | `200` |
+| `GET` | `/v1/payments/saldo` | Producer balance/status | Yes | `200` |
+| `POST` | `/v1/tips` | Register buyer tip (idempotent, bivalent) | `Idempotency-Key` | `201` · `409` · `422` |
+| `GET` | `/v1/me` | Authenticated user profile | Yes | `200` |
 | `POST` | `/v1/sync` | Batch of offline operations | Yes (reuses ids) | `202` · `207` |
 | `POST` | `/v1/auth/login` | Login (Supabase JWT) | No | `200` · `401` |
+| `POST` | `/v1/auth/refresh` | Refresh token | No | `200` · `401` |
+| `GET` | `/v1/cooperativas` | List cooperatives (admin) | Yes | `200` · `403` |
 | `POST` | `/v1/auth/refresh` | Refresh token | No | `200` · `401` |
 | `GET` | `/v1/cooperatives` | List cooperatives (admin) | Yes | `200` · `403` |
 
 **Applied rules:**
 - Resources in plural (`/lots`, `/events`); nesting only for real hierarchies (`/lots/{id}/events`).
 - Transitions and payments are **actions** → `POST`, not a `PUT` on state; `Idempotency-Key` is used so an offline retry doesn't duplicate the event.
-- No `DELETE` in traceability: physically it's "cancelled" via the `REJECTED` state (history is kept).
+- No `DELETE` in traceability: physically it's "cancelled" via the `RECHAZADO` state (history is kept).
 - URL versioning (`/v1/`): field phones don't update the same day; the old API version must keep working.
 - Cursor pagination (`?cursor=..&limit=..`) instead of `OFFSET` (avoids slow scans on large tables).
 - 2xx codes with correct semantics: `200` (read), `201` (created), `202` (async on-chain payment), `207` (multi-status in sync).
@@ -647,12 +752,12 @@ sequenceDiagram
     participant DB as Supabase (Postgres)
     participant SC as CoffeePayments (Polygon)
 
-    P->>API: POST /v1/lots/{id}/events (CHERRY→PARCHMENT)
+    P->>API: POST /v1/lots/{id}/events (CEREZA→PERGAMINO)
     API->>DB: Validate JWT + current lot state
-    DB-->>API: state OK (CHERRY)
+    DB-->>API: state OK (CEREZA)
     alt Transition allowed
         API->>DB: INSERT lot_events (append-only)
-        API->>DB: UPDATE lots (state → PARCHMENT)
+        API->>DB: UPDATE lots (state → PERGAMINO)
         API-->>P: 201 Created
     else Invalid transition
         API-->>P: 409 State not allowed
@@ -688,43 +793,59 @@ sequenceDiagram
 
 ```
 ┌───────────────────────────────────────────────┐
-│ Screens (expo-router)                          │
-│   - index: list of lots (with current state)   │
-│   - register: harvest/event capture            │
-│   - detail: lot history                        │
-│   - qr: scan / verify                          │
+│ Screens (expo-router, 4 tabs + stacks)        │
+│   Harvest (tab): lots/ (list) + stack         │
+│   Dashboard (tab): My Farm (bento grid)       │
+│   Traceability (tab): my lots history         │
+│     (the public scanner lives in verify/)     │
+│   Market (tab): offers + market/[lotId]       │
+│   Settings (tab): profile, sync, session      │
+│   PUBLIC group verify/: index (scanner)       │
+│     + [code] (Coffee Passport, no auth)       │
 ├───────────────────────────────────────────────┤
-│ UI State (Zustand / Jotai)                     │
-│   - lotStore (cached current lot state)        │
-│   - syncStore (counter, pending, errors)       │
+│ UI State (Zustand / Jotai)                    │
+│   - lotStore (cached current lot state)       │
+│   - syncStore (counter, pending, errors)      │
+│   - offlineStore (cached reads + alert)       │
 ├───────────────────────────────────────────────┤
-│ Local repository (SQLite)                      │
-│   - reads ALWAYS from local storage            │
-│   - pending operations queue (sync_queue)      │
+│ Local repository (SQLite)                     │
+│   - reads ALWAYS from local (cache)           │
+│   - pending operations queue (sync_queue)     │
 ├───────────────────────────────────────────────┤
-│ Network client (HTTP to FastAPI)               │
-│   - sends operations online or in batch        │
-│   - authenticates with Supabase JWT            │
+│ Network client (HTTP to FastAPI)              │
+│   - sends operations online or in batch       │
+│   - authenticates with Supabase JWT           │
 └───────────────────────────────────────────────┘
 ```
 
 ### 7.3 Navigation and screen flow
 
 - **Native navigation** (expo-router with native stack/tabs) per the Vercel skill (avoid JS navigators for performance and platform behavior).
-- App routes: Home → Lot detail → Event registration → QR. QR verification is public (no login).
+- **4 authenticated tabs**: **Harvest** (registration + detail), **Dashboard My Farm** (bento summary), **Market** (offers/projection), **Settings** (profile and sync).
+- **Per-tab stack**:
+  - `lots/` (list) → `lots/new` (**3-step wizard**: 1) variety + method → 2) weight → 3) photo evidence) → `lots/[id]` (detail with **per-stage hash timeline**).
+  - `market/` → `market/[lotId]` (**Fair Trade Panel**: donut 97/3 + tip).
+- **PUBLIC group `verify/` outside auth**: `verify/` (scanner) → `verify/[code]` (Coffee Passport). The end consumer does not log in.
+- **Dashboard My Farm** (tab): **bento** layout with cards (active lots, balance, decorative Status of the Day) + **persistent offline alert** when no connection + **FAB** floating button that leads to the `lots/new` wizard.
 
 ```mermaid
 flowchart LR
-    A[Login] --> B[Home: lot list]
-    B --> C[Register CHERRY harvest]
-    B --> D[Lot detail]
-    D --> E[Event history]
-    D --> F[Generate QR]
-    D --> G[Register event/transition]
-    C --> B
-    F --> H[Public QR verification]
-    G --> D
+    subgraph AUTH["🔐 Authenticated (4 tabs)"]
+        T1[Harvest] --> W[New lot wizard<br/>1 variety+method → 2 weight → 3 evidence]
+        T1 --> D[Lot detail [id]<br/>per-stage hash timeline]
+        T2[Dashboard My Farm<br/>bento + offline alert + FAB]
+        T3[Market] --> P[Fair Trade Panel<br/>donut 97/3 + tip]
+        T4[Settings]
+    end
+    subgraph PUB["🌐 Public (no auth)"]
+        S[verify/ scanner] --> PAS[verify/[code]<br/>Coffee Passport]
+    end
+    Login --> AUTH
+    T1 --> Login
+    S --> PAS
 ```
+
+**"Copa de cata" palette** (visual identity): espresso `#3A1D0C` (backgrounds/strong accents), cream `#8A5A00` (CTAs and accents), cherry `#8A2E3D` (alerts and highlights), surface `#F7EBDD` (light backgrounds and cards).
 
 ### 7.4 Performance and field experience (official skills)
 
@@ -786,18 +907,73 @@ sequenceDiagram
 
 ---
 
-## 8. Certificate of Origin (public QR)
+## 8. Coffee Passport (public QR verification)
 
-> This whole system converges on a single artifact for the consumer: the **Certificate of Origin** issued via a QR code. "Verifying the coffee" means confirming that the declared origin and processes really happened.
+> This whole system converges on a single artifact for the consumer: the **Coffee Passport** (evolution of the Certificate of Origin) issued via a QR code. "Verifying the coffee" means confirming that the declared origin and processes really happened.
 
-- The QR encodes the lot's `code` + `sha256_hash` (it doesn't expose the full history in the QR itself; the API supplies that on validation).
-- The certificate shows: producer, farm (municipality + altitude), harvest date, process history (CHERRY → PARCHMENT → GREEN → ROASTED), and current stage.
+- The QR encodes the lot's `code` + `sha256_hash` root (it doesn't expose the full history in the QR itself; the API supplies that on validation).
+- The passport displays **rich traceability data**: producer, farm (municipality + altitude), **variety**, **processing method**, harvest date, **final humidity**, **SCA score**, current state and process history as a **per-stage hash timeline** (CEREZA → PERGAMINO → ORO → TOSTADO, including sub-stages).
 - On scan → `GET /v1/verify/{code}` (no authentication).
 - Responses:
-  - **Valid**: the Certificate of Origin with lot data + rendered event history.
+  - **Valid**: the Coffee Passport with lot data + event timeline with its `stage_hash`.
   - **Not found** → HTTP 404.
   - **Invalid/tampered** → HTTP 409.
-- The `sha256_hash` allows platform-independent verification and, optionally, an on-chain record (storing the hash inside the contract, see §9).
+- **Integrity is cut at `issued_at`**: events after the certificate was issued **do not** form part of the canonical verified hash (the passport is a snapshot of the lot at issuance). The per-stage hash also enables on-chain anchoring (§9, ADR-11).
+
+### Verification flow (sequence diagram)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Consumer (mobile/camera)
+    participant API as Backend FastAPI
+    participant DB as Supabase
+
+    C->>C: Scans QR (code + hash in the code)
+    C->>API: GET /v1/verify/{code} (no auth)
+    API->>DB: SELECT qr_certificate WHERE code=?
+    alt Not found
+        API-->>C: 404 Code not found
+    end
+    API->>DB: SELECT lots + lot_events (timeline, up to issued_at)
+    API->>API: Recalculates per-stage hash chain from real history
+    alt hash matches certificate root
+        API->>DB: INSERT verification (audit query)
+        API-->>C: 200 Coffee Passport (variety, method, altitude, humidity, SCA, timeline with per-stage hash)
+    else hash doesn't match (tampered)
+        API-->>C: 409 Invalid / tampered passport
+    end
+```
+
+### Mobile scan → Coffee Passport (public group, no auth)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Con as Consumer
+    participant App as RN App (PUBLIC group verify/)
+    participant API as Backend FastAPI
+    participant DB as Supabase
+
+    Con->>App: Opens verify/ (no login)
+    App->>App: Camera scans QR (code + hash)
+    App->>API: GET /v1/verify/{code}
+    API->>DB: SELECT qr_certificate WHERE code=?
+    alt Not found
+        API-->>App: 404
+        App-->>Con: "Code not found"
+    else Exists
+        API->>DB: SELECT lots + lot_events (up to issued_at)
+        API->>API: Recalculates per-stage hash chain
+        alt root matches
+            API-->>App: 200 Coffee Passport (variety, method, altitude, humidity, SCA, timeline)
+            App-->>Con: Renders passport with per-stage hash
+        else root differs (tampered)
+            API-->>App: 409
+            App-->>Con: Tampered passport alert
+        end
+    end
+```
 
 ---
 
@@ -806,10 +982,19 @@ sequenceDiagram
 ### Responsibility of the `CoffeePayments.sol` Smart Contract
 
 Sole responsibility: payment and transaction immutability (*single responsibility*).
-- Receives the sale (`lot_id`, `producer`, `quantity` → `weight_kg` from the `SALE` event, `price` → `total_amount`) **signed by the backend**.
+- Receives the sale (`lot_id`, `producer`, `quantity` → `weight_kg` from the `VENTA` event, `price` → `total_amount`) **signed by the backend**.
 - Withholds the **3% commission** to the cooperative's treasury.
 - Automatically sends **97%** to the producer's wallet (*pull-over-push* pattern).
 - Emits on-chain events (`PaymentPaid(lotId, producerAddr, amount)`) for auditing.
+- Also records **tips to the producer** (ADR-10): buyer → producer, 100% direct, idempotent, issued after the sale.
+
+### Fair Trade Panel (read-only projection)
+
+The **Fair Trade Panel** is a read-only view of the lot's payment breakdown: **97% to the producer, 3% to the cooperative's operation**. It is rendered from the backend (`GET /v1/payments`, `GET /v1/payments/saldo`) and optionally supplemented with **tips** (`POST /v1/tips`, `GET /v1/tips`). The panel never writes directly to the contract; all mutations go through the backend (ADR-9).
+
+### Per-stage hash anchoring (ADR-11)
+
+Instead of anchoring a single hash per lot, the backend can call `anchorHash(lotId, stageRootHash)` for each stage (or in batch). The root of the per-stage hash chain is stored in the `HashAnchored` event, allowing auditors to verify the lot's history at any point. This is optional and does not block offline verification (see §8).
 
 ### Best practices from the Solidity skill
 
@@ -859,12 +1044,14 @@ Roles are modeled in the **`USERS.role`** table (`producer | cooperative | buyer
 |---|---|---|---|
 | **producer** | Their farms and lots | Events on their lots | Yes |
 | **cooperative** | All lots from their farms | Manage lots, producers, payments | Yes |
-| **buyer** | Verifiable lots (public QR) | — | Yes |
+| **buyer** | Verifiable lots (public QR), Fair Trade Panel, tips | Tips (`POST /v1/tips`) | Yes |
 | **consumer** | Only public QR `/verify` | — | No |
 | **admin** | Everything | Configuration, cooperatives | Yes |
 
 - **Authentication**: Supabase Auth (email/password, or *magic link* for producers without email). Supabase's `auth.uid()` **is** `USERS.id` (same UUID linked at registration).
-- **Authorization**: PostgreSQL RLS — policies resolve the role from `USERS` and restrict by ownership (`PRODUCER` of the farm, `COOPERATIVE` of the farm) **without trusting client-supplied IDs**; additionally the `get_current_user` dependency in FastAPI enforces the same check at the API level.
+- **Authorization**: PostgreSQL RLS — policies resolve the role from `USERS` and restrict by ownership (`PRODUCER` of the farm, `COOPERATIVE` of the farm, `BUYER` of the tip) **without trusting client-supplied IDs**; additionally the `get_current_user` dependency in FastAPI enforces the same check at the API level.
+- **TIP table** has its own RLS policy: the producer sees what reaches their farm, the buyer sees what they gave, admin sees everything.
+- **Tenant isolation** ALWAYS filters by `auth.uid()` (the JWT's `user.id`), never by a query parameter. Today the Supabase repos use the service key (RLS is inert — TODO B11 in `dependencies.py`), but the documented policy must be correct.
 
 ---
 
@@ -876,8 +1063,54 @@ Roles are modeled in the **`USERS.role`** table (`producer | cooperative | buyer
 4. **QR with hash (no fragile state in the DB)**: fast and verifiable for the consumer.
 5. **Contract separated from the backend**: payment immutability and independent auditability.
 6. **`USERS` as the central identity table**: credentials and wallet live in `USERS`; `PRODUCER`/`COOPERATIVE`/`BUYER` only add the business role (RLS anchors to `USERS`, not to the specific entity).
+7. **Web3 paused in MVP** (B7): the `CoffeePayments.sol` contract is specified in `docs/06-contratos.md` but not implemented in this milestone; the MVP uses `FakeGatewayPagos`. Avoids debt: the interface and idempotency (`idempotency_key UNIQUE`) are already resolved.
+8. **Money as `real`/`float` with CHECK** per ERD; migrating to `NUMERIC`/`Decimal` is a documented future improvement (does not block MVP).
 
-Each decision is documented in `docs/adr/README.md` with the template: Title · Context · Decision · Consequences.
+Each decision is documented in this same section (ADR 1–8) with template: Title · Context · Decision · Consequences.
+
+Below, ADRs 9–14 in the standard format **Context → Decision → Options Considered → Consequences** (consistent with ADRs 1–8):
+
+### ADR-9 — Market as a read-only projection
+
+- **Context:** the app and passport need to show offers/fair trade of the coffee; writing that view from the mobile would break the source of truth and tenant isolation.
+- **Decision:** the market is a **read-only projection** materialized by the backend (from `LOT`, `PAYMENT`, `TIP`); there is no `POST /market`.
+- **Options considered:** (a) direct write from mobile to market — rejected: breaks RLS; (b) materialized SQL view with refresh — rejected: complexity in MVP; (c) **projection calculated in the service** — chosen.
+- **Consequences:** offer and Fair Trade Panel views are always consistent; no role writes the market; minimal latency since it's a simple calculation.
+
+### ADR-10 — Tip to the producer (100% direct, idempotent, bivalent)
+
+- **Context:** the buyer wants to recognize the producer's work beyond the sale; the 3% sale commission must not apply to the tip.
+- **Decision:** `TIP` table with `idempotency_key UNIQUE`; the amount goes **100%** to the producer; `tip_status` (`REGISTERED → PENDING → CONFIRMED`) is **bivalent off-chain/on-chain** (same as `PAYMENT`).
+- **Options considered:** (a) tip inside `PAYMENT` — rejected: mixes commission; (b) tip only on-chain — rejected: web3 paused (B7); (c) **dedicated bivalent table** — chosen.
+- **Consequences:** the producer receives 100%; idempotency prevents double sends; when web3 resumes, the tip settles with the same signing mechanism.
+
+### ADR-11 — Per-stage hash (linear chain + on-chain root anchor)
+
+- **Context:** the passport shows the full history; a single hash does not prove that *each stage* was not tampered with.
+- **Decision:** each `LOT_EVENTS` carries a `stage_hash` in a **linear chain** (`hash_i = HASH(hash_{i-1} ‖ data)` ordered by `registered_at, id`); the root is `QR_CERTIFICATE.sha256_hash`, verifiable with the QR and anchorable on-chain **reusing `anchorHash()`**.
+- **Options considered:** (a) single lot hash — rejected: doesn't isolate the tampered stage; (b) Merkle tree — rejected for MVP complexity; (c) **linear chain** — chosen for simplicity and sufficient for the use case.
+- **Consequences:** verification cuts at `issued_at`; editing any event breaks the root → 409; per-stage anchoring optional when web3 resumes (B7).
+
+### ADR-12 — Expanded coffee process (full chain with auto-transitions)
+
+- **Context:** the technical memory describes sub-stages (fermentation, washing, drying, resting, grading) that did not exist in the original 4-state machine.
+- **Decision:** the **milestones** `CEREZA → PERGAMINO → ORO → TOSTADO → VENDIDO` (+ `RECHAZADO`) are preserved and sub-stages are recorded as **auto-transitions** (same state) with `EventType` expanded to **11 types** (`COSECHA`, `LIMPIEZA`, `DESPULPADO`, `FERMENTACION`, `LAVADO`, `SECADO`, `REPOSO`, `DESCASCARADO`, `CLASIFICACION`, `TOSTADO`, `VENTA`, `RECHAZADO`). **Additive, not destructive**: old events remain valid.
+- **Options considered:** (a) new states per sub-stage — rejected: inflates the machine and breaks compatibility; (b) auto-transitions — chosen; (c) loose fields on the lot — rejected: loses temporal evidence.
+- **Consequences:** milestones are not skipped; sub-stages are only recorded within their milestone with no strict order; no going back after `TOSTADO`; the full history lives in `lot_events`.
+
+### ADR-13 — Status of the Day decorative (no contract)
+
+- **Context:** the dashboard wants a motivational "Status of the Day"; it has no traceability value or domain logic.
+- **Decision:** it is a **decorative** widget computed on the client from already available data (active lots, last sync, local weather). **It has no endpoint, table, or contract.**
+- **Options considered:** (a) dedicated endpoint — rejected: cost without value; (b) client-side calculation — chosen.
+- **Consequences:** zero error surface; the backend never stores decorative UI (§12).
+
+### ADR-14 — Photographic evidence (Storage, url + sha256, outside the canonical hash)
+
+- **Context:** traceability requires visual backup (field photos of the lot).
+- **Decision:** evidence uploads to **Supabase Storage**; `LOT` stores `evidence_url` + `evidence_sha256`. The evidence **stays outside the canonical per-stage hash**: the hash covers the event's structured data, not binaries.
+- **Options considered:** (a) inside the canonical hash — rejected: makes the hash fragile to re-uploads and heavy; (b) url + sha256 outside the hash — chosen; (c) no evidence — rejected: doesn't meet the technical memory.
+- **Consequences:** the photo is verifiable by its `sha256` (binary integrity) without bloating the chain; the passport can link to it when displaying the lot.
 
 ---
 
@@ -904,6 +1137,12 @@ Each decision is documented in `docs/adr/README.md` with the template: Title · 
 - `lot_events` as **append-only** (no UPDATE/DELETE).
 - Indexes for the most common queries (QR code lookup, per-lot history).
 - RLS per cooperative; the app never sees another cooperative's rows (Supabase best-practices skill).
+- **Read-model / projection**: market and Fair Trade Panel are materialized in the service (read-only) — never written from the mobile (ADR-9).
+- **Per-stage hash**: `lot_events.stage_hash` in linear chain; the root lives in `qr_certificate.sha256_hash` and is recalculated on verification (ADR-11).
+- **Photographic evidence**: `evidence_url` + `evidence_sha256` on `LOT` (Storage); outside the canonical hash (ADR-14).
+
+### Backend (FastAPI / Python)
+- **Do not persist decorative UI**: the Status of the Day is computed on the client; the backend never stores presentation fields (ADR-13).
 
 ### Blockchain (Solidity)
 - 0.8.0+, OpenZeppelin, `ReentrancyGuard`, *pull-over-push*, custom errors.
@@ -924,31 +1163,44 @@ Each decision is documented in `docs/adr/README.md` with the template: Title · 
 | Term | Meaning |
 |---|---|
 | **Lot** | A batch of coffee from the same process/producer that's been registered (unit of traceability) |
-| **State event** | A recorded transition of the lot (CHERRY → PARCHMENT, etc.) |
-| **CHERRY** | Coffee as red fruit at the moment of harvest |
-| **PARCHMENT** | Coffee after pulping and drying |
-| **GREEN** | Hulled green coffee, ready to trade |
-| **ROASTED** | Roasted coffee → enables the QR |
-| **Certificate of Origin** | The QR: digital proof of where and how the lot was produced (farm, producer, altitude, processes) |
-| **Public QR** | Scannable code carrying the Certificate of Origin and verifying traceability |
+| **State event** | A recorded transition of the lot (CEREZA → PERGAMINO, etc.) |
+| **CEREZA** | Coffee as red cherry fruit at the moment of harvest |
+| **PERGAMINO** | Coffee after pulping and drying (parchment) |
+| **ORO** | Hulled green coffee, ready to trade |
+| **TOSTADO** | Roasted coffee → enables the Coffee Passport QR |
+| **VENDIDO** | Sold lot → triggers on-chain payment |
+| **Coffee Passport** | Evolution of the Certificate of Origin: public verification with variety, method, altitude, humidity, SCA and per-stage hash timeline (§8) |
+| **Public QR** | Scannable code carrying the Coffee Passport and verifying traceability |
 | **Smart Contract** | On-chain program that executes the fair payment (3% commission) |
 | **Append-only** | A table where you only insert, never edit (evidence) |
 | **Offline-first** | The app works without internet and syncs afterward |
 | **LWW** | Last-Write-Wins: the most recent change wins sync conflicts |
 | **Aggregate root** | The entity (the Lot) that guarantees consistency over its history |
+| **Variety** | Coffee cultivar (e.g. Bourbon, Caturra, Gesha, Typica) registered on the lot |
+| **Wet processing** | Process with water: pulping + fermentation + washing (produces washed coffee) |
+| **Dry processing** | Process without water: the whole fruit is dried and hulled later (natural coffee) |
+| **Washed** | Wet method: mucilage is removed with water after fermentation |
+| **Natural** | Dry method: the whole fruit is dried with the bean inside (fruity notes) |
+| **Honey** | Intermediate method: pulped but mucilage is dried stuck to the bean (semi-washed with honey) |
+| **Fermentation** | Sub-stage (PERGAMINO) that develops flavor; method and hours are recorded |
+| **Humidity %MC** | Bean moisture content in %; optimal export ~10–12% |
+| **SCA score** | Cupping score 0–100 from the *Specialty Coffee Association*; ≥80 = specialty coffee |
+| **Resting** | Sub-stage (PERGAMINO) of bean rest (days) before hulling |
+| **Tip** | Voluntary buyer-to-producer payment, 100% direct, idempotent and bivalent (ADR-10) |
+| **Auto-transition** | Event that doesn't change state (e.g. CEREZA → CEREZA): records sub-stages without moving the milestone |
 
 ---
 
 ## 14. Proposed development flow (small team)
 
-1. **Domain**: define and document the state machine + rules → `docs/01-coffee-domain.md` (Issue 1).
-2. **Data model**: ERD + initial migration → `docs/02-data-model.md` + `db/migrations/` (Issue 2).
-3. **API contract**: routes + Pydantic schemas + flow → `docs/03-api-contract.md` (Issue 3).
-4. **Mobile UI**: wireframes + navigation tree → `docs/04-ui-flow.md` (Issue 4).
-5. **Offline sync**: full design → `docs/05-offline-sync.md` (Issue 5).
-6. **Backend**: set up `Backend/` (FastAPI) starting with the core (state machine + public QR).
-7. **Mobile**: `mobile/` with Expo (registration + working QR).
-8. **Contracts**: `CoffeePayments.sol` + tests + testnet deploy.
+1. **Domain**: define and document the state machine (milestones + auto-transitions) + rules → §4 (consolidated; Issue 1).
+2. **Data model**: ERD + initial migration (includes `TIP` and per-stage columns) → §5 + `db/migrations/` (Issue 2).
+3. **API contract**: routes + Pydantic schemas + flow → §6–§8 + `docs/06-contratos.md` (Issue 3).
+4. **Mobile UI**: wireframes + navigation tree (4 tabs + public `verify/` group) → `mobile/` (Issue 4).
+5. **Offline sync**: full design → §7.5 (Issue 5).
+6. **Backend**: set up `Backend/` (FastAPI) starting with the core (state machine + per-stage hash + public Coffee Passport).
+7. **Mobile**: `mobile/` with Expo — steps: **My Farm dashboard** (bento + offline alert + FAB) → **3-step wizard** (`lots/new`) → **scanner/passport** (`verify/` + `verify/[code]`) → **fair trade** (`market/[lotId]` with donut 97/3 + tip).
+8. **Contracts**: `CoffeePayments.sol` + tests + testnet deploy (per-stage `anchorHash` anchoring).
 
 Each member works on their own feature branch; `docs/ARCHITECTURE.md` (or this English translation) is the single source of truth for the design.
 

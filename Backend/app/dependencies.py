@@ -29,6 +29,7 @@ from app.repositories.in_memory import (
     InMemoryFincaRepo,
     InMemoryLoteRepo,
     InMemoryPagoRepo,
+    InMemoryPropinaRepo,
     InMemoryQRRepo,
     InMemoryUsuarioRepo,
     Memoria,
@@ -38,6 +39,7 @@ from app.repositories.interfaces import (
     RepositorioFinca,
     RepositorioLote,
     RepositorioPago,
+    RepositorioPropina,
     RepositorioQR,
     RepositorioUsuario,
 )
@@ -45,12 +47,14 @@ from app.repositories.supabase import (
     SupabaseFincaRepo,
     SupabaseLoteRepo,
     SupabasePagoRepo,
+    SupabasePropinaRepo,
     SupabaseQRRepo,
     SupabaseUsuarioRepo,
 )
 from app.schemas.auth import CurrentUser
 from app.services.lote_service import LoteService
 from app.services.pagos_service import PagoService
+from app.services.propina_service import PropinaService
 from app.services.qr_service import QrService
 
 _bearer = HTTPBearer(auto_error=False)
@@ -168,6 +172,12 @@ def get_repo_pago(settings: SettingsDep) -> RepositorioPago:
     return InMemoryPagoRepo(_memoria())
 
 
+def get_repo_propina(settings: SettingsDep) -> RepositorioPropina:
+    if settings.repo_backend == "supabase":
+        return SupabasePropinaRepo(_cliente_supabase(settings))
+    return InMemoryPropinaRepo(_memoria())
+
+
 def get_repo_finca(settings: SettingsDep) -> RepositorioFinca:
     if settings.repo_backend == "supabase":
         return SupabaseFincaRepo(_cliente_supabase(settings))
@@ -187,6 +197,7 @@ def get_gateway_pagos() -> GatewayPagos:
 RepoLoteDep = Annotated[RepositorioLote, Depends(get_repo_lote)]
 RepoQRDep = Annotated[RepositorioQR, Depends(get_repo_qr)]
 RepoPagoDep = Annotated[RepositorioPago, Depends(get_repo_pago)]
+RepoPropinaDep = Annotated[RepositorioPropina, Depends(get_repo_propina)]
 RepoFincaDep = Annotated[RepositorioFinca, Depends(get_repo_finca)]
 RepoUsuarioDep = Annotated[RepositorioUsuario, Depends(get_repo_usuario)]
 
@@ -304,5 +315,22 @@ def get_pagos_service(
     )
 
 
+def get_propina_service(
+    repo_propina: RepoPropinaDep,
+    repo_lote: RepoLoteDep,
+    repo_finca: RepoFincaDep,
+    repo_usuario: RepoUsuarioDep,
+    gateway: Annotated[GatewayPagos, Depends(get_gateway_pagos)],
+) -> PropinaService:
+    return PropinaService(
+        repo_propina=repo_propina,
+        repo_lote=repo_lote,
+        repo_finca=repo_finca,
+        repo_usuario=repo_usuario,
+        gateway=gateway,
+    )
+
+
 LoteServiceDep = Annotated[LoteService, Depends(get_lote_service)]
 PagoServiceDep = Annotated[PagoService, Depends(get_pagos_service)]
+PropinaServiceDep = Annotated[PropinaService, Depends(get_propina_service)]
