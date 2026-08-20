@@ -16,7 +16,8 @@ directas del comprador al productor).
 - `Backend/` — FastAPI (Python ≥3.12), capas: endpoints → services → repositories (interfaz + in_memory + supabase). BD Supabase/PostgreSQL, migraciones en `Backend/db/`.
 - `mobile/` — React Native / Expo Router (pnpm). Tokens de diseño "Copa de cata" en `src/theme/tokens.ts`.
 - `docs/` — `ARCHITECTURE.md` (diseño), `06-contratos.md` (web3).
-- `.opencode/agent/login-flow.md` — agente de auth flow (lee este archivo antes de usar el agente).
+- `.opencode/agent/` — agentes del proyecto (cada uno con sus skills a instalar/usar):
+  `login-flow.md` (auth flow), `backend.md`, `mobile.md`, `supabase.md`, `revisar.md`.
 
 No existe `contracts/` (web3 pausado — deuda B7) ni `db/` en la raíz.
 
