@@ -1,6 +1,7 @@
 /** Pasaporte de Café — verificación pública detallada (F03). */
 
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
 import { DonutChart } from '@/src/components/donut-chart';

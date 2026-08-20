@@ -145,6 +145,10 @@ class InMemoryUsuarioRepo:
                 return usuario
         return None
 
+    def guardar(self, usuario: Usuario) -> Usuario:
+        self._memoria.usuarios[usuario.id] = usuario
+        return usuario
+
     def listar_cooperativas(self) -> list[Cooperativa]:
         return [
             Cooperativa(id=usuario.id, nombre=usuario.nombre)

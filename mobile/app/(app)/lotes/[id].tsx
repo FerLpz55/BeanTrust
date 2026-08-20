@@ -1,6 +1,7 @@
 /** Detalle de Lote — placeholder (F05). */
 
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
@@ -33,8 +34,12 @@ export default function LoteDetailScreen() {
         <View style={styles.header}>
           <IconSymbol size={32} name="local_cafe" color={primary} />
           <View style={styles.headerText}>
-            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>{lote.codigo}</Text>
-            <Text style={[typeScale.headlineMedium, { color: onSurface }]}>{lote.variedad}</Text>
+            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]} numberOfLines={1} ellipsizeMode="tail">
+              {lote.codigo}
+            </Text>
+            <Text style={[typeScale.headlineMedium, { color: onSurface }]} numberOfLines={1} ellipsizeMode="tail">
+              {lote.variedad}
+            </Text>
           </View>
         </View>
 
@@ -56,7 +61,13 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.row}>
       <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>{label}</Text>
-      <Text style={[typeScale.bodyMedium, { color: onSurface }]}>{value}</Text>
+      <Text
+        style={[typeScale.bodyMedium, styles.rowValue, { color: onSurface }]}
+        numberOfLines={1}
+        ellipsizeMode="middle"
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -81,6 +92,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   headerText: {
+    flex: 1,
     gap: spacing.xs,
   },
   card: {
@@ -91,5 +103,10 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  rowValue: {
+    flexShrink: 1,
+    textAlign: 'right',
   },
 });

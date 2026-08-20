@@ -21,14 +21,9 @@ interface SyncState {
   setOnline: (online: boolean) => void;
 }
 
-const INITIAL_PENDING: PendingItem[] = [
-  {
-    id: 'lote-402',
-    codigo: 'Lote #402',
-    tipo: 'lote',
-    creadoEn: '2026-08-19T14:22:00Z',
-  },
-];
+// Sin pendientes por defecto: la sincronización offline real aún no está
+// conectada (§ mocks), así que no simulamos un lote pendiente aquí.
+const INITIAL_PENDING: PendingItem[] = [];
 
 export const useSyncStore = create<SyncState>((set) => ({
   pendingCount: INITIAL_PENDING.length,

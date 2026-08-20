@@ -1,6 +1,7 @@
 /** Ajustes — Perfil, tema y logout (placeholder F06). */
 
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
@@ -42,9 +43,13 @@ export default function AjustesScreen() {
           <View style={styles.avatar}>
             <IconSymbol size={32} name="person" color={onSurfaceVariant} />
           </View>
-          <View>
-            <Text style={[typeScale.titleLarge, { color: onSurface }]}>Productor</Text>
-            <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
+          <View style={styles.profileText}>
+            <Text style={[typeScale.titleLarge, { color: onSurface }]} numberOfLines={1}>Productor</Text>
+            <Text
+              style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
               {email ?? 'Sin sesión'}
             </Text>
           </View>
@@ -119,6 +124,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.05)',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+  },
+  profileText: {
+    flex: 1,
   },
   section: {
     gap: spacing.sm,

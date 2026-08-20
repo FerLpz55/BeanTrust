@@ -19,6 +19,9 @@ import { PrimaryButton } from '@/src/components/primary-button';
 import { TextField } from '@/src/components/text-field';
 import { TextLink } from '@/src/components/text-link';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
+import { useAuthStore } from '@/src/store/auth';
+import { login } from '@/src/api/auth';
+import { ApiError } from '@/src/api/client';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 
 const MIN_PASSWORD = 8;
@@ -60,7 +63,7 @@ export default function LoginScreen() {
     }
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (phase === 'loading') return;
     const emailError = validateEmail(email);
     const passwordError = validatePassword(password);
@@ -73,11 +76,22 @@ export default function LoginScreen() {
       return;
     }
 
-    // Demostración: el acceso real llega en el módulo de auth.
     setPhase('loading');
-    setTimeout(() => {
-      router.replace({ pathname: '/', params: { email: email.trim(), demo: '1' } });
-    }, 900);
+    try {
+      const ok = await useAuthStore.getState().login(email.trim(), password);
+      // auth store sets status='authenticated' → AppLayout redirects to tabs
+      if (!ok) {
+        const msg = useAuthStore.getState().error ?? 'No se pudo iniciar sesión.';
+        setSubmitError(msg);
+        announce(msg);
+      }
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : 'No se pudo iniciar sesión.';
+      setSubmitError(msg);
+      announce(msg);
+    } finally {
+      setPhase('idle');
+    }
   }
 
   return (

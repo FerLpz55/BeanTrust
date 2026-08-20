@@ -1,6 +1,7 @@
 /** Escáner QR mock (F03) — público, sin auth. */
 
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';

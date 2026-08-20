@@ -47,18 +47,6 @@ const MOCK_LOTES: Lote[] = [
     certificado: true,
   },
   {
-    id: 'lote-402',
-    codigo: 'Lote #402',
-    variedad: 'Caturra',
-    metodo: 'Natural',
-    evidencia: [],
-    hash_etapa: '0x9b2c...a1f4',
-    estado: 'CEREZA',
-    peso_actual_kg: 85.0,
-    fecha_cosecha: '2026-08-15T10:30:00Z',
-    certificado: false,
-  },
-  {
     id: 'lote-403',
     codigo: 'Lote #403',
     variedad: 'Typica',

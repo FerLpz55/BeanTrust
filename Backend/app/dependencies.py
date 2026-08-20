@@ -105,6 +105,13 @@ def _construir_memoria() -> Memoria:
             "Comercializadora de Altura",
             hasher.hash("Comp123!"),
         ),
+        Usuario(
+            uuid.uuid4(),
+            "fernando@test.com",
+            Rol.PRODUCTOR,
+            "Fernando Test",
+            hasher.hash("fernando"),
+        ),
     ]
     for usuario in usuarios:
         memoria.usuarios[usuario.id] = usuario

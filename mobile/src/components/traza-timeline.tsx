@@ -18,8 +18,16 @@ export function TrazaTimeline({ events }: { events: TrazaEvent[] }) {
     <View style={styles.root}>
       {events.map((e, i) => (
         <View key={i} style={styles.row}>
-          <Text style={[typeScale.bodyMedium, { color: onSurface }]}>{e.etapa}</Text>
-          <Text style={[typeScale.dataMono, { color: onSurfaceVariant }]}>{e.hash.slice(0, 8)}...</Text>
+          <Text
+            style={[typeScale.bodyMedium, styles.etapa, { color: onSurface }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {e.etapa}
+          </Text>
+          <Text style={[typeScale.dataMono, styles.hash, { color: onSurfaceVariant }]}>
+            {e.hash.slice(0, 8)}...
+          </Text>
         </View>
       ))}
     </View>
@@ -33,5 +41,12 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  etapa: {
+    flex: 1,
+  },
+  hash: {
+    flexShrink: 0,
   },
 });

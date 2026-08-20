@@ -1,17 +1,27 @@
-/** Dashboard Mi Finca — bento grid (F01). */
+/** Dashboard Mi Finca — fila de estadísticas + lotes recientes (F01). */
 
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
-import { FAB } from '@/src/components/fab';
-import { MetricCard } from '@/src/components/metric-card';
+import { CherryIcon, ScaleIcon, SealIcon, StallIcon } from '@/src/components/icons/stat-icons';
 import { OfflineBanner } from '@/src/components/offline-banner';
+import { PrimaryButton } from '@/src/components/primary-button';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
-import { useLotesStore } from '@/src/store/lotes';
+import { useLotesStore, type LoteEstado } from '@/src/store/lotes';
 import { useSyncStore } from '@/src/store/sync';
-import { spacing, typeScale } from '@/src/theme/tokens';
+import { radii, spacing, typeScale } from '@/src/theme/tokens';
 import { router, type Href } from 'expo-router';
+
+function formatFechaRelativa(iso: string): string {
+  const dias = Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
+  if (dias <= 0) return 'Hoy';
+  if (dias === 1) return 'Ayer';
+  if (dias < 30) return `Hace ${dias} días`;
+  return new Date(iso).toLocaleDateString('es-ES');
+}
 
 export default function DashboardScreen() {
   const { lotes, isLoading } = useLotesStore();
@@ -23,15 +33,69 @@ export default function DashboardScreen() {
   const primaryContainer = useThemeColor('primaryContainer');
   const onPrimaryContainer = useThemeColor('onPrimaryContainer');
   const surfaceContainerLow = useThemeColor('surfaceContainerLow');
+  const surfaceContainerLowest = useThemeColor('surfaceContainerLowest');
+  const outlineVariant = useThemeColor('outlineVariant');
+  const secondary = useThemeColor('secondary');
   const tertiary = useThemeColor('tertiary');
-  const tertiaryContainer = useThemeColor('tertiaryContainer');
-  const onTertiaryContainer = useThemeColor('onTertiaryContainer');
+  const error = useThemeColor('error');
+
+  const colorPorEstado = (estado: LoteEstado): string => {
+    switch (estado) {
+      case 'CEREZA':
+        return tertiary;
+      case 'PERGAMINO':
+      case 'ORO':
+        return secondary;
+      case 'TOSTADO':
+        return primary;
+      case 'RECHAZADO':
+        return error;
+      case 'VENDIDO':
+      default:
+        return onSurfaceVariant;
+    }
+  };
 
   // Métricas calculadas
-  const totalLotes = lotes.length;
   const lotesActivos = lotes.filter(l => l.estado !== 'VENDIDO' && l.estado !== 'RECHAZADO').length;
   const pesoTotalKg = lotes.reduce((sum, l) => sum + l.peso_actual_kg, 0);
   const certificados = lotes.filter(l => l.certificado).length;
+  const enMercado = lotes.filter(l => l.estado === 'TOSTADO').length;
+
+  const stats = [
+    {
+      key: 'activos',
+      Icon: CherryIcon,
+      color: primary,
+      value: String(lotesActivos),
+      label: 'LOTES ACTIVOS',
+      onPress: () => router.push('/trazabilidad' as Href),
+    },
+    {
+      key: 'peso',
+      Icon: ScaleIcon,
+      color: tertiary,
+      value: `${pesoTotalKg.toFixed(1)} kg`,
+      label: 'PESO TOTAL',
+      onPress: () => router.push('/trazabilidad' as Href),
+    },
+    {
+      key: 'certificados',
+      Icon: SealIcon,
+      color: primary,
+      value: String(certificados),
+      label: 'CERTIFICADOS',
+      onPress: () => router.push('/mercado' as Href),
+    },
+    {
+      key: 'mercado',
+      Icon: StallIcon,
+      color: tertiary,
+      value: String(enMercado),
+      label: 'EN MERCADO',
+      onPress: () => router.push('/mercado' as Href),
+    },
+  ] as const;
 
   if (isLoading) {
     return (
@@ -47,68 +111,85 @@ export default function DashboardScreen() {
     <SafeAreaView style={styles.root}>
       <OfflineBanner pendingCount={pendingCount} onRetry={() => {}} />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <BrandMark size={40} />
-            <View style={styles.headerText}>
-              <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>MI FINCA</Text>
-              <Text style={[typeScale.headlineMedium, { color: onSurface }]}>Bean Trust</Text>
+          <BrandMark size={40} />
+          <View style={styles.headerText}>
+            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>MI FINCA</Text>
+            <Text style={[typeScale.headlineMedium, { color: onSurface }]}>Bean Trust</Text>
+            <View
+              style={[
+                styles.syncBadge,
+                { backgroundColor: pendingCount > 0 ? primaryContainer : surfaceContainerLow },
+              ]}
+            >
+              <View
+                style={[
+                  styles.syncDot,
+                  { backgroundColor: pendingCount > 0 ? primary : onSurfaceVariant },
+                ]}
+              />
+              <Text
+                style={[
+                  typeScale.dataMono,
+                  { color: pendingCount > 0 ? onPrimaryContainer : onSurfaceVariant },
+                ]}
+              >
+                {pendingCount > 0 ? `${pendingCount} pendiente${pendingCount > 1 ? 's' : ''}` : 'Sincronizado'}
+              </Text>
             </View>
-          </View>
-          <View style={styles.headerRight}>
-            <Text style={[typeScale.dataMono, { color: primary, backgroundColor: primaryContainer }, styles.syncBadge]}>
-              {pendingCount > 0 ? `${pendingCount} pendiente${pendingCount > 1 ? 's' : ''}` : 'Sincronizado'}
-            </Text>
           </View>
         </View>
 
-        {/* Bento Grid: 2x2 métricas principales */}
-        <View style={styles.bentoGrid}>
-          <MetricCard
-            iconName="local_cafe"
-            iconColor={primary}
-            label="LOTES ACTIVOS"
-            value={String(lotesActivos)}
-            sublabel={`de ${totalLotes} totales`}
-            onPress={() => router.push('/trazabilidad' as Href)}
-          />
-          <MetricCard
-            iconName="account_balance_wallet"
-            iconColor={tertiary}
-            label="PESO TOTAL"
-            value={`${pesoTotalKg.toFixed(1)} kg`}
-            sublabel="En proceso"
-            onPress={() => router.push('/trazabilidad' as Href)}
-          />
-          <MetricCard
-            iconName="verified_user"
-            iconColor={primary}
-            label="CERTIFICADOS"
-            value={String(certificados)}
-            sublabel="Listos para venta"
-            onPress={() => router.push('/mercado' as Href)}
-          />
-          <MetricCard
-            iconName="storefront"
-            iconColor={tertiary}
-            label="EN MERCADO"
-            value={String(lotes.filter(l => l.estado === 'TOSTADO').length)}
-            sublabel="Esperando comprador"
-            onPress={() => router.push('/mercado' as Href)}
-          />
+        {/* Estadísticas — agrupadas por tema: cosecha (2) y comercio (2) */}
+        <View style={styles.statsGroups}>
+          {[stats.slice(0, 2), stats.slice(2, 4)].map((grupo, i) => (
+            <View key={i} style={styles.statsList}>
+              {grupo.map((stat) => {
+                const Icon = stat.Icon;
+                return (
+                  <Pressable
+                    key={stat.key}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      stat.onPress();
+                    }}
+                    style={({ pressed }) => [
+                      styles.statRow,
+                      { backgroundColor: surfaceContainerLow, opacity: pressed ? 0.9 : 1 },
+                    ]}
+                  >
+                    <View style={[styles.statIconBadge, { backgroundColor: surfaceContainerLowest }]}>
+                      <Icon size={20} color={onSurfaceVariant} />
+                    </View>
+                    <Text
+                      style={[typeScale.labelMedium, styles.statRowLabel, { color: onSurfaceVariant }]}
+                      numberOfLines={1}
+                    >
+                      {stat.label}
+                    </Text>
+                    <Text style={[typeScale.titleLarge, { color: stat.color }]} numberOfLines={1}>
+                      {stat.value}
+                    </Text>
+                    <IconSymbol size={18} name="chevron_right" color={onSurfaceVariant} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          ))}
         </View>
 
         {/* Lotes recientes */}
         <View style={styles.sectionHeader}>
           <Text style={[typeScale.labelLarge, { color: onSurface }]}>LOTES RECIENTES</Text>
-          <Text
-            style={[typeScale.labelMedium, { color: primary }]}
+          <Pressable
+            style={styles.verTodosRow}
             onPress={() => router.push('/trazabilidad' as Href)}
           >
-            Ver todos
-          </Text>
+            <Text style={[typeScale.labelMedium, { color: primary }]}>Ver todos</Text>
+            <IconSymbol size={16} name="chevron_right" color={primary} />
+          </Pressable>
         </View>
 
         {lotes.length === 0 ? (
@@ -124,27 +205,48 @@ export default function DashboardScreen() {
         ) : (
           <View style={styles.lotesList}>
             {lotes.slice(0, 3).map(lote => (
-              <View key={lote.id} style={[styles.loteCard, { backgroundColor: surfaceContainerLow }]}>
+              <Pressable
+                key={lote.id}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  router.push(`/lotes/${lote.id}` as Href);
+                }}
+                style={({ pressed }) => [
+                  styles.loteCard,
+                  { backgroundColor: surfaceContainerLow, opacity: pressed ? 0.9 : 1 },
+                ]}
+              >
+                <View style={[styles.statIconBadge, { backgroundColor: surfaceContainerLowest }]}>
+                  <IconSymbol size={18} name="local_cafe" color={onSurfaceVariant} />
+                </View>
                 <View style={styles.loteCardLeft}>
-                  <Text style={[typeScale.titleMedium, { color: onSurface }]}>{lote.variedad ?? 'Sin variedad'}</Text>
+                  <View style={styles.loteCardTitleRow}>
+                    <View style={[styles.statusDot, { backgroundColor: colorPorEstado(lote.estado) }]} />
+                    <Text
+                      style={[typeScale.titleMedium, styles.loteCardTitle, { color: onSurface }]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {lote.variedad ?? 'Sin variedad'}
+                    </Text>
+                  </View>
                   <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
-                    {new Date(lote.fecha_cosecha).toLocaleDateString('es-ES')}
+                    {formatFechaRelativa(lote.fecha_cosecha)}
                   </Text>
                 </View>
-                <View style={styles.loteCardRight}>
-                  <Text style={[typeScale.dataMono, { color: onSurface }]}>{lote.peso_actual_kg.toFixed(1)} kg</Text>
-                </View>
-              </View>
+                <Text style={[typeScale.dataMono, { color: onSurface }]} numberOfLines={1}>
+                  {lote.peso_actual_kg.toFixed(1)} kg
+                </Text>
+                <IconSymbol size={18} name="chevron_right" color={onSurfaceVariant} />
+              </Pressable>
             ))}
           </View>
         )}
       </ScrollView>
 
-      <FAB
-        iconName="add"
-        onPress={() => router.push('/lotes/nuevo' as Href)}
-        accessibilityLabel="Nueva cosecha"
-      />
+      <View style={[styles.bottomBar, { borderTopColor: outlineVariant }]}>
+        <PrimaryButton label="Nueva cosecha" onPress={() => router.push('/lotes/nuevo' as Href)} />
+      </View>
     </SafeAreaView>
   );
 }
@@ -161,45 +263,78 @@ const styles = StyleSheet.create({
   loadingContent: {
     alignItems: 'center',
   },
+  scroll: {
+    flex: 1,
+  },
   scrollContent: {
     paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xxl + 80, // espacio para FAB
-    gap: spacing.xl,
+    paddingBottom: spacing.lg,
+    gap: spacing.md,
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
   headerText: {
+    flex: 1,
     gap: spacing.xs,
   },
-  headerRight: {
-    alignItems: 'flex-end',
-  },
   syncBadge: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    marginTop: 2,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
     borderRadius: spacing.full,
   },
-  bentoGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  syncDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statsGroups: {
     gap: spacing.md,
-    justifyContent: 'space-between',
+  },
+  statsList: {
+    gap: spacing.sm,
+  },
+  statRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.large,
+    borderCurve: 'continuous',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  statIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statRowLabel: {
+    flex: 1,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: spacing.lg,
+  },
+  verTodosRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   emptyState: {
     alignItems: 'center',
@@ -218,14 +353,38 @@ const styles = StyleSheet.create({
   loteCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.md,
-    borderRadius: 12,
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.large,
+    borderCurve: 'continuous',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 5,
+    elevation: 2,
   },
   loteCardLeft: {
+    flex: 1,
+    gap: 2,
+  },
+  loteCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.xs,
   },
-  loteCardRight: {
-    alignItems: 'flex-end',
+  loteCardTitle: {
+    flex: 1,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  bottomBar: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
 });

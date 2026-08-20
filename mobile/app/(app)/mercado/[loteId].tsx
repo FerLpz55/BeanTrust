@@ -1,6 +1,7 @@
 /** Detalle de venta de lote — placeholder. */
 
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
@@ -35,7 +36,9 @@ export default function MercadoLoteDetailScreen() {
           <IconSymbol size={32} name="storefront" color={tertiary} />
           <View style={styles.headerText}>
             <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>VENTA</Text>
-            <Text style={[typeScale.headlineMedium, { color: onSurface }]}>{lote.variedad}</Text>
+            <Text style={[typeScale.headlineMedium, { color: onSurface }]} numberOfLines={1} ellipsizeMode="tail">
+              {lote.variedad}
+            </Text>
           </View>
         </View>
 
@@ -73,6 +76,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   headerText: {
+    flex: 1,
     gap: spacing.xs,
   },
   card: {

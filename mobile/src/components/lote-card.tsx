@@ -33,10 +33,10 @@ export const LoteCard = React.memo(function LoteCard({ lote, onPressId }: LoteCa
     >
       <View style={styles.row}>
         <View style={styles.left}>
-          <Text style={[typeScale.titleLarge, { color: onSurface }]}>
+          <Text style={[typeScale.titleLarge, { color: onSurface }]} numberOfLines={1} ellipsizeMode="tail">
             {lote.variedad}
           </Text>
-          <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
+          <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]} numberOfLines={1}>
             {lote.metodo} · {new Date(lote.fecha_cosecha).toLocaleDateString('es-ES')}
           </Text>
         </View>
@@ -51,7 +51,11 @@ export const LoteCard = React.memo(function LoteCard({ lote, onPressId }: LoteCa
       </View>
       <View style={styles.footer}>
         <IconSymbol size={14} name="tag" color={onSurfaceVariant} />
-        <Text style={[typeScale.dataMono, { color: onSurfaceVariant }]}>
+        <Text
+          style={[typeScale.dataMono, styles.footerText, { color: onSurfaceVariant }]}
+          numberOfLines={1}
+          ellipsizeMode="middle"
+        >
           {lote.codigo} · {lote.hash_etapa}
         </Text>
       </View>
@@ -90,5 +94,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+  },
+  footerText: {
+    flexShrink: 1,
   },
 });

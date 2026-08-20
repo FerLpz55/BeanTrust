@@ -1,6 +1,7 @@
 /** Mercado — Saldo y lotes listos para venta (placeholder F04). */
 
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/src/components/empty-state';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
@@ -64,9 +65,11 @@ export default function MercadoScreen() {
           <View style={styles.list}>
             {lotesVenta.map((lote) => (
               <View key={lote.id} style={[styles.item, { backgroundColor: tertiaryContainer }]}>
-                <View>
-                  <Text style={[typeScale.titleLarge, { color: onTertiaryContainer }]}>{lote.variedad}</Text>
-                  <Text style={[typeScale.bodySmall, { color: onTertiaryContainer }]}>
+                <View style={styles.itemText}>
+                  <Text style={[typeScale.titleLarge, { color: onTertiaryContainer }]} numberOfLines={1} ellipsizeMode="tail">
+                    {lote.variedad}
+                  </Text>
+                  <Text style={[typeScale.bodySmall, { color: onTertiaryContainer }]} numberOfLines={1}>
                     {lote.metodo} · {lote.peso_actual_kg.toFixed(1)} kg
                   </Text>
                 </View>
@@ -131,5 +134,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: spacing.md,
     borderRadius: 12,
+  },
+  itemText: {
+    flex: 1,
+    marginRight: spacing.sm,
   },
 });

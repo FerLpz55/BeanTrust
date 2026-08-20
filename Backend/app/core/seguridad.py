@@ -26,7 +26,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from pydantic import BaseModel, EmailStr
 
-from app.models.dominio import CredencialesInvalidas, Usuario
+from app.models.dominio import CredencialesInvalidas, Rol, Usuario
 
 if TYPE_CHECKING:
     from app.repositories.interfaces import RepositorioUsuario
@@ -61,6 +61,11 @@ class AuthProvider(ABC):
 
     @abstractmethod
     def verify(self, token: str) -> Claims: ...
+
+    @abstractmethod
+    def register(
+        self, email: str, password: str, nombre: str, rol: Rol
+    ) -> TokenPair: ...
 
 
 class PasswordService:
@@ -107,6 +112,25 @@ class LocalAuthProvider(AuthProvider):
             raise CredencialesInvalidas("Credenciales inválidas.")
         if not self._password_service.verificar(password, usuario.password_hash):
             raise CredencialesInvalidas("Credenciales inválidas.")
+        return self._emitir_par(usuario)
+
+    def register(
+        self, email: str, password: str, nombre: str, rol: Rol
+    ) -> TokenPair:
+        email_norm = email.strip().lower()
+        if self._repo_usuarios.buscar_por_email(email_norm) is not None:
+            raise CredencialesInvalidas("Credenciales inválidas.")
+        if rol == Rol.ADMIN:
+            raise CredencialesInvalidas("Credenciales inválidas.")
+        hasher = self._password_service
+        usuario = Usuario(
+            id=uuid.uuid4(),
+            email=email_norm,
+            rol=rol,
+            nombre=nombre.strip(),
+            password_hash=hasher.hash(password),
+        )
+        self._repo_usuarios.guardar(usuario)
         return self._emitir_par(usuario)
 
     def refresh(self, refresh_token: str) -> TokenPair:
@@ -208,6 +232,32 @@ class SupabaseAuthProvider(AuthProvider):
             access_token=sesion.access_token,
             refresh_token=sesion.refresh_token,
             expires_in=sesion.expires_in,
+        )
+
+    def register(
+        self, email: str, password: str, nombre: str, rol: Rol
+    ) -> TokenPair:
+        from supabase import create_client
+
+        if rol == Rol.ADMIN:
+            raise CredencialesInvalidas("Credenciales inválidas.")
+        try:
+            cliente = create_client(self._url, self._anon_key)
+            sesion = cliente.auth.sign_up(
+                {
+                    "email": email.strip().lower(),
+                    "password": password,
+                    "data": {"nombre": nombre.strip(), "rol": rol.value},
+                }
+            )
+        except Exception as exc:
+            raise CredencialesInvalidas("Credenciales inválidas.") from exc
+        if sesion.session is None:
+            raise CredencialesInvalidas("Credenciales inválidas.")
+        return TokenPair(
+            access_token=sesion.session.access_token,
+            refresh_token=sesion.session.refresh_token,
+            expires_in=sesion.session.expires_in,
         )
 
     def refresh(self, refresh_token: str) -> TokenPair:
