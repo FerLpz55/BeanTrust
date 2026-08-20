@@ -66,14 +66,13 @@ def obtener_saldo(
 router_propinas = APIRouter(
     prefix="/propinas",
     tags=["propinas"],
-    dependencies=[Depends(require_rol(Rol.COMPRADOR))],
 )
 
 
-@router_propinas.post("", status_code=201)
+@router_propinas.post("", status_code=201, dependencies=[Depends(require_rol(Rol.COMPRADOR))])
 def registrar_propina(
     body: PropinaCreate,
-    idempotencia: uuid.UUID,
+    idempotencia: IdempotenciaDep,
     usuario: CurrentUserDep,
     servicio: PropinaServiceDep,
 ) -> PropinaRead:
@@ -93,5 +92,5 @@ def listar_propinas_lote(
     usuario: CurrentUserDep,
     servicio: PropinaServiceDep,
 ) -> list[PropinaListRead]:
-    """Lista propinas de un lote."""
-    return servicio._repo_propina.buscar_por_lote(lote_id)
+    """Lista propinas de un lote (lectura por tenant, ADR-10)."""
+    return servicio.listar_propinas_lote(usuario, lote_id)

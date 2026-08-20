@@ -79,45 +79,44 @@ Modelo de negocio (B2B2C): el productor **no paga**. Pagan las cooperativas (sus
 ```
 BeanTrust/
 ├── docs/
-│   ├── ARCHITECTURE.md        # ← Este documento
-│   ├── 01-dominio-cafe.md      # Máquina de estados (Issue 1)
-│   ├── 02-modelo-datos.md      # ERD + migraciones (Issue 2)
-│   ├── 03-api-contrato.md      # Endpoints + schemas (Issue 3)
-│   ├── 04-ui-flujo.md          # Wireframes + navegación (Issue 4)
-│   ├── 05-offline-sync.md      # Sincronización offline (Issue 5)
-│   └── adr/                    # Decisiones de arquitectura (ADR)
-├── Backend/                     # FastAPI
+│   ├── ARCHITECTURE.md        # ← Este documento (fuente de verdad del diseño)
+│   ├── 06-contratos.md         # Contratos Solidity (diseño; web3 en pausa — B7)
+│   └── (los ADR viven inline en §11 de ARCHITECTURE.md)
+├── Backend/                     # FastAPI (la carpeta va con mayúscula)
 │   ├── app/
-│   │   ├── main.py              # Punto de inicio: instancia FastAPI(), monta routers
-│   │   ├── core/                 # config, seguridad (JWT Supabase), logger
+│   │   ├── main.py              # crear_app() + handler de errores de dominio
+│   │   ├── core/                 # config, seguridad (JWT + argon2), logger
 │   │   ├── api/v1/
-│   │   │   └── endpoints/        # lotes, eventos, verificacion, pagos, propinas, mercado, me, auth, sync (1 router por dominio)
-│   │   ├── models/                # Esquema de datos (SQLAlchemy / Supabase)
-│   │   ├── schemas/               # Pydantic → validación entrada/salida
-│   │   ├── services/              # maquina_estados, qr_service, blockchain_link
-│   │   ├── repositories/          # RepositorioLote (interfaz) + SupabaseLoteRepo (impl.) — ver §4
-│   │   ├── utils/                 # helpers puros sin estado (hashing, formateo, etc.)
-│   │   └── dependencies.py        # Inyección de dependencias compartidas (DB, Auth) — ver §4
-│   ├── tests/
-│   │   ├── unit/
-│   │   └── integration/
+│   │   │   ├── router.py         # Monta TODOS los routers de /v1 (incluye propinas)
+│   │   │   └── endpoints/        # auth, cooperativas, lotes, eventos, verificacion, pagos, sync
+│   │   ├── models/dominio.py     # Reglas de negocio (máquina de estados) — sin I/O
+│   │   ├── schemas/              # Pydantic → validación entrada/salida
+│   │   ├── services/             # lotes, qr, pagos, propinas (casos de uso)
+│   │   ├── repositories/         # Interfaces + in_memory + supabase + gateway pagos
+│   │   ├── utils/                # helpers puros (cursor base64url, hashing)
+│   │   └── dependencies.py       # Inyección de dependencias compartidas (Annotated + Depends)
+│   ├── db/                       # Migraciones SQL + seed (Supabase/PostgreSQL)
+│   ├── tests/                    # unit/ + integration/ (incluye test_contrato_api.py)
 │   └── pyproject.toml
-├── mobile/                     # React Native (Expo Router)
-│   ├── app/                    # Pantallas (registro, lote, QR, sync...)
+├── mobile/                     # React Native (Expo Router) — ver §7
+│   ├── app/                    # Pantallas (login, registro, dashboard, verificar, mercado...)
 │   ├── src/
 │   │   ├── components/         # Componentes UI reutilizables
-│   │   ├── api/                # Cliente HTTP (por módulo)
-│   │   ├── db/                 # SQLite local (expo-sqlite / WatermelonDB)
-│   │   └── supabase/           # Cliente de Supabase (Auth, lecturas)
-│   └── sync/                   # Cola de operaciones offline
-├── contracts/                  # Solidity (Foundry)
-│   ├── src/CoffeePayments.sol  # ← Contrato principal
-│   ├── src/interfaces/
-│   ├── test/                   # Pruebas de los contratos
-│   └── script/                 # Despliegue a Polygon (testnet/mainnet)
-├── db/                         # Migraciones SQL + seed
+│   │   ├── api/                # Cliente HTTP (auth, lotes, sync)
+│   │   ├── store/              # Estado de auth (zubstand) + JWT util
+│   │   ├── storage/            # SecureStore (tokens)
+│   │   └── theme/              # Tokens del sistema de diseño "Copa de cata"
+│   └── package.json            # scripts: start, lint, typecheck
+├── .opencode/                  # Config de agentes (login-flow = memoria del proyecto)
+├── AGENTS.md                   # ← Memoria persistente y reglas de alineación docs↔código
 └── README.md
 ```
+
+> **`contracts/` (Solidity) y `db/` en la raíz NO existen todavía.** El web3 está
+> en pausa (deuda B7): el diseño del contrato vive en `docs/06-contratos.md` y el
+> gateway fake lo simula en desarrollo. La BD real vive en `Backend/db/`.
+> La fuente de verdad de la estructura real es este monorepo (no las secciones
+> antiguas de este documento ni el README de la raíz).
 
 ---
 
@@ -717,24 +716,28 @@ flowchart LR
 
 | Método | Ruta | Qué hace | Idempotencia | Códigos |
 |---|---|---|---|---|
+| `POST` | `/v1/auth/login` | Login (JWT de Supabase) | No | `200` · `401` |
+| `POST` | `/v1/auth/register` | Registrar usuario | No | `200` · `409` · `422` |
+| `POST` | `/v1/auth/refresh` | Renovar token | No | `200` · `401` |
+| `GET` | `/v1/auth/me` | Perfil del usuario autenticado (resuelve rol real por `auth.uid()`) | Sí | `200` |
+| `GET` | `/v1/cooperativas` | Listar cooperativas (admin) | Sí | `200` · `403` |
 | `POST` | `/v1/lotes` | Crear lote en estado CEREZA (variedad, método, peso, evidencia) | No (da id) | `201` · `400` · `422` |
-| `POST` | `/v1/lotes/{id}/eventos` | Registrar transición/sub-etapa (11 tipos) | `Idempotency-Key` | `201` · `409` · `422` |
-| `GET` | `/v1/lotes/{id}` | Consultar lote + historial | Sí | `200` · `404` |
+| `POST` | `/v1/lotes/{lote_id}/eventos` | Registrar transición/sub-etapa (11 tipos) | `Idempotency-Key` | `201` · `409` · `422` |
+| `GET` | `/v1/lotes/{lote_id}` | Consultar lote + historial | Sí | `200` · `404` |
 | `GET` | `/v1/lotes` | Listar lotes (paginado por cursor) | Sí | `200` · `400` |
 | `GET` | `/v1/verificar/{codigo}` | **Pasaporte de Café** público (sin auth) | Sí | `200` · `404` · `409` |
-| `GET` | `/v1/pagos` | Consultar pagos (lectura) | Sí | `200` |
-| `GET` | `/v1/pagos/saldo` | Saldo/estado del productor | Sí | `200` |
+| `POST` | `/v1/pagos` | Venta + disparo de pago on-chain 3%/97% | `Idempotency-Key` | `202` · `409` · `422` |
+| `GET` | `/v1/pagos` | Consultar pagos — **STUB** (devuelve vacío) | Sí | `200` |
+| `GET` | `/v1/pagos/saldo` | Saldo del productor — **STUB** (devuelve ceros) | Sí | `200` |
 | `POST` | `/v1/propinas` | Registrar propina del comprador (idempotente, bivalente) | `Idempotency-Key` | `201` · `409` · `422` |
-| `GET` | `/v1/me` | Perfil del usuario autenticado | Sí | `200` |
+| `GET` | `/v1/propinas/lote/{lote_id}` | Listar propinas de un lote (lectura por tenant: dueños del lote + admin) | Sí | `200` · `403` · `404` |
 | `POST` | `/v1/sync` | Batch de operaciones offline | Sí (reusa ids) | `202` · `207` |
-| `POST` | `/v1/auth/login` | Login (JWT de Supabase) | No | `200` · `401` |
-| `POST` | `/v1/auth/refresh` | Renovar token | No | `200` · `401` |
-| `GET` | `/v1/cooperativas` | Listar cooperativas (admin) | Sí | `200` · `403` |
+| `GET` | `/health` | Health check (fuera de `/v1`) | Sí | `200` |
 
 **Notas de alcance:**
 - **Estado del Día** es un widget **decorativo** del dashboard: se computa en el cliente desde datos ya disponibles; **no tiene endpoint** propio (ADR-13).
 - **Mercado** es una **proyección de solo lectura** (`GET`): se materializa desde el backend, la app nunca lo escribe (ADR-9).
-- El comprador lee pagos/propinas (`GET /v1/pagos`, `POST /v1/propinas`) y el productor ve su saldo (`GET /v1/pagos/saldo`); `GET /v1/me` resuelve el rol real desde `USUARIOS` por `auth.uid()`.
+- La venta (`POST /v1/pagos`) y la lectura de pagos (`GET /v1/pagos`, `GET /v1/pagos/saldo`) son de la **cooperativa**; la propina la escribe el **comprador** (`POST /v1/propinas`) y la leen los **dueños del lote** (productor, cooperativa, comprador de la venta) y admin (`GET /v1/propinas/lote/{lote_id}`); `GET /v1/auth/me` resuelve el rol real desde `USUARIOS` por `auth.uid()`.
 
 **Reglas aplicadas:**
 - Recursos en plural (`/lotes`, `/eventos`); anidamiento solo en jerarquías reales (`/lotes/{id}/eventos`).
@@ -1092,6 +1095,11 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 
 - **Autenticación**: Supabase Auth (email/contraseña, o *magic link* para productores sin email). El `auth.uid()` de Supabase **es** el `USUARIOS.id` (mismo UUID vinculado al registrarse).
 - **Autorización**: RLS en PostgreSQL — las políticas resuelven el rol desde `USUARIOS` y restringen por pertenencia (`PRODUCTOR` de la finca, `COOPERATIVA` de la finca) **sin confiar en IDs enviados por el cliente**; adicionalmente la dependencia `get_current_user` en FastAPI fuerza el mismo chequeo a nivel de API.
+
+**Estado real (MVP):**
+- La matriz RLS de la tabla es el **objetivo de diseño**. Hoy la defensa principal vive en la **capa de servicio** del backend (p.ej. `PropinaService.listar_propinas_lote` valida el tenant de cada lote: productor/cooperativa solo de su finca, comprador solo si compró la venta, admin todo). El RLS de Supabase está definido en `Backend/db/` pero **inerte** hasta la deuda B11 (backend Supabase real).
+- `GET /v1/pagos` y `GET /v1/pagos/saldo` son **STUBS** (devuelven datos vacíos/ceros); su autorización actual a nivel de API es cooperativa-only. El `PropinaService.obtener_saldo_productor` (destinado al productor) está pendiente de cablear y de inyectar el repo de pagos.
+- **Móvil (Expo)**: login y refresh consumen el backend real; **register y recover son demo** (sin conexión real). El rol se resuelve con `GET /v1/auth/me`.
 
 ### Flujo de autenticación (diagrama de secuencia)
 

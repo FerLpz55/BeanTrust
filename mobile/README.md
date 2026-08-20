@@ -1,40 +1,53 @@
-# Welcome to your Expo app 👋
+# BeanTrust · Móvil (Expo)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Aplicación móvil (React Native / Expo Router) para registro de eventos en campo,
+verificación de Pasaporte de Café y acceso al panel de comercio justo. Consume la
+API de `../Backend` (FastAPI).
 
-## Get started
+## Requisitos
 
-1. Install dependencies
+- Node + `pnpm` (el repo usa pnpm, no npm)
+- Backend corriendo en local (`Backend/`): `uvicorn app.main:app --reload`
 
-   ```bash
-   npm install
-   ```
+## Ejecutar
 
-2. Start the app
+```bash
+pnpm install
+pnpm start            # Expo (QR para Expo Go / emulador)
+```
 
-   ```bash
-   npx expo start
-   ```
+La URL de la API se configura con `EXPO_PUBLIC_API_URL` (`.env`) y por defecto
+apunta a `http://192.168.1.109:8000` (ver `src/config.ts`).
 
-In the output, you'll find options to open the app in a
+## Verificación
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+```bash
+pnpm lint             # ESLint (eslint-config-expo)
+pnpm typecheck        # tsc --noEmit (los tipos deben compilar limpio)
+```
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Estado del MVP (real, no promesa)
 
-## Learn more
+| Módulo | Ruta | Estado |
+| --- | --- | --- |
+| Login / refresh | `app/(auth)/login.tsx` | **Real** — conectado al backend (`src/api/auth.ts`) |
+| Registro | `app/(auth)/register.tsx` | **Demo** — sin conexión real |
+| Recuperación | `app/(auth)/recover.tsx` | **Demo** — sin conexión real |
+| Dashboard (Estado del Día) | `(app)/(tabs)/index.tsx` | Hecho (widget decorativo, ADR-13) |
+| Alta de lote (wizard) | `(app)/lotes/nuevo.tsx` | **Placeholder** |
+| Detalle de lote | `(app)/lotes/[id].tsx` | Parcial |
+| Verificar QR | `app/verificar/index.tsx` y `[codigo].tsx` | **Stub** — botones sin `onPress`; `[codigo]` ignora el parámetro y usa datos mock |
+| Mercado | `(app)/mercado.tsx` y `mercado/[loteId].tsx` | **Stub** — datos mock; sin navegación al detalle |
+| Trazabilidad / timeline | `(app)/(tabs)/trazabilidad.tsx` | Parcial — tab con filtros funcional; el detalle `lotes/[id].tsx` es placeholder |
+| Ajustes | `(app)/(tabs)/ajustes.tsx` | Parcial |
 
-To learn more about developing your project with Expo, look at the following resources:
+### Convenciones
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- Diseño: sistema de tokens **"Copa de cata"** en `src/theme/tokens.ts`
+  (tipografías Fraunces / Work Sans / IBM Plex Mono). Preferir tokens; hay colores
+  hardcodeados en pantallas (deuda a limpiar).
+- Estado de auth: `src/store/auth.ts` (zustand), tokens en `expo-secure-store`
+  (`src/storage/secure.ts`), JWT util en `src/utils/jwt.ts`.
+- Sin tests automatizados aún (deuda).
+- Antes de tocar APIs de Expo, consultar la documentación versionada
+  (https://docs.expo.dev/versions/v54.0.0/).

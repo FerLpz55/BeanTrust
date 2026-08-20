@@ -51,6 +51,8 @@ class PagoService:
     ) -> Pago:
         existente = self._repo_pago.buscar_por_idempotencia(idempotencia)
         if existente is not None:
+            if usuario.rol is not Rol.ADMIN and existente.cooperativa_id != usuario.id:
+                raise NoAutorizado("Esta clave de idempotencia pertenece a otra cooperativa.")
             return existente
 
         lote = self._repo_lote.buscar_por_id(lote_id)

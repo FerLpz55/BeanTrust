@@ -5,7 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.dependencies import AuthProviderDep, CurrentUserDep, limitar_login
-from app.schemas.auth import CurrentUser, LoginRequest, RefreshRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    CurrentUser,
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

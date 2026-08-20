@@ -49,20 +49,28 @@ pytest
 
 ## Endpoints (`/v1`)
 
+La superficie exacta de la API está blindada por `tests/integration/test_contrato_api.py`:
+si una ruta de esta tabla no existe en el código (o existe una ruta no documentada),
+el test falla. Mantén la tabla, `docs/ARCHITECTURE.md` §6 y el test sincronizados en
+el mismo cambio.
+
 | Método | Ruta                          | Acceso                       | Descripción                              |
 | ------ | ----------------------------- | ---------------------------- | ---------------------------------------- |
 | POST   | `/auth/login`                 | público                      | Emite token JWT                          |
+| POST   | `/auth/register`              | público                      | Registra usuario                         |
 | POST   | `/auth/refresh`               | público                      | Renueva access token con refresh token   |
+| GET    | `/auth/me`                    | autenticado                  | Perfil del usuario autenticado           |
 | GET    | `/cooperativas`               | admin                        | Directorio de cooperativas               |
 | POST   | `/lotes`                      | productor/cooperativa/admin  | Registra cosecha (crea lote: variedad, método, peso, evidencia) |
 | GET    | `/lotes`                      | productor/cooperativa/admin  | Lista paginada por cursor                |
-| GET    | `/lotes/{id}`                 | productor/cooperativa/admin  | Detalle con historial (timeline hash por etapa) |
-| POST   | `/lotes/{id}/eventos`         | productor/cooperativa/admin  | Avanza estado/sub-etapa (idempotente, 11 tipos) |
+| GET    | `/lotes/{lote_id}`            | productor/cooperativa/admin  | Detalle con historial (timeline hash por etapa) |
+| POST   | `/lotes/{lote_id}/eventos`    | productor/cooperativa/admin  | Avanza estado/sub-etapa (idempotente, 11 tipos) |
 | GET    | `/verificar/{codigo}`         | público                      | Pasaporte de Café (200/404/409)          |
-| GET    | `/pagos`                      | productor/cooperativa/comprador | Historial de pagos y propinas         |
-| GET    | `/pagos/saldo`                | productor                    | Saldo/estado del productor               |
-| POST   | `/propinas`                   | comprador                    | Propina al productor (idempotente, bivalente) |
-| GET    | `/me`                         | autenticado                  | Perfil del usuario autenticado           |
+| POST   | `/pagos`                      | cooperativa                  | Venta + pago on-chain 3%/97% (202, idempotente) |
+| GET    | `/pagos`                      | cooperativa                  | Historial de pagos — **STUB** (devuelve vacío) |
+| GET    | `/pagos/saldo`                | cooperativa                  | Saldo del productor — **STUB** (devuelve ceros) |
+| POST   | `/propinas`                   | comprador                    | Propina al productor (201, idempotente, bivalente) |
+| GET    | `/propinas/lote/{lote_id}`    | dueños del lote: productor/cooperativa/comprador de la venta/admin | Lista propinas del lote (tenancy) |
 | POST   | `/sync`                       | productor/cooperativa        | Batch offline (202/207)                  |
 | GET    | `/health`                     | público                      | Health check                             |
 
@@ -76,7 +84,7 @@ app/
 ├── core/              # config, logger, seguridad (JWT HS256/JWKS, argon2)
 ├── models/dominio.py  # reglas de negocio (máquina de estados) — sin I/O
 ├── schemas/           # Pydantic de entrada/salida (fronteras)
-├── services/          # casos de uso (lote, qr, pagos)
+├── services/          # casos de uso (lote, qr, pagos, propinas)
 ├── repositories/      # interfaces + in_memory + supabase + gateway pagos
 └── utils/cursor.py    # paginación por cursor base64url
 db/                    # migraciones SQL + seed (Supabase/PostgreSQL)

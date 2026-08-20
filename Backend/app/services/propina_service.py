@@ -37,10 +37,10 @@ class PropinaService:
         if lote.estado.value != "VENDIDO":
             raise TransicionInvalida("Solo se puede dar propina en lotes vendidos.")
         # Verificar que el comprador sea el que compró el lote
-        evento_venta = next(
-            (e for e in lote.historial if e.tipo.value == "VENTA"), None
-        )
-        if evento_venta and evento_venta.comprador_id != usuario.id:
+        evento_venta = next((e for e in lote.historial if e.tipo.value == "VENTA"), None)
+        if evento_venta is None:
+            raise TransicionInvalida("El lote no tiene una venta registrada.")
+        if evento_venta.comprador_id != usuario.id:
             raise NoAutorizado("No es el comprador de este lote.")
 
     def registrar_propina(
@@ -56,6 +56,8 @@ class PropinaService:
         clave = str(idempotencia)
         existente = self._repo_propina.buscar_por_idempotencia(clave)
         if existente is not None:
+            if usuario.rol is not Rol.ADMIN and existente.comprador_id != usuario.id:
+                raise NoAutorizado("Esta clave de idempotencia pertenece a otro comprador.")
             return existente
 
         lote = self._repo_lote.buscar_por_id(lote_id)
@@ -85,6 +87,25 @@ class PropinaService:
         lote.asociar_propina(propina)
         self._repo_lote.guardar(lote)
         return propina
+
+    def listar_propinas_lote(self, usuario: CurrentUser, lote_id: uuid.UUID) -> list[Propina]:
+        """Lista propinas de un lote validando el tenant (matriz RLS de ADR-10)."""
+        lote = self._repo_lote.buscar_por_id(lote_id)
+        if lote is None:
+            raise LoteNoEncontrado("Lote no encontrado.")
+        finca = self._repo_finca.buscar_por_id(lote.finca_id)
+
+        if usuario.rol is Rol.ADMIN:
+            return self._repo_propina.buscar_por_lote(lote_id)
+        if usuario.rol is Rol.PRODUCTOR and finca and finca.productor_id == usuario.id:
+            return self._repo_propina.buscar_por_lote(lote_id)
+        if usuario.rol is Rol.COOPERATIVA and finca and finca.cooperativa_id == usuario.id:
+            return self._repo_propina.buscar_por_lote(lote_id)
+        if usuario.rol is Rol.COMPRADOR:
+            evento_venta = next((e for e in lote.historial if e.tipo.value == "VENTA"), None)
+            if evento_venta and evento_venta.comprador_id == usuario.id:
+                return self._repo_propina.buscar_por_lote(lote_id)
+        raise NoAutorizado("No tiene acceso a las propinas de este lote.")
 
     def confirmar_propina(self, lote_id: uuid.UUID) -> Propina:
         """Simula el poller de confirmación (REGISTRADA -> CONFIRMADA)."""

@@ -10,11 +10,15 @@ Este proyecto busca mitigar la intermediación excesiva en zonas rurales mediant
 
 Este repositorio centraliza los componentes del ecosistema Bean Trust:
 
-* `/backend`: Backend (FastAPI). Maneja la lógica de negocio central, la base de datos relacional (Supabase/PostgreSQL) y la exposición de endpoints.
-* `/mobile`: Aplicación móvil (React Native / Expo). Interfaz de usuario diseñada para registro de eventos en campo con soporte *offline*.
-* `/contracts`: Contratos inteligentes (Solidity) diseñados para la red Polygon.
-* `/db`: Migraciones SQL + seed.
-* `/docs`: Documentación técnica.
+* `Backend/`: Backend (FastAPI). Maneja la lógica de negocio central, la base de datos relacional (Supabase/PostgreSQL, migraciones en `Backend/db/`) y la exposición de endpoints.
+* `mobile/`: Aplicación móvil (React Native / Expo). Interfaz de usuario diseñada para registro de eventos en campo con soporte *offline*.
+* `docs/`: Documentación técnica (la arquitectura es la fuente de verdad del diseño).
+* `.opencode/`: Configuración de agentes; `AGENTS.md` guarda la memoria persistente del proyecto y las reglas de alineación docs↔código.
+
+> **Nota:** `contracts/` (Solidity) y `db/` en la raíz **no existen todavía**: el
+> web3 está en pausa (diseño en `docs/06-contratos.md`, simulado por un gateway
+> fake) y la BD vive en `Backend/db/`. La estructura real está descrita en
+> `docs/ARCHITECTURE.md` §3.
 
 ## Documentación
 
