@@ -1,6 +1,5 @@
-/** Pasaporte de Café — verificación pública detallada (F03). */
-
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
@@ -11,9 +10,10 @@ import { StatusChip } from '@/src/components/status-chip';
 import { TrazaTimeline } from '@/src/components/traza-timeline';
 import { VerifiedSeal } from '@/src/components/verified-seal';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
-import { spacing, typeScale } from '@/src/theme/tokens';
+import { spacing, typeScale, radii } from '@/src/theme/tokens';
 import { useVerificarStore } from '@/src/store/verificar';
-import { useLocalSearchParams } from 'expo-router';
+import { LoteEstado, EventoTipo } from '@/src/store/lotes';
+import { useLocalSearchParams, router } from 'expo-router';
 
 interface LocalParams {
   codigo: string;
@@ -21,37 +21,47 @@ interface LocalParams {
 
 export default function VerificarCodigoScreen() {
   const params = useLocalSearchParams() as unknown as LocalParams;
-  const { data, isLoading } = useVerificarStore();
+  const { data, isLoading, error, buscarPorCodigo, reset } = useVerificarStore();
 
+  const background = useThemeColor('background');
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
   const primary = useThemeColor('primary');
+  const onPrimary = useThemeColor('onPrimary');
   const primaryContainer = useThemeColor('primaryContainer');
   const onPrimaryContainer = useThemeColor('onPrimaryContainer');
   const surfaceContainerLow = useThemeColor('surfaceContainerLow');
   const tertiary = useThemeColor('tertiary');
   const tertiaryContainer = useThemeColor('tertiaryContainer');
   const onTertiaryContainer = useThemeColor('onTertiaryContainer');
+  
+  useEffect(() => {
+    if (params.codigo) {
+      buscarPorCodigo(params.codigo);
+    }
+    return () => reset();
+  }, [params.codigo, buscarPorCodigo, reset]);
 
-  if (isLoading) {
+  if (isLoading || (!data && !error)) {
     return (
-      <SafeAreaView style={styles.loadingRoot}>
+      <SafeAreaView style={[styles.loadingRoot, { backgroundColor: background }]}>
         <View style={styles.loadingContent}>
           <BrandMark size={48} />
+          <ActivityIndicator size="large" color={primary} style={{ marginTop: spacing.lg }} />
         </View>
       </SafeAreaView>
     );
   }
 
-  if (!data) {
+  if (error || !data) {
     return (
-      <SafeAreaView style={styles.root}>
+      <SafeAreaView style={[styles.root, { backgroundColor: background }]}>
         <EmptyState
           title="Lote no encontrado"
-          description="El código escaneado no corresponde a ningún lote registrado."
+          description={error || "El código escaneado no corresponde a ningún lote registrado."}
           iconName="close"
-          actionLabel="Escanear otro"
-          onAction={() => {}}
+          actionLabel="Volver al escáner"
+          onAction={() => router.back()}
         />
       </SafeAreaView>
     );
@@ -60,20 +70,24 @@ export default function VerificarCodigoScreen() {
   const { lote, historial } = data;
 
   return (
-    <SafeAreaView style={styles.root}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Header con sello verificado */}
+    <SafeAreaView style={[styles.root, { backgroundColor: background }]} edges={['top', 'bottom']}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* Cabecera / Sello */}
         <View style={styles.headerSection}>
-          <BrandMark size={48} />
           <VerifiedSeal />
           <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.headerLabel]}>
-            PASAPORTE DE CAFÉ
+            CAFÉ DE ESPECIALIDAD
           </Text>
           <Text style={[typeScale.headlineMedium, { color: onSurface }, styles.headerTitle]}>
-            Lote {lote.codigo_publico}
+            {lote.finca_nombre || 'Finca'}
           </Text>
-          <View style={[styles.estadoRow, { gap: spacing.md }]}>
-            <StatusChip estado={lote.estado} />
+          {lote.finca_municipio ? (
+            <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant }]}>
+              {lote.finca_municipio}
+            </Text>
+          ) : null}
+          <View style={styles.estadoRow}>
+            <StatusChip estado={lote.estado as LoteEstado} />
             <View style={[styles.hashBadge, { backgroundColor: surfaceContainerLow }]}>
               <IconSymbol size={12} name="lock" color={onSurfaceVariant} />
               <Text style={[typeScale.dataMono, { color: onSurfaceVariant }]}>
@@ -85,22 +99,22 @@ export default function VerificarCodigoScreen() {
 
         {/* Info principal: variedad, método, peso, fecha */}
         <View style={styles.infoGrid}>
-          <View style={styles.infoCard}>
+          <View style={[styles.infoCard, { backgroundColor: surfaceContainerLow }]}>
             <IconSymbol size={24} name="eco" color={tertiary} />
             <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>VARIEDAD</Text>
             <Text style={[typeScale.titleLarge, { color: onSurface }]}>{lote.variedad ?? '—'}</Text>
           </View>
-          <View style={styles.infoCard}>
+          <View style={[styles.infoCard, { backgroundColor: surfaceContainerLow }]}>
             <IconSymbol size={24} name="water_drop" color={primary} />
             <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>BENEFICIADO</Text>
             <Text style={[typeScale.titleLarge, { color: onSurface }]}>{lote.metodo_beneficiado ?? '—'}</Text>
           </View>
-          <View style={styles.infoCard}>
+          <View style={[styles.infoCard, { backgroundColor: surfaceContainerLow }]}>
             <IconSymbol size={24} name="local_cafe" color={primary} />
             <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>PESO</Text>
             <Text style={[typeScale.titleLarge, { color: onSurface }]}>{lote.peso_actual_kg.toFixed(1)} kg</Text>
           </View>
-          <View style={styles.infoCard}>
+          <View style={[styles.infoCard, { backgroundColor: surfaceContainerLow }]}>
             <IconSymbol size={24} name="location_on" color={onSurfaceVariant} />
             <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>COSECHA</Text>
             <Text style={[typeScale.titleLarge, { color: onSurface }]}>
@@ -145,7 +159,14 @@ export default function VerificarCodigoScreen() {
           <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }, styles.sectionSubtitle]}>
             Cada etapa genera un hash criptográfico que encadena la historia completa
           </Text>
-          <TrazaTimeline events={historial} />
+          <TrazaTimeline events={historial.map((h, i) => ({
+            id: `ev-${i}`,
+            tipo: h.tipo as EventoTipo,
+            fecha: h.fecha,
+            descripcion: h.etapa,
+            hash_etapa: h.hash,
+            completed: h.completed
+          }))} />
         </View>
 
         {/* Certificado */}
@@ -218,6 +239,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     marginTop: spacing.sm,
+    gap: spacing.sm,
   },
   hashBadge: {
     flexDirection: 'row',
@@ -239,13 +261,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
     padding: spacing.md,
-    backgroundColor: '#F2E6D8',
-    borderRadius: 12,
+    borderRadius: radii.medium,
   },
   sectionCard: {
     padding: spacing.lg,
-    borderRadius: 16,
-    gap: spacing.md,
+    borderRadius: radii.large,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -261,7 +281,7 @@ const styles = StyleSheet.create({
   pill: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    borderRadius: spacing.full,
+    borderRadius: radii.full,
   },
   donutWrapper: {
     alignItems: 'center',
@@ -280,12 +300,13 @@ const styles = StyleSheet.create({
   legendDot: {
     width: 10,
     height: 10,
-    borderRadius: 5,
+    borderRadius: radii.full,
   },
   comercioDetail: {
     alignItems: 'center',
     marginTop: spacing.md,
     paddingHorizontal: spacing.md,
+    textAlign: 'center',
   },
   certHeader: {
     flexDirection: 'row',
@@ -312,5 +333,6 @@ const styles = StyleSheet.create({
   footerNote: {
     alignItems: 'center',
     paddingTop: spacing.lg,
+    textAlign: 'center',
   },
 });
