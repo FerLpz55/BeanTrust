@@ -59,7 +59,7 @@ Si tocas un router/endpoint del backend debes sincronizar **en el mismo cambio**
 
 ## 6. Estado real del MVP (no asumir más)
 
-- **Backend**: `POST /v1/propinas` y `GET /v1/propinas/lote/{lote_id}` montados y probados (tenancy en `PropinaService.listar_propinas_lote`: productor/cooperativa solo de su finca, comprador solo si compró la venta, admin todo). `GET /v1/pagos` y `GET /v1/pagos/saldo` son **STUBs**. `PropinaService.obtener_saldo_productor` tiene bug latente (`self._repo_pago` no inyectado) y está sin cablear.
+- **Backend**: `POST /v1/propinas` y `GET /v1/propinas/lote/{lote_id}` montados y probados (tenancy en `PropinaService.listar_propinas_lote`: productor/cooperativa solo de su finca, comprador solo si compró la venta, admin todo). `GET /v1/pagos` y `GET /v1/pagos/saldo` están implementados (B13), igual que `GET /v1/fincas` (B15).
 - **Mobile**: login/refresh **reales**; register/recover **demo**. F02 (wizard alta lote `lotes/nuevo.tsx`), F03 (verificar: `verificar/index.tsx` botones sin `onPress`; `verificar/[codigo].tsx` ignora el parámetro y usa mock), F04 (mercado: donut con datos mock, sin navegación a `mercado/[loteId].tsx`), F05 (trazabilidad: tab con filtros funcional; el detalle `lotes/[id].tsx` es placeholder) = **stubs/placeholders**. Sin tests móviles. Colores hardcodeados fuera de tokens en varias pantallas (deuda).
 - **Deudas**: B7 web3 en pausa; B11 Supabase real + RLS activo + wallet `public_address`; refresh sin rotación de tokens; rate limit en memoria; `test_contrato_api.py` marca stubs de pagos.
 

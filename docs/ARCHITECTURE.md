@@ -719,16 +719,20 @@ flowchart LR
 | `POST` | `/v1/auth/login` | Login (JWT de Supabase) | No | `200` · `401` |
 | `POST` | `/v1/auth/register` | Registrar usuario | No | `200` · `409` · `422` |
 | `POST` | `/v1/auth/refresh` | Renovar token | No | `200` · `401` |
+| `POST` | `/v1/auth/recover` | Solicita recuperación de contraseña (respuesta uniforme, no enumera cuentas) | No | `200` |
+| `POST` | `/v1/auth/recover/confirm` | Fija la nueva contraseña con un token de un solo uso | No | `200` · `401` · `422` |
 | `GET` | `/v1/auth/me` | Perfil del usuario autenticado (resuelve rol real por `auth.uid()`) | Sí | `200` |
 | `GET` | `/v1/cooperativas` | Listar cooperativas (admin) | Sí | `200` · `403` |
+| `GET` | `/v1/fincas` | Fincas del usuario autenticado (resuelve `finca_id` para el alta de lote) | Sí | `200` · `403` |
 | `POST` | `/v1/lotes` | Crear lote en estado CEREZA (variedad, método, peso, evidencia) | No (da id) | `201` · `400` · `422` |
 | `POST` | `/v1/lotes/{lote_id}/eventos` | Registrar transición/sub-etapa (11 tipos) | `Idempotency-Key` | `201` · `409` · `422` |
 | `GET` | `/v1/lotes/{lote_id}` | Consultar lote + historial | Sí | `200` · `404` |
 | `GET` | `/v1/lotes` | Listar lotes (paginado por cursor) | Sí | `200` · `400` |
 | `GET` | `/v1/verificar/{codigo}` | **Pasaporte de Café** público (sin auth) | Sí | `200` · `404` · `409` |
+| `GET` | `/v1/mercado/{lote_id}` | **Panel Comercio Justo**: proyección read-only 97/3 + propinas (ADR-9) | Sí | `200` · `403` · `404` |
 | `POST` | `/v1/pagos` | Venta + disparo de pago on-chain 3%/97% | `Idempotency-Key` | `202` · `409` · `422` |
-| `GET` | `/v1/pagos` | Consultar pagos — **STUB** (devuelve vacío) | Sí | `200` |
-| `GET` | `/v1/pagos/saldo` | Saldo del productor — **STUB** (devuelve ceros) | Sí | `200` |
+| `GET` | `/v1/pagos` | Historial de pagos de la cooperativa (cursor) | Sí | `200` · `403` |
+| `GET` | `/v1/pagos/saldo` | Saldo del productor (97% ventas confirmadas + propinas) | Sí | `200` · `403` |
 | `POST` | `/v1/propinas` | Registrar propina del comprador (idempotente, bivalente) | `Idempotency-Key` | `201` · `409` · `422` |
 | `GET` | `/v1/propinas/lote/{lote_id}` | Listar propinas de un lote (lectura por tenant: dueños del lote + admin) | Sí | `200` · `403` · `404` |
 | `POST` | `/v1/sync` | Batch de operaciones offline | Sí (reusa ids) | `202` · `207` |
@@ -736,8 +740,8 @@ flowchart LR
 
 **Notas de alcance:**
 - **Estado del Día** es un widget **decorativo** del dashboard: se computa en el cliente desde datos ya disponibles; **no tiene endpoint** propio (ADR-13).
-- **Mercado** es una **proyección de solo lectura** (`GET`): se materializa desde el backend, la app nunca lo escribe (ADR-9).
-- La venta (`POST /v1/pagos`) y la lectura de pagos (`GET /v1/pagos`, `GET /v1/pagos/saldo`) son de la **cooperativa**; la propina la escribe el **comprador** (`POST /v1/propinas`) y la leen los **dueños del lote** (productor, cooperativa, comprador de la venta) y admin (`GET /v1/propinas/lote/{lote_id}`); `GET /v1/auth/me` resuelve el rol real desde `USUARIOS` por `auth.uid()`.
+- **Mercado** es una **proyección de solo lectura**: `GET /v1/mercado/{lote_id}` se materializa desde el backend a partir de `LOTE`/`PAGO`/`PROPINA`; la app nunca lo escribe (ADR-9).
+- La venta (`POST /v1/pagos`) y el historial (`GET /v1/pagos`) son de la **cooperativa**; el saldo (`GET /v1/pagos/saldo`) es del **productor** (o admin), coherente con la matriz §10 donde `pago` es lectura del productor sobre sus lotes; la propina la escribe el **comprador** (`POST /v1/propinas`) y la leen los **dueños del lote** (productor, cooperativa, comprador de la venta) y admin (`GET /v1/propinas/lote/{lote_id}`); `GET /v1/auth/me` resuelve el rol real desde `USUARIOS` por `auth.uid()`.
 
 **Reglas aplicadas:**
 - Recursos en plural (`/lotes`, `/eventos`); anidamiento solo en jerarquías reales (`/lotes/{id}/eventos`).
@@ -1098,7 +1102,7 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 
 **Estado real (MVP):**
 - La matriz RLS de la tabla es el **objetivo de diseño**. Hoy la defensa principal vive en la **capa de servicio** del backend (p.ej. `PropinaService.listar_propinas_lote` valida el tenant de cada lote: productor/cooperativa solo de su finca, comprador solo si compró la venta, admin todo). El RLS de Supabase está definido en `Backend/db/` pero **inerte** hasta la deuda B11 (backend Supabase real).
-- `GET /v1/pagos` y `GET /v1/pagos/saldo` son **STUBS** (devuelven datos vacíos/ceros); su autorización actual a nivel de API es cooperativa-only. El `PropinaService.obtener_saldo_productor` (destinado al productor) está pendiente de cablear y de inyectar el repo de pagos.
+- `GET /v1/pagos` (historial de la cooperativa, cursor) y `GET /v1/pagos/saldo` (saldo del productor) están **implementados** (B13). El rol se declara por operación: el router de pagos ya no aplica un `require_rol` global, que hacía inalcanzable el saldo. La agregación vive en los repositorios (`total_confirmado_por_productor`).
 - **Móvil (Expo)**: login y refresh consumen el backend real; **register y recover son demo** (sin conexión real). El rol se resuelve con `GET /v1/auth/me`.
 
 ### Flujo de autenticación (diagrama de secuencia)
@@ -1163,7 +1167,7 @@ A continuación, los ADR 9–14 en el formato estándar **Contexto → Decisión
 ### ADR-9 — Mercado como proyección de solo lectura
 
 - **Contexto:** la app y el pasaporte necesitan mostrar ofertas/comercio justo del café; escribir esa vista desde el móvil rompería la fuente de verdad y el aislamiento por tenant.
-- **Decisión:** el mercado es una **proyección read-only** materializada por el backend (a partir de `LOTE`, `PAGO`, `PROPINA`); no existe `POST /mercado`.
+- **Decisión:** el mercado es una **proyección read-only** materializada por el backend (a partir de `LOTE`, `PAGO`, `PROPINA`) y expuesta en `GET /v1/mercado/{lote_id}`; no existe `POST /mercado`.
 - **Opciones consideradas:** (a) escritura directa desde el móvil al mercado — descartada por romper RLS; (b) vista SQL materializada con refresh — descartada por complejidad en MVP; (c) **proyección calculada en el servicio** — elegida.
 - **Consecuencias:** vistas de oferta y Panel Comercio Justo siempre consistentes; ningún rol escribe el mercado; latencia mínima al ser un cálculo simple.
 

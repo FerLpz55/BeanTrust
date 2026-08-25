@@ -59,16 +59,20 @@ el mismo cambio.
 | POST   | `/auth/login`                 | público                      | Emite token JWT                          |
 | POST   | `/auth/register`              | público                      | Registra usuario                         |
 | POST   | `/auth/refresh`               | público                      | Renueva access token con refresh token   |
+| POST   | `/auth/recover`               | público                      | Solicita recuperación (respuesta uniforme) |
+| POST   | `/auth/recover/confirm`       | público                      | Fija nueva contraseña con token de un solo uso |
 | GET    | `/auth/me`                    | autenticado                  | Perfil del usuario autenticado           |
 | GET    | `/cooperativas`               | admin                        | Directorio de cooperativas               |
+| GET    | `/fincas`                     | productor/cooperativa/admin  | Fincas del usuario (resuelve `finca_id` para crear lotes) |
 | POST   | `/lotes`                      | productor/cooperativa/admin  | Registra cosecha (crea lote: variedad, método, peso, evidencia) |
 | GET    | `/lotes`                      | productor/cooperativa/admin  | Lista paginada por cursor                |
 | GET    | `/lotes/{lote_id}`            | productor/cooperativa/admin  | Detalle con historial (timeline hash por etapa) |
 | POST   | `/lotes/{lote_id}/eventos`    | productor/cooperativa/admin  | Avanza estado/sub-etapa (idempotente, 11 tipos) |
 | GET    | `/verificar/{codigo}`         | público                      | Pasaporte de Café (200/404/409)          |
+| GET    | `/mercado/{lote_id}`          | dueños del lote + admin      | Panel Comercio Justo: desglose 97/3 + propinas (ADR-9) |
 | POST   | `/pagos`                      | cooperativa                  | Venta + pago on-chain 3%/97% (202, idempotente) |
-| GET    | `/pagos`                      | cooperativa                  | Historial de pagos — **STUB** (devuelve vacío) |
-| GET    | `/pagos/saldo`                | cooperativa                  | Saldo del productor — **STUB** (devuelve ceros) |
+| GET    | `/pagos`                      | cooperativa                  | Historial de pagos de la cooperativa (paginado por cursor) |
+| GET    | `/pagos/saldo`                | productor/admin              | Saldo del productor (97% ventas confirmadas + propinas) |
 | POST   | `/propinas`                   | comprador                    | Propina al productor (201, idempotente, bivalente) |
 | GET    | `/propinas/lote/{lote_id}`    | dueños del lote: productor/cooperativa/comprador de la venta/admin | Lista propinas del lote (tenancy) |
 | POST   | `/sync`                       | productor/cooperativa        | Batch offline (202/207)                  |

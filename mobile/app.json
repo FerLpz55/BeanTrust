@@ -39,7 +39,13 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BeanTrust usa la camara para escanear el QR del Pasaporte de Cafe."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

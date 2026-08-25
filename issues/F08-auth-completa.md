@@ -1,6 +1,6 @@
 # [Mobile] F08 — Auth completa: register real + recover real + perfil/rol con GET /v1/auth/me
 
-> **GitHub:** [#29](https://github.com/FerLpz55/BeanTrust/issues/29) · **Estado:** Todo · **Label:** —
+> **GitHub:** [#29](https://github.com/FerLpz55/BeanTrust/issues/29) · **Estado:** Done · **Label:** —
 > **Depende de:** F07, B14 · **Desbloquea:** F10, F13
 
 ## Contexto
@@ -18,9 +18,9 @@ Mismatch conocido: la pantalla de registro captura "Nombre de tu finca" pero el 
 
 ## Criterios de aceptación
 
-- [ ] Registro real crea cuenta y hace login; recover real cambia la contraseña (flujo demo eliminado).
-- [ ] El rol real está disponible en un store y la UI puede condicionar por rol (base para F10/F13).
-- [ ] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+- [x] Registro real crea cuenta y hace login; recover real cambia la contraseña (flujo demo eliminado).
+- [x] El rol real está disponible en un store y la UI puede condicionar por rol (base para F10/F13).
+- [x] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
 
 ## Referencias
 

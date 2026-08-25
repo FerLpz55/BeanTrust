@@ -56,6 +56,12 @@ class RepositorioPago(Protocol):
 
     def buscar_por_idempotencia(self, clave: uuid.UUID) -> Pago | None: ...
 
+    def listar_por_cooperativa(
+        self, cooperativa_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Pago], Cursor | None]: ...
+
+    def total_confirmado_por_productor(self, productor_id: uuid.UUID) -> float: ...
+
 
 @runtime_checkable
 class RepositorioPropina(Protocol):
@@ -73,10 +79,18 @@ class RepositorioPropina(Protocol):
         self, comprador_id: uuid.UUID, cursor: Cursor | None, limit: int
     ) -> tuple[list[Propina], Cursor | None]: ...
 
+    def total_confirmado_por_productor(self, productor_id: uuid.UUID) -> float: ...
+
 
 @runtime_checkable
 class RepositorioFinca(Protocol):
     def buscar_por_id(self, finca_id: uuid.UUID) -> Finca | None: ...
+
+    def listar_por_productor(self, productor_id: uuid.UUID) -> list[Finca]: ...
+
+    def listar_por_cooperativa(self, cooperativa_id: uuid.UUID) -> list[Finca]: ...
+
+    def listar_todas(self) -> list[Finca]: ...
 
 
 @runtime_checkable

@@ -335,14 +335,21 @@ class Lote:
         self.metodo_beneficiado = metodo_beneficiado
         self.evidencia_url = evidencia_url
         self.evidencia_sha256 = evidencia_sha256
+        # La cosecha es el eslabón génesis de la cadena (ADR-11): también lleva
+        # `hash_etapa`, calculado con hash anterior vacío. Sin esto el primer
+        # eslabón quedaba sin anclar y el timeline lo mostraba sin hash.
+        # Mismo patrón de dos fases que `avanzar`, porque `LoteEvento` es frozen.
+        campos = {
+            "id": uuid.uuid4(),
+            "lote_id": self.id,
+            "tipo": TipoEvento.COSECHA,
+            "de_estado": None,
+            "a_estado": Estado.CEREZA,
+            "actor_id": actor_id,
+            "peso_kg": peso_kg,
+        }
         evento = LoteEvento(
-            id=uuid.uuid4(),
-            lote_id=self.id,
-            tipo=TipoEvento.COSECHA,
-            de_estado=None,
-            a_estado=Estado.CEREZA,
-            actor_id=actor_id,
-            peso_kg=peso_kg,
+            **campos, hash_etapa=self._calcular_hash_etapa(LoteEvento(**campos))
         )
         self.historial.append(evento)
         self.actualizado_en = ahora_utc()

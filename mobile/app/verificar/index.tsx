@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 
 import { BrandMark } from '@/src/components/brand-mark';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
@@ -13,6 +14,9 @@ import { spacing, typeScale, radii } from '@/src/theme/tokens';
 export default function VerificarScreen() {
   const [codigo, setCodigo] = useState('');
   const [flashlightOn, setFlashlightOn] = useState(false);
+  const [permiso, pedirPermiso] = useCameraPermissions();
+  // Evita que un QR sostenido dispare N navegaciones seguidas.
+  const yaEscaneado = useRef(false);
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
@@ -21,11 +25,26 @@ export default function VerificarScreen() {
   const outline = useThemeColor('outline');
   const background = useThemeColor('background');
 
-  const handleVerify = (codeToVerify: string) => {
+  const handleVerify = useCallback((codeToVerify: string) => {
     Haptics.selectionAsync();
-    if (!codeToVerify) return;
-    router.push(`/verificar/${codeToVerify}` as Href);
-  };
+    const limpio = codeToVerify.trim().toUpperCase();
+    if (!limpio) return;
+    router.push(`/verificar/${encodeURIComponent(limpio)}` as Href);
+  }, []);
+
+  const handleEscaneo = useCallback(
+    ({ data }: BarcodeScanningResult) => {
+      if (yaEscaneado.current) return;
+      yaEscaneado.current = true;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      handleVerify(data);
+      // Se rearma al volver del pasaporte.
+      setTimeout(() => {
+        yaEscaneado.current = false;
+      }, 1500);
+    },
+    [handleVerify]
+  );
 
   const handleClose = () => {
     Haptics.selectionAsync();
@@ -63,22 +82,38 @@ export default function VerificarScreen() {
 
       <View style={styles.scannerWrapper}>
         <View style={styles.scannerFrame}>
+          {permiso?.granted ? (
+            <CameraView
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              enableTorch={flashlightOn}
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={handleEscaneo}
+            />
+          ) : null}
           <View style={styles.corners}>
             <View style={[styles.corner, styles.cornerTL, { borderColor: primaryContainer }]} />
             <View style={[styles.corner, styles.cornerTR, { borderColor: primaryContainer }]} />
             <View style={[styles.corner, styles.cornerBL, { borderColor: primaryContainer }]} />
             <View style={[styles.corner, styles.cornerBR, { borderColor: primaryContainer }]} />
           </View>
-          <View style={styles.scannerContent}>
-            <IconSymbol size={64} name="photo_camera" color={onSurfaceVariant} />
-            <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant }, styles.scannerText]}>
-              Apunta al código QR del lote
-            </Text>
-            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.scannerHint]}>
-              Formato: BTR-XXXX-XXXX
-            </Text>
-          </View>
+          {!permiso?.granted ? (
+            <View style={styles.scannerContent}>
+              <IconSymbol size={64} name="photo_camera" color={onSurfaceVariant} />
+              <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant }, styles.scannerText]}>
+                {permiso
+                  ? 'Necesitamos la cámara para leer el código QR'
+                  : 'Preparando la cámara…'}
+              </Text>
+              {permiso && !permiso.granted ? (
+                <PrimaryButton label="Permitir cámara" onPress={() => void pedirPermiso()} />
+              ) : null}
+            </View>
+          ) : null}
         </View>
+        <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.scannerHint]}>
+          Apunta al QR del Pasaporte de Café
+        </Text>
       </View>
 
       <View style={styles.manualInputSection}>
@@ -86,7 +121,7 @@ export default function VerificarScreen() {
         <View style={styles.inputRow}>
           <TextInput
             style={[styles.input, typeScale.dataMono, { color: onSurface, borderColor: outline }]}
-            placeholder="BTR-2024-XXXX"
+            placeholder="BT-XXXXXXXXXX"
             placeholderTextColor={onSurfaceVariant}
             value={codigo}
             onChangeText={setCodigo}
@@ -96,25 +131,6 @@ export default function VerificarScreen() {
         </View>
       </View>
 
-      <View style={styles.demoSection}>
-        <Text style={[typeScale.labelMedium, { color: onSurfaceVariant }, styles.demoTitle]}>
-          Probar con lote demo
-        </Text>
-        <View style={styles.demoButtons}>
-          <Pressable
-            onPress={() => handleVerify('BTR-2024-0042')}
-            style={({ pressed }) => [styles.demoButton, { backgroundColor: primaryContainer, opacity: pressed ? 0.85 : 1 }]}
-          >
-            <Text style={[typeScale.labelLarge, { color: onPrimaryContainer }]}>BTR-2024-0042</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => handleVerify('BTR-2024-0128')}
-            style={({ pressed }) => [styles.demoButton, { backgroundColor: primaryContainer, opacity: pressed ? 0.85 : 1 }]}
-          >
-            <Text style={[typeScale.labelLarge, { color: onPrimaryContainer }]}>BTR-2024-0128</Text>
-          </Pressable>
-        </View>
-      </View>
     </SafeAreaView>
   );
 }

@@ -1,6 +1,6 @@
 # [Mobile] F10 — Wizard conectado: POST /v1/lotes con finca_id, fecha_cosecha e Idempotency-Key
 
-> **GitHub:** [#31](https://github.com/FerLpz55/BeanTrust/issues/31) · **Estado:** Todo · **Label:** —
+> **GitHub:** [#31](https://github.com/FerLpz55/BeanTrust/issues/31) · **Estado:** Done · **Label:** —
 > **Depende de:** F07, F08 · **Desbloquea:** —
 
 ## Contexto
@@ -17,9 +17,9 @@ El wizard F02 (`app/(app)/lotes/nuevo.tsx`) guarda con `addLote()` en memoria lo
 
 ## Criterios de aceptación
 
-- [ ] Crear un lote desde el wizard lo persiste en el backend y aparece en dashboard/trazabilidad.
-- [ ] Doble tap / retry no duplica el lote (idempotencia demostrada en test o manualmente).
-- [ ] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+- [x] Crear un lote desde el wizard lo persiste en el backend y aparece en dashboard/trazabilidad.
+- [x] Doble tap / retry no duplica el lote (idempotencia demostrada en test o manualmente).
+- [x] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
 
 ## Referencias
 

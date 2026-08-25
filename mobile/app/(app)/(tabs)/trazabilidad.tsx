@@ -1,6 +1,14 @@
 /** Trazabilidad — Lista de lotes con timeline hash (F05). */
 
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/src/components/empty-state';
@@ -8,7 +16,8 @@ import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { LoteCard } from '@/src/components/lote-card';
 import { OfflineBanner } from '@/src/components/offline-banner';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
-import { useLotesStore, type LoteEstado } from '@/src/store/lotes';
+import { useLotes } from '@/src/hooks/use-lotes';
+import { type LoteEstado } from '@/src/store/lotes';
 import { useSyncStore } from '@/src/store/sync';
 import { spacing, typeScale } from '@/src/theme/tokens';
 import { router, type Href } from 'expo-router';
@@ -19,7 +28,8 @@ type Filtro = 'TODOS' | LoteEstado;
 const ESTADOS: Filtro[] = ['TODOS', 'CEREZA', 'PERGAMINO', 'ORO', 'TOSTADO', 'VENDIDO', 'RECHAZADO'];
 
 export default function TrazabilidadScreen() {
-  const { lotes, isLoading } = useLotesStore();
+  const { lotes, isLoading, error, refrescar, refrescando, hayMas, cargarMas, isLoadingMore } =
+    useLotes();
   const { pendingCount } = useSyncStore();
   const [filtro, setFiltro] = useState<Filtro>('TODOS');
 
@@ -48,9 +58,13 @@ export default function TrazabilidadScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <OfflineBanner pendingCount={pendingCount} onRetry={() => {}} />
+      <OfflineBanner pendingCount={pendingCount} onRetry={refrescar} />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refrescando} onRefresh={refrescar} />}
+      >
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
@@ -94,6 +108,15 @@ export default function TrazabilidadScreen() {
           </View>
         </View>
 
+        {error ? (
+          <Text
+            style={[typeScale.bodyMedium, { color: onSurfaceVariant }, styles.errorTexto]}
+            accessibilityLiveRegion="polite"
+          >
+            {error}
+          </Text>
+        ) : null}
+
         {/* Lista de lotes */}
         {lotesFiltrados.length === 0 ? (
           <EmptyState
@@ -109,13 +132,24 @@ export default function TrazabilidadScreen() {
           />
         ) : (
           <View style={styles.lotesList}>
-            {lotesFiltrados.map(lote => (
-              <LoteCard
-                key={lote.id}
-                lote={lote}
-                onPressId={handleLotePress}
-              />
+            {lotesFiltrados.map((lote) => (
+              <LoteCard key={lote.id} lote={lote} onPressId={handleLotePress} />
             ))}
+
+            {/* Paginación por cursor (§6): se pide la siguiente página bajo demanda. */}
+            {hayMas && filtro === 'TODOS' ? (
+              isLoadingMore ? (
+                <ActivityIndicator color={primary} style={styles.masIndicador} />
+              ) : (
+                <Pressable
+                  onPress={cargarMas}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.masBtn, { opacity: pressed ? 0.7 : 1 }]}
+                >
+                  <Text style={[typeScale.labelLarge, { color: primary }]}>Cargar más lotes</Text>
+                </Pressable>
+              )
+            ) : null}
           </View>
         )}
       </ScrollView>
@@ -124,6 +158,17 @@ export default function TrazabilidadScreen() {
 }
 
 const styles = StyleSheet.create({
+  errorTexto: {
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  masBtn: {
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+  },
+  masIndicador: {
+    marginVertical: spacing.lg,
+  },
   root: {
     flex: 1,
   },

@@ -1,6 +1,6 @@
 # [Mobile] F09 — Lotes reales: lista paginada por cursor + detalle con timeline hash por etapa
 
-> **GitHub:** [#30](https://github.com/FerLpz55/BeanTrust/issues/30) · **Estado:** Todo · **Label:** —
+> **GitHub:** [#30](https://github.com/FerLpz55/BeanTrust/issues/30) · **Estado:** Done · **Label:** —
 > **Depende de:** F07 · **Desbloquea:** F11
 
 ## Contexto
@@ -19,9 +19,11 @@
 
 ## Criterios de aceptación
 
-- [ ] Dashboard, trazabilidad y detalle muestran solo datos del backend (cero mocks de lotes).
-- [ ] Paginación por cursor funciona en trazabilidad; timeline renderiza el historial real con hash por etapa.
-- [ ] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+- [x] Dashboard, trazabilidad y detalle muestran solo datos del backend (cero mocks de lotes).
+- [x] Paginación por cursor funciona en trazabilidad; timeline renderiza el historial real con hash por etapa.
+- [x] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+- [ ] **Pendiente**: migrar las listas a FlashList (`@shopify/flash-list` no se instalo;
+      hoy siguen en `ScrollView` + `map`, con paginacion por cursor bajo demanda).
 
 ## Referencias
 

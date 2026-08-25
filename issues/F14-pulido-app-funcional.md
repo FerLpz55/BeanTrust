@@ -3,6 +3,10 @@
 > **GitHub:** [#35](https://github.com/FerLpz55/BeanTrust/issues/35) · **Estado:** Todo · **Label:** —
 > **Depende de:** F09–F13 · **Desbloquea:** —
 
+> **Estado real:** ya se cablearon el boton del certificado QR, los `onRetry` del banner
+> offline y los chips muertos de Mercado. Quedan los `MenuItem` de Ajustes, el color
+> hardcodeado de `error-boundary`/`auth-shell` y la sincronizacion forzada.
+
 ## Contexto
 
 Con los flujos ya conectados (F07–F13), quedan acciones que **parecen funcionales pero no hacen nada**, y deuda visual fuera del sistema de diseño "Copa de cata":

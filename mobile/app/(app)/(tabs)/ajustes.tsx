@@ -1,23 +1,43 @@
-/** Ajustes — Perfil, tema y logout (F06). */
+/**
+ * Ajustes — Perfil, finca y cierre de sesión (F06/F08).
+ *
+ * Datos reales: la identidad sale de `GET /v1/auth/me` (store de auth) y las
+ * fincas de `GET /v1/fincas` (B15). El contrato de `/auth/me` no incluye el
+ * nombre de la persona ni la fecha de alta, así que la UI no los inventa.
+ */
 
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 
 import { BrandMark } from '@/src/components/brand-mark';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useAuthStore } from '@/src/store/auth';
 import { useSyncStore } from '@/src/store/sync';
+import { useLotesStore } from '@/src/store/lotes';
 import { usePerfilStore } from '@/src/store/perfil';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 
 export default function AjustesScreen() {
   const logout = useAuthStore((s) => s.logout);
+  const email = useAuthStore((s) => s.email);
+  const rol = useAuthStore((s) => s.rol);
   const { pendingCount, isOnline } = useSyncStore();
-  const { perfil } = usePerfilStore();
+  const fincas = usePerfilStore((s) => s.fincas);
+  const cargarFincas = usePerfilStore((s) => s.cargarFincas);
+  const lotes = useLotesStore((s) => s.lotes);
+
+  useEffect(() => {
+    void cargarFincas();
+  }, [cargarFincas]);
+
+  // Estadísticas derivadas de los lotes reales ya cargados.
+  const lotesTotales = lotes.length;
+  const certificadosEmitidos = lotes.filter((l) => l.certificado).length;
+  const finca = fincas[0] ?? null;
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
@@ -43,11 +63,6 @@ export default function AjustesScreen() {
     Haptics.selectionAsync();
   }, []);
 
-  const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? '' : d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
-  };
-
   const getRoleColors = (rol: string) => {
     switch (rol) {
       case 'productor':
@@ -62,7 +77,7 @@ export default function AjustesScreen() {
     }
   };
 
-  const roleColors = getRoleColors(perfil.rol);
+  const roleColors = getRoleColors(rol ?? '');
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: useThemeColor('background') }]}>
@@ -84,50 +99,63 @@ export default function AjustesScreen() {
             <IconSymbol size={32} name="person" color={onSurfaceVariant} />
           </View>
           <View style={styles.profileInfo}>
-            <Text style={[typeScale.titleLarge, { color: onSurface }]} numberOfLines={1}>{perfil.nombre}</Text>
-            <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]} numberOfLines={1} ellipsizeMode="tail">
-              {perfil.email}
+            <Text
+              style={[typeScale.titleLarge, { color: onSurface }]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {email ?? 'Sesión activa'}
             </Text>
-            <View style={styles.roleRow}>
-              <View style={[styles.roleChip, { backgroundColor: roleColors.bg }]}>
-                <Text style={[typeScale.labelMedium, { color: roleColors.text }]}>
-                  {perfil.rol.charAt(0).toUpperCase() + perfil.rol.slice(1)}
-                </Text>
+            {rol ? (
+              <View style={styles.roleRow}>
+                <View style={[styles.roleChip, { backgroundColor: roleColors.bg }]}>
+                  <Text style={[typeScale.labelMedium, { color: roleColors.text }]}>
+                    {rol.charAt(0).toUpperCase() + rol.slice(1)}
+                  </Text>
+                </View>
               </View>
-            </View>
-            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
-              Miembro desde {formatDate(perfil.fecha_registro)}
-            </Text>
+            ) : null}
           </View>
         </View>
 
         {/* Finca Section */}
-        {perfil.finca && (
+        {finca && (
           <View style={styles.section}>
-            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.sectionTitle]}>MI FINCA</Text>
-            <View style={[styles.card, { backgroundColor: surfaceContainerLow, borderRadius: radii.large }]}>
+            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.sectionTitle]}>
+              MI FINCA
+            </Text>
+            <View
+              style={[
+                styles.card,
+                { backgroundColor: surfaceContainerLow, borderRadius: radii.large },
+              ]}
+            >
               <View style={styles.cardHeader}>
                 <IconSymbol size={24} name="landscape" color={onSurfaceVariant} />
-                <Text style={[typeScale.titleMedium, { color: onSurface }]}>{perfil.finca.nombre}</Text>
+                <Text style={[typeScale.titleMedium, { color: onSurface }]}>{finca.nombre}</Text>
               </View>
               <View style={styles.fincaDetailRow}>
                 <IconSymbol size={20} name="location-on" color={onSurfaceVariant} />
                 <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
-                  {perfil.finca.municipio}, {perfil.finca.departamento}
+                  {finca.municipio}
                 </Text>
               </View>
-              <View style={styles.fincaDetailRow}>
-                <IconSymbol size={20} name="terrain" color={onSurfaceVariant} />
-                <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
-                  {perfil.finca.altitud_min} - {perfil.finca.altitud_max} msnm
-                </Text>
-              </View>
-              <View style={styles.fincaDetailRow}>
-                <IconSymbol size={20} name="crop-square" color={onSurfaceVariant} />
-                <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
-                  {perfil.finca.hectareas} hectáreas
-                </Text>
-              </View>
+              {finca.altitud_min !== null && finca.altitud_max !== null ? (
+                <View style={styles.fincaDetailRow}>
+                  <IconSymbol size={20} name="terrain" color={onSurfaceVariant} />
+                  <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
+                    {finca.altitud_min} - {finca.altitud_max} msnm
+                  </Text>
+                </View>
+              ) : null}
+              {finca.organica ? (
+                <View style={styles.fincaDetailRow}>
+                  <IconSymbol size={20} name="eco" color={onSurfaceVariant} />
+                  <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
+                    Producción orgánica
+                  </Text>
+                </View>
+              ) : null}
             </View>
           </View>
         )}
@@ -137,11 +165,13 @@ export default function AjustesScreen() {
           <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.sectionTitle]}>ACTIVIDAD</Text>
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: surfaceContainerLow, borderRadius: radii.medium }]}>
-              <Text style={[typeScale.titleLarge, { color: onSurface }]}>{perfil.lotes_totales}</Text>
+              <Text style={[typeScale.titleLarge, { color: onSurface }]}>{lotesTotales}</Text>
               <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center' }]}>lotes registrados</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: surfaceContainerLow, borderRadius: radii.medium }]}>
-              <Text style={[typeScale.titleLarge, { color: onSurface }]}>{perfil.certificados_emitidos}</Text>
+              <Text style={[typeScale.titleLarge, { color: onSurface }]}>
+                {certificadosEmitidos}
+              </Text>
               <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center' }]}>certificados</Text>
             </View>
           </View>

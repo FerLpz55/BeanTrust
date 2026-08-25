@@ -1,7 +1,14 @@
 /** Dashboard Mi Finca — fila de estadísticas + lotes recientes (F01). */
 
 import * as Haptics from 'expo-haptics';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
@@ -10,7 +17,8 @@ import { OfflineBanner } from '@/src/components/offline-banner';
 import { PrimaryButton } from '@/src/components/primary-button';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
-import { useLotesStore, type LoteEstado } from '@/src/store/lotes';
+import { useLotes } from '@/src/hooks/use-lotes';
+import { type LoteEstado } from '@/src/store/lotes';
 import { useSyncStore } from '@/src/store/sync';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 import { router, type Href } from 'expo-router';
@@ -24,7 +32,7 @@ function formatFechaRelativa(iso: string): string {
 }
 
 export default function DashboardScreen() {
-  const { lotes, isLoading } = useLotesStore();
+  const { lotes, isLoading, error: errorLotes, refrescar, refrescando } = useLotes();
   const { pendingCount } = useSyncStore();
 
   const onSurface = useThemeColor('onSurface');
@@ -109,9 +117,22 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <OfflineBanner pendingCount={pendingCount} onRetry={() => {}} />
+      <OfflineBanner pendingCount={pendingCount} onRetry={refrescar} />
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refrescando} onRefresh={refrescar} />}
+      >
+        {errorLotes ? (
+          <Text
+            style={[typeScale.bodyMedium, { color: onSurfaceVariant }, styles.errorTexto]}
+            accessibilityLiveRegion="polite"
+          >
+            {errorLotes}
+          </Text>
+        ) : null}
         {/* Header */}
         <View style={styles.header}>
           <BrandMark size={40} />
@@ -252,6 +273,10 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  errorTexto: {
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
   root: {
     flex: 1,
   },

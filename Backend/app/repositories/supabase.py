@@ -356,6 +356,43 @@ class SupabaseQRRepo:
             raise RepoError("No se pudo registrar la verificación.") from exc
 
 
+def _listar_paginado(
+    cliente,
+    tabla: str,
+    columna: str,
+    valor: uuid.UUID,
+    cursor: Cursor | None,
+    limit: int,
+    mapper,
+    error: str,
+):
+    """Listado descendente por cursor sobre `(creado_en, id)` (§6).
+
+    Compartido por los listados de propinas y pagos para no repetir la misma
+    query en cada repositorio.
+    """
+    try:
+        query = (
+            cliente.table(tabla)
+            .select("*")
+            .eq(columna, str(valor))
+            .order("creado_en", desc=True)
+            .order("id", desc=True)
+            .limit(limit)
+        )
+        if cursor is not None:
+            query = query.lt("creado_en", cursor.ts.isoformat())
+        resp = query.execute()
+    except APIError as exc:
+        raise RepoError(error) from exc
+    registros = [mapper(fila) for fila in (resp.data or [])]
+    siguiente: Cursor | None = None
+    if len(registros) == limit and registros:
+        ultimo = registros[-1]
+        siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
+    return registros, siguiente
+
+
 class SupabasePagoRepo:
     def __init__(self, cliente) -> None:
         self._cliente = cliente
@@ -379,6 +416,28 @@ class SupabasePagoRepo:
         except APIError as exc:
             raise RepoError("No se pudo consultar el pago.") from exc
         return fila_a_pago(resp.data) if resp.data else None
+
+    def listar_por_cooperativa(
+        self, cooperativa_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Pago], Cursor | None]:
+        return _listar_paginado(
+            self._cliente, "pago", "cooperativa_id", cooperativa_id, cursor, limit,
+            fila_a_pago, "No se pudo listar los pagos.",
+        )
+
+    def total_confirmado_por_productor(self, productor_id: uuid.UUID) -> float:
+        """97% de las ventas confirmadas de los lotes del productor (join lote→finca)."""
+        try:
+            resp = (
+                self._cliente.table("pago")
+                .select("monto_productor, lote!inner(finca!inner(productor_id))")
+                .eq("estado_pago", EstadoPago.CONFIRMADO.value)
+                .eq("lote.finca.productor_id", str(productor_id))
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudo calcular el saldo de pagos.") from exc
+        return round(sum(fila["monto_productor"] for fila in (resp.data or [])), 2)
 
     def buscar_por_idempotencia(self, clave: uuid.UUID) -> Pago | None:
         try:
@@ -466,52 +525,32 @@ class SupabasePropinaRepo:
     def buscar_por_productor(
         self, productor_id: uuid.UUID, cursor: Cursor | None, limit: int
     ) -> tuple[list[Propina], Cursor | None]:
-        try:
-            query = (
-                self._cliente.table("propina")
-                .select("*")
-                .eq("productor_id", str(productor_id))
-                .order("creado_en", desc=True)
-                .order("id", desc=True)
-                .limit(limit)
-            )
-            if cursor is not None:
-                query = query.lt("creado_en", cursor.ts.isoformat())
-            resp = query.execute()
-        except APIError as exc:
-            raise RepoError("No se pudo listar las propinas.") from exc
-        filas = resp.data or []
-        propinas = [fila_a_propina(fila) for fila in filas]
-        siguiente: Cursor | None = None
-        if len(propinas) == limit and propinas:
-            ultimo = propinas[-1]
-            siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
-        return propinas, siguiente
+        return _listar_paginado(
+            self._cliente, "propina", "productor_id", productor_id, cursor, limit,
+            fila_a_propina, "No se pudo listar las propinas.",
+        )
 
     def buscar_por_comprador(
         self, comprador_id: uuid.UUID, cursor: Cursor | None, limit: int
     ) -> tuple[list[Propina], Cursor | None]:
+        return _listar_paginado(
+            self._cliente, "propina", "comprador_id", comprador_id, cursor, limit,
+            fila_a_propina, "No se pudo listar las propinas.",
+        )
+
+    def total_confirmado_por_productor(self, productor_id: uuid.UUID) -> float:
+        """Propinas confirmadas del productor (100% directas, ADR-10)."""
         try:
-            query = (
+            resp = (
                 self._cliente.table("propina")
-                .select("*")
-                .eq("comprador_id", str(comprador_id))
-                .order("creado_en", desc=True)
-                .order("id", desc=True)
-                .limit(limit)
+                .select("monto")
+                .eq("productor_id", str(productor_id))
+                .eq("estado_propina", EstadoPropina.CONFIRMADA.value)
+                .execute()
             )
-            if cursor is not None:
-                query = query.lt("creado_en", cursor.ts.isoformat())
-            resp = query.execute()
         except APIError as exc:
-            raise RepoError("No se pudo listar las propinas.") from exc
-        filas = resp.data or []
-        propinas = [fila_a_propina(fila) for fila in filas]
-        siguiente: Cursor | None = None
-        if len(propinas) == limit and propinas:
-            ultimo = propinas[-1]
-            siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
-        return propinas, siguiente
+            raise RepoError("No se pudo calcular el saldo de propinas.") from exc
+        return round(sum(fila["monto"] for fila in (resp.data or [])), 2)
 
 
 class SupabaseFincaRepo:
@@ -530,6 +569,32 @@ class SupabaseFincaRepo:
         except APIError as exc:
             raise RepoError("No se pudo consultar la finca.") from exc
         return fila_a_finca(resp.data) if resp.data else None
+
+    def _listar_por(self, columna: str, valor: uuid.UUID) -> list[Finca]:
+        try:
+            resp = (
+                self._cliente.table("finca")
+                .select("*")
+                .eq(columna, str(valor))
+                .order("nombre")
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudieron consultar las fincas.") from exc
+        return [fila_a_finca(fila) for fila in (resp.data or [])]
+
+    def listar_por_productor(self, productor_id: uuid.UUID) -> list[Finca]:
+        return self._listar_por("productor_id", productor_id)
+
+    def listar_por_cooperativa(self, cooperativa_id: uuid.UUID) -> list[Finca]:
+        return self._listar_por("cooperativa_id", cooperativa_id)
+
+    def listar_todas(self) -> list[Finca]:
+        try:
+            resp = self._cliente.table("finca").select("*").order("nombre").execute()
+        except APIError as exc:
+            raise RepoError("No se pudieron consultar las fincas.") from exc
+        return [fila_a_finca(fila) for fila in (resp.data or [])]
 
 
 class SupabaseUsuarioRepo:

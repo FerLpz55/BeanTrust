@@ -1,6 +1,6 @@
 # [Backend] B14: Endpoint de recuperación de contraseña (POST /v1/auth/recover + confirm)
 
-> **GitHub:** [#27](https://github.com/FerLpz55/BeanTrust/issues/27) · **Estado:** Todo · **Label:** `backend`
+> **GitHub:** [#27](https://github.com/FerLpz55/BeanTrust/issues/27) · **Estado:** Done · **Label:** `backend`
 > **Depende de:** — · **Desbloquea:** F08
 
 ## Contexto
@@ -17,8 +17,8 @@ El móvil tiene `app/(auth)/recover.tsx` en modo **demo** (`setTimeout`, sin red
 
 ## Criterios de aceptación
 
-- [ ] Flujo completo recover→confirm funciona contra el almacén en memoria con tests (expiración, reuso de token, email inexistente).
-- [ ] `test_contrato_api.py`, README y ARCHITECTURE sincronizados; `ruff check app tests` + `pytest` en verde.
+- [x] Flujo completo recover→confirm funciona contra el almacén en memoria con tests (expiración, reuso de token, email inexistente).
+- [x] `test_contrato_api.py`, README y ARCHITECTURE sincronizados; `ruff check app tests` + `pytest` en verde.
 
 ## Referencias
 

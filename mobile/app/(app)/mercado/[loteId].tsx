@@ -1,8 +1,12 @@
 /**
- * Panel de Comercio Justo (F04).
+ * Panel de Comercio Justo (F04/F13) - `GET /v1/mercado/{lote_id}` (B16, ADR-9).
+ *
+ * Proyeccion de **solo lectura**: los montos 97/3 los materializa el backend.
+ * La unica escritura es la propina (`POST /v1/propinas`), idempotente y
+ * reservada al comprador de la venta (§10). Dinero simulado: web3 en pausa (B7).
  */
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, Pressable, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -11,17 +15,33 @@ import { DonutChart } from '@/src/components/donut-chart';
 import { PrimaryButton } from '@/src/components/primary-button';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
+import { ApiError } from '@/src/api/client';
+import { useAuthStore } from '@/src/store/auth';
 import { useMercadoStore } from '@/src/store/mercado';
+import { nuevaClaveIdempotencia } from '@/src/utils/idempotencia';
 import { spacing, typeScale, radii } from '@/src/theme/tokens';
 import { EmptyState } from '@/src/components/empty-state';
 
 export default function LoteComercioJustoScreen() {
   const { loteId } = useLocalSearchParams<{ loteId: string }>();
-  const { lotes, enviarPropina } = useMercadoStore();
-  const lote = lotes.find((l) => l.lote_id === loteId);
+  const rol = useAuthStore((s) => s.rol);
+  const lote = useMercadoStore((s) => (loteId ? s.paneles[loteId] : undefined));
+  const cargarPanel = useMercadoStore((s) => s.cargarPanel);
+  const enviarPropina = useMercadoStore((s) => s.enviarPropina);
+  const enviando = useMercadoStore((s) => s.enviando);
+  const errorStore = useMercadoStore((s) => s.error);
 
   const [tipModalVisible, setTipModalVisible] = useState(false);
   const [tipAmount, setTipAmount] = useState('');
+  // Una clave por intencion de propina: los reintentos no duplican el cargo.
+  const [claveIdempotencia, setClaveIdempotencia] = useState(nuevaClaveIdempotencia);
+
+  useEffect(() => {
+    if (loteId) void cargarPanel(loteId);
+  }, [loteId, cargarPanel]);
+
+  // Solo el comprador de la venta puede dar propina (ADR-10).
+  const puedeDarPropina = rol === 'comprador';
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
@@ -37,6 +57,21 @@ export default function LoteComercioJustoScreen() {
   const onPrimary = useThemeColor('onPrimary');
   const background = useThemeColor('background');
 
+  const handleConfirmTip = useCallback(async () => {
+    const amount = parseFloat(tipAmount.replace(',', '.'));
+    if (Number.isNaN(amount) || amount <= 0 || !lote) return;
+    try {
+      await enviarPropina(lote.lote_id, amount, claveIdempotencia);
+      setTipAmount('');
+      setTipModalVisible(false);
+      // Nueva clave: la siguiente propina es otra intencion.
+      setClaveIdempotencia(nuevaClaveIdempotencia());
+    } catch (err) {
+      // El store ya expone el mensaje; aqui solo se evita cerrar el formulario.
+      if (!(err instanceof ApiError)) throw err;
+    }
+  }, [tipAmount, lote, enviarPropina, claveIdempotencia]);
+
   if (!lote) {
     return (
       <SafeAreaView style={[styles.root, { backgroundColor: background }]}>
@@ -50,19 +85,11 @@ export default function LoteComercioJustoScreen() {
     );
   }
 
-  const handleConfirmTip = () => {
-    const amount = parseFloat(tipAmount);
-    if (!isNaN(amount) && amount > 0) {
-      enviarPropina(lote.lote_id, amount);
-      setTipAmount('');
-      setTipModalVisible(false);
-    }
-  };
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: background }]}>
-      <KeyboardAvoidingView 
-        style={styles.keyboardView} 
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -82,13 +109,8 @@ export default function LoteComercioJustoScreen() {
               {lote.productor_nombre}
             </Text>
             <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center', marginBottom: spacing.sm }]}>
-              {lote.finca_nombre}, {lote.finca_municipio}
+              {lote.finca_nombre}{lote.finca_municipio ? `, ${lote.finca_municipio}` : ''}
             </Text>
-            {lote.testimonio && (
-              <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }]}>
-                &quot;{lote.testimonio}&quot;
-              </Text>
-            )}
           </View>
 
           {/* Donut Section */}
@@ -108,12 +130,12 @@ export default function LoteComercioJustoScreen() {
               <View style={styles.legendRow}>
                 <View style={[styles.legendDot, { backgroundColor: primary }]} />
                 <Text style={[typeScale.bodyMedium, { color: onSurface, flex: 1 }]}>Productor (97%)</Text>
-                <Text style={[typeScale.labelLarge, { color: onSurface }]}>${lote.precio_productor.toFixed(2)}</Text>
+                <Text style={[typeScale.labelLarge, { color: onSurface }]}>${lote.monto_productor.toFixed(2)}</Text>
               </View>
               <View style={styles.legendRow}>
                 <View style={[styles.legendDot, { backgroundColor: outlineVariant }]} />
                 <Text style={[typeScale.bodyMedium, { color: onSurface, flex: 1 }]}>Plataforma (3%)</Text>
-                <Text style={[typeScale.labelLarge, { color: onSurface }]}>${lote.precio_plataforma.toFixed(2)}</Text>
+                <Text style={[typeScale.labelLarge, { color: onSurface }]}>${lote.monto_plataforma.toFixed(2)}</Text>
               </View>
             </View>
             <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center', marginTop: spacing.md }]}>
@@ -130,7 +152,16 @@ export default function LoteComercioJustoScreen() {
               100% al productor
             </Text>
 
-            {!tipModalVisible ? (
+            {!puedeDarPropina ? (
+              <Text
+                style={[
+                  typeScale.bodySmall,
+                  { color: onTertiaryContainer, textAlign: 'center' },
+                ]}
+              >
+                Solo el comprador de la venta puede dejar propina.
+              </Text>
+            ) : !tipModalVisible ? (
               <>
                 <Pressable
                   style={({ pressed }) => [
@@ -145,7 +176,7 @@ export default function LoteComercioJustoScreen() {
                 <View style={styles.secureContainer}>
                   <IconSymbol name="lock" size={16} color={onTertiaryContainer} />
                   <Text style={[typeScale.bodySmall, { color: onTertiaryContainer }]}>
-                    Transacción segura e inmutable
+                    Entorno de prueba: el pago es simulado
                   </Text>
                 </View>
               </>
@@ -153,8 +184,8 @@ export default function LoteComercioJustoScreen() {
               <View style={styles.tipModal}>
                 <TextInput
                   style={[
-                    styles.tipInput, 
-                    typeScale.headlineMedium, 
+                    styles.tipInput,
+                    typeScale.headlineMedium,
                     { color: onSurface, backgroundColor: surfaceContainerLow, borderColor: outlineVariant }
                   ]}
                   placeholder="0.00"
@@ -164,9 +195,19 @@ export default function LoteComercioJustoScreen() {
                   onChangeText={setTipAmount}
                   autoFocus
                 />
-                <PrimaryButton 
-                  label="Confirmar" 
-                  onPress={handleConfirmTip} 
+                {errorStore ? (
+                  <Text
+                    style={[typeScale.bodySmall, { color: onSurface }, styles.errorTexto]}
+                    accessibilityLiveRegion="polite"
+                  >
+                    {errorStore}
+                  </Text>
+                ) : null}
+                <PrimaryButton
+                  label="Confirmar"
+                  loadingLabel="Enviando..."
+                  loading={enviando}
+                  onPress={handleConfirmTip}
                   style={{ marginTop: spacing.md }}
                 />
                 <Pressable
@@ -198,12 +239,12 @@ export default function LoteComercioJustoScreen() {
                         ${propina.monto.toFixed(2)} {propina.moneda}
                       </Text>
                       <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
-                        {new Date(propina.fecha).toLocaleDateString()} · {propina.comprador_nombre}
+                        {new Date(propina.creado_en).toLocaleDateString()}
                       </Text>
                     </View>
-                    <View style={[styles.pill, { backgroundColor: propina.estado === 'CONFIRMADA' ? primaryContainer : surfaceContainerHigh }]}>
-                      <Text style={[typeScale.labelMedium, { color: propina.estado === 'CONFIRMADA' ? onPrimaryContainer : onSurface }]}>
-                        {propina.estado}
+                    <View style={[styles.pill, { backgroundColor: propina.estado_propina === 'CONFIRMADA' ? primaryContainer : surfaceContainerHigh }]}>
+                      <Text style={[typeScale.labelMedium, { color: propina.estado_propina === 'CONFIRMADA' ? onPrimaryContainer : onSurface }]}>
+                        {propina.estado_propina}
                       </Text>
                     </View>
                   </View>
@@ -223,6 +264,10 @@ export default function LoteComercioJustoScreen() {
 }
 
 const styles = StyleSheet.create({
+  errorTexto: {
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
   root: { flex: 1 },
   keyboardView: { flex: 1 },
   scrollContent: {

@@ -36,7 +36,7 @@ Eres el ingeniero backend senior de BeanTrust (FastAPI, Python ≥3.12). Trabaja
 ## Estado real (para no re-inventar)
 
 - Montados y probados: trazabilidad (lotes/eventos), auth (login/register/refresh/me), pagos 97/3, propinas (tenancy en `PropinaService.listar_propinas_lote`), verificar QR, sync.
-- **STUBs**: `GET /v1/pagos` y `GET /v1/pagos/saldo` (vacíos/ceros). `PropinaService.obtener_saldo_productor` tiene bug latente (`self._repo_pago` no inyectado).
+- Implementados (B13): `GET /v1/pagos` (cursor, cooperativa) y `GET /v1/pagos/saldo` (productor/admin). `PropinaService` ya recibe `repo_pago`; la agregación de saldo vive en los repos. `GET /v1/fincas` montado (B15).
 - Supabase: repos + migraciones en `Backend/db/` **sin validar contra BD real** (deuda B11). RLS definido pero inerte (defensa en la capa de servicio). Web3 pausado (B7).
 
 ## Cómo trabajar / entregable

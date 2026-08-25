@@ -11,14 +11,32 @@ dependencies = [
     "supabase>=2.31.0",
     "pyjwt[crypto]>=2.13.0",
     "argon2-cffi>=25.1.0",
+    "email-validator>=2.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+    "httpx>=0.28.1",
+    "ruff>=0.16.2",
+]
+
+# Mantenido para herramientas que ya resuelven PEP 735 (uv, pip moderno).
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
     "httpx>=0.28.1",
     "ruff>=0.16.2",
 ]
+
+# Sin `build-system` explícito, setuptools no sabe qué empaquetar (app/, tests/
+# y db/ conviven en la raíz) y el editable install del README falla.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
 
 [tool.fastapi]
 entrypoint = "app.main:app"

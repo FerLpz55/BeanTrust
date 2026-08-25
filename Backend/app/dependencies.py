@@ -52,7 +52,9 @@ from app.repositories.supabase import (
     SupabaseUsuarioRepo,
 )
 from app.schemas.auth import CurrentUser
+from app.services.finca_service import FincaService
 from app.services.lote_service import LoteService
+from app.services.mercado_service import MercadoService
 from app.services.pagos_service import PagoService
 from app.services.propina_service import PropinaService
 from app.services.qr_service import QrService
@@ -327,6 +329,7 @@ def get_propina_service(
     repo_lote: RepoLoteDep,
     repo_finca: RepoFincaDep,
     repo_usuario: RepoUsuarioDep,
+    repo_pago: RepoPagoDep,
     gateway: Annotated[GatewayPagos, Depends(get_gateway_pagos)],
 ) -> PropinaService:
     return PropinaService(
@@ -334,10 +337,31 @@ def get_propina_service(
         repo_lote=repo_lote,
         repo_finca=repo_finca,
         repo_usuario=repo_usuario,
+        repo_pago=repo_pago,
         gateway=gateway,
     )
 
 
+def get_finca_service(repo_finca: RepoFincaDep) -> FincaService:
+    return FincaService(repo_finca=repo_finca)
+
+
+def get_mercado_service(
+    repo_pago: RepoPagoDep,
+    repo_propina: RepoPropinaDep,
+    repo_usuario: RepoUsuarioDep,
+    propina_service: Annotated[PropinaService, Depends(get_propina_service)],
+) -> MercadoService:
+    return MercadoService(
+        repo_pago=repo_pago,
+        repo_propina=repo_propina,
+        repo_usuario=repo_usuario,
+        propina_service=propina_service,
+    )
+
+
 LoteServiceDep = Annotated[LoteService, Depends(get_lote_service)]
+MercadoServiceDep = Annotated[MercadoService, Depends(get_mercado_service)]
+FincaServiceDep = Annotated[FincaService, Depends(get_finca_service)]
 PagoServiceDep = Annotated[PagoService, Depends(get_pagos_service)]
 PropinaServiceDep = Annotated[PropinaService, Depends(get_propina_service)]

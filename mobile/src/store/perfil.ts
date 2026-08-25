@@ -1,51 +1,47 @@
 /**
- * Perfil store for the logged-in user.
+ * Perfil del usuario autenticado (F08).
+ *
+ * Sustituye el mock fijo por datos reales: la identidad sale de
+ * `GET /v1/auth/me` (vía el store de auth) y las fincas de `GET /v1/fincas`
+ * (B15). No hay endpoint de "nombre de la persona" todavía: `/auth/me`
+ * devuelve `id`, `rol` y `email`, así que la UI muestra el correo como
+ * identidad hasta que el contrato exponga `nombre`.
  */
+
 import { create } from 'zustand';
 
-export interface Finca {
-  nombre: string;
-  municipio: string;
-  departamento: string;
-  altitud_min: number;
-  altitud_max: number;
-  hectareas: number;
-}
-
-export interface Perfil {
-  nombre: string;
-  email: string;
-  rol: 'productor' | 'cooperativa' | 'comprador' | 'admin';
-  avatar_url?: string;
-  finca?: Finca;
-  fecha_registro: string;
-  lotes_totales: number;
-  certificados_emitidos: number;
-}
+import { ApiError } from '@/src/api/client';
+import { listarFincas } from '@/src/api/fincas';
+import type { FincaRead } from '@/src/api/types';
 
 interface PerfilState {
-  perfil: Perfil;
+  fincas: FincaRead[];
   isLoading: boolean;
+  error: string | null;
+  cargarFincas: () => Promise<void>;
+  /** Finca por defecto para el alta de lote (F10). */
+  fincaPorDefecto: () => FincaRead | null;
 }
 
-const mockPerfil: Perfil = {
-  nombre: 'Carlos Mendoza',
-  email: 'productor@beantrust.dev',
-  rol: 'productor',
-  finca: {
-    nombre: 'Finca El Roble',
-    municipio: 'Huehuetenango',
-    departamento: 'Huehuetenango',
-    altitud_min: 1450,
-    altitud_max: 1620,
-    hectareas: 12.5,
-  },
-  fecha_registro: '2024-01-15T00:00:00Z',
-  lotes_totales: 6,
-  certificados_emitidos: 3,
-};
-
-export const usePerfilStore = create<PerfilState>((set) => ({
-  perfil: mockPerfil,
+export const usePerfilStore = create<PerfilState>((set, get) => ({
+  fincas: [],
   isLoading: false,
+  error: null,
+
+  cargarFincas: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      set({ fincas: await listarFincas(), isLoading: false });
+    } catch (err) {
+      // 403 es esperado para el rol comprador (no tiene fincas, matriz §10).
+      const esSinAcceso = err instanceof ApiError && err.status === 403;
+      set({
+        fincas: [],
+        isLoading: false,
+        error: esSinAcceso ? null : 'No se pudieron cargar tus fincas.',
+      });
+    }
+  },
+
+  fincaPorDefecto: () => get().fincas[0] ?? null,
 }));

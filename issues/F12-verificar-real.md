@@ -1,6 +1,6 @@
 # [Mobile] F12 — Verificar real: GET /v1/verificar/{codigo} + escáner QR con expo-camera
 
-> **GitHub:** [#33](https://github.com/FerLpz55/BeanTrust/issues/33) · **Estado:** Todo · **Label:** —
+> **GitHub:** [#33](https://github.com/FerLpz55/BeanTrust/issues/33) · **Estado:** Done · **Label:** —
 > **Depende de:** F07 · **Desbloquea:** —
 
 ## Contexto
@@ -17,9 +17,9 @@
 
 ## Criterios de aceptación
 
-- [ ] Escanear un QR real (o escribir un código real) muestra el Pasaporte de Café desde el backend, con 404/409 diferenciados.
-- [ ] Cero datos mock en el flujo de verificación.
-- [ ] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+- [x] Escanear un QR real (o escribir un código real) muestra el Pasaporte de Café desde el backend, con 404/409 diferenciados.
+- [x] Cero datos mock en el flujo de verificación.
+- [x] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
 
 ## Referencias
 

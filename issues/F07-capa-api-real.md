@@ -1,6 +1,6 @@
 # [Mobile] F07 — Capa de API real (módulos lotes/verificar/pagos/propinas + refresh 401 + .env.example)
 
-> **GitHub:** [#28](https://github.com/FerLpz55/BeanTrust/issues/28) · **Estado:** Todo · **Label:** —
+> **GitHub:** [#28](https://github.com/FerLpz55/BeanTrust/issues/28) · **Estado:** Done · **Label:** —
 > **Depende de:** — · **Desbloquea:** F08, F09, F10, F11, F12, F13
 
 ## Contexto
@@ -21,9 +21,9 @@ Este issue es la **base** de toda la conexión móvil (F08–F13 dependen de él
 
 ## Criterios de aceptación
 
-- [ ] Todos los módulos api compilando y con tests de unidad (happy path + errores 401/404/409/422).
-- [ ] Una petición con token expirado se renueva y reintenta de forma transparente.
-- [ ] `pnpm exec tsc --noEmit` y `pnpm exec expo lint` en verde; README y `.env.example` coherentes con `config.ts`.
+- [x] Todos los módulos api compilando y con tests de unidad (happy path + errores 401/404/409/422).
+- [x] Una petición con token expirado se renueva y reintenta de forma transparente.
+- [x] `pnpm exec tsc --noEmit` y `pnpm exec expo lint` en verde; README y `.env.example` coherentes con `config.ts`.
 
 ## Referencias
 

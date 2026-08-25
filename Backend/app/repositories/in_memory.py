@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from app.models.dominio import (
     CertificadoQR,
     Cooperativa,
+    EstadoPago,
+    EstadoPropina,
     EventoDuplicado,
     Finca,
     Lote,
@@ -22,6 +24,29 @@ from app.models.dominio import (
     Usuario,
 )
 from app.utils.cursor import Cursor
+
+
+def _paginar[T](
+    registros: list[T], cursor: Cursor | None, limit: int
+) -> tuple[list[T], Cursor | None]:
+    """Pagina por cursor descendente sobre `(creado_en, id)` (§6).
+
+    Compartido por los repos en memoria para no repetir el recorrido en cada
+    listado (propinas por productor/comprador, pagos por cooperativa).
+    """
+    registros.sort(key=lambda r: (r.creado_en, r.id), reverse=True)
+    pagina: list[T] = []
+    for registro in registros:
+        if cursor is not None and (registro.creado_en, registro.id) >= (cursor.ts, cursor.id):
+            continue
+        pagina.append(registro)
+        if len(pagina) == limit:
+            break
+    siguiente: Cursor | None = None
+    if len(pagina) == limit and len(registros) > limit:
+        ultimo = pagina[-1]
+        siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
+    return pagina, siguiente
 
 
 @dataclass
@@ -123,6 +148,30 @@ class InMemoryPagoRepo:
     def buscar_por_idempotencia(self, clave: uuid.UUID) -> Pago | None:
         return self._memoria.pagos_idempotencia.get(clave)
 
+    def listar_por_cooperativa(
+        self, cooperativa_id: uuid.UUID, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Pago], Cursor | None]:
+        pagos = [p for p in self._memoria.pagos.values() if p.cooperativa_id == cooperativa_id]
+        return _paginar(pagos, cursor, limit)
+
+    def total_confirmado_por_productor(self, productor_id: uuid.UUID) -> float:
+        """Suma el 97% de las ventas confirmadas de los lotes del productor.
+
+        El vínculo pago → productor pasa por `lote.finca_id`; la agregación vive
+        en el repositorio para que el servicio no recorra estructuras internas.
+        """
+        fincas = {
+            f.id for f in self._memoria.fincas.values() if f.productor_id == productor_id
+        }
+        total = 0.0
+        for pago in self._memoria.pagos.values():
+            if pago.estado_pago is not EstadoPago.CONFIRMADO:
+                continue
+            lote = self._memoria.lotes.get(pago.lote_id)
+            if lote is not None and lote.finca_id in fincas:
+                total += pago.monto_productor
+        return round(total, 2)
+
 
 class InMemoryFincaRepo:
     def __init__(self, memoria: Memoria) -> None:
@@ -130,6 +179,15 @@ class InMemoryFincaRepo:
 
     def buscar_por_id(self, finca_id: uuid.UUID) -> Finca | None:
         return self._memoria.fincas.get(finca_id)
+
+    def listar_por_productor(self, productor_id: uuid.UUID) -> list[Finca]:
+        return [f for f in self._memoria.fincas.values() if f.productor_id == productor_id]
+
+    def listar_por_cooperativa(self, cooperativa_id: uuid.UUID) -> list[Finca]:
+        return [f for f in self._memoria.fincas.values() if f.cooperativa_id == cooperativa_id]
+
+    def listar_todas(self) -> list[Finca]:
+        return list(self._memoria.fincas.values())
 
 
 class InMemoryUsuarioRepo:
@@ -176,44 +234,26 @@ class InMemoryPropinaRepo:
     def buscar_por_productor(
         self, productor_id: uuid.UUID, cursor: Cursor | None, limit: int
     ) -> tuple[list[Propina], Cursor | None]:
-        propinas = [
-            p for p in self._memoria.propinas.values()
-            if p.productor_id == productor_id
-        ]
-        propinas.sort(key=lambda p: (p.creado_en, p.id), reverse=True)
-        pagina: list[Propina] = []
-        for p in propinas:
-            if cursor is not None and (p.creado_en, p.id) >= (cursor.ts, cursor.id):
-                continue
-            pagina.append(p)
-            if len(pagina) == limit:
-                break
-        siguiente: Cursor | None = None
-        if len(pagina) == limit and len(propinas) > limit:
-            ultimo = pagina[-1]
-            siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
-        return pagina, siguiente
+        propinas = [p for p in self._memoria.propinas.values() if p.productor_id == productor_id]
+        return _paginar(propinas, cursor, limit)
 
     def buscar_por_comprador(
         self, comprador_id: uuid.UUID, cursor: Cursor | None, limit: int
     ) -> tuple[list[Propina], Cursor | None]:
-        propinas = [
-            p for p in self._memoria.propinas.values()
-            if p.comprador_id == comprador_id
-        ]
-        propinas.sort(key=lambda p: (p.creado_en, p.id), reverse=True)
-        pagina: list[Propina] = []
-        for p in propinas:
-            if cursor is not None and (p.creado_en, p.id) >= (cursor.ts, cursor.id):
-                continue
-            pagina.append(p)
-            if len(pagina) == limit:
-                break
-        siguiente: Cursor | None = None
-        if len(pagina) == limit and len(propinas) > limit:
-            ultimo = pagina[-1]
-            siguiente = Cursor(id=ultimo.id, ts=ultimo.creado_en)
-        return pagina, siguiente
+        propinas = [p for p in self._memoria.propinas.values() if p.comprador_id == comprador_id]
+        return _paginar(propinas, cursor, limit)
+
+    def total_confirmado_por_productor(self, productor_id: uuid.UUID) -> float:
+        """Suma las propinas confirmadas del productor (100% directas, ADR-10)."""
+        return round(
+            sum(
+                p.monto
+                for p in self._memoria.propinas.values()
+                if p.productor_id == productor_id
+                and p.estado_propina is EstadoPropina.CONFIRMADA
+            ),
+            2,
+        )
 
 
 class FakeGatewayPagos:

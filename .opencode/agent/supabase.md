@@ -39,7 +39,7 @@ Antes de tocar SQL lee las fuentes de verdad y el estado real (no asumas).
 - B11: repos + migraciones **sin validar contra una BD real** (primera conexión pendiente);
   falta columna `wallet public_address`.
 - Trigger de orden: el pago debe existir ANTES del evento VENTA (comentado en `pagos_service.py`).
-- `PropinaService.obtener_saldo_productor` sin cablear al endpoint (STUB de saldo).
+- Saldo cableado (B13): la agregación es `total_confirmado_por_productor` en los repos de pago y propina.
 
 ## Cómo trabajar / entregable
 

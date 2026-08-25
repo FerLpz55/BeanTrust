@@ -1,27 +1,49 @@
 /**
- * Mercado — Saldo y lotes vendidos (F04).
+ * Mercado — Saldo del productor y lotes vendidos (F04/F13).
+ *
+ * Gating por rol (matriz §10):
+ * - **productor**: ve su saldo real (`GET /v1/pagos/saldo`) y sus lotes vendidos.
+ * - **cooperativa/admin**: ven los lotes vendidos; el saldo es del productor.
+ * - **comprador**: no puede listar lotes (`LoteService.listar` lo rechaza; el
+ *   comprador llega al lote escaneando su QR, §8), así que se le indica esa ruta.
+ *
+ * El dinero es simulado por el gateway fake: web3 sigue en pausa (B7).
  */
 
-import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { router, type Href } from 'expo-router';
+import { useCallback, useEffect, useMemo } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/src/components/empty-state';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
+import { useLotes } from '@/src/hooks/use-lotes';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
+import { useAuthStore } from '@/src/store/auth';
 import { useMercadoStore } from '@/src/store/mercado';
-import { spacing, typeScale, radii } from '@/src/theme/tokens';
-import { useCallback } from 'react';
+import { radii, spacing, typeScale } from '@/src/theme/tokens';
 
 export default function MercadoScreen() {
-  const { lotes, saldo } = useMercadoStore();
+  const rol = useAuthStore((s) => s.rol);
+  const saldo = useMercadoStore((s) => s.saldo);
+  const cargarSaldo = useMercadoStore((s) => s.cargarSaldo);
+  const { lotes, refrescar, refrescando } = useLotes();
+
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
   const tertiary = useThemeColor('tertiary');
   const tertiaryContainer = useThemeColor('tertiaryContainer');
   const onTertiaryContainer = useThemeColor('onTertiaryContainer');
   const surfaceContainer = useThemeColor('surfaceContainer');
+
+  const esComprador = rol === 'comprador';
+
+  useEffect(() => {
+    if (rol === 'productor' || rol === 'admin') void cargarSaldo();
+  }, [rol, cargarSaldo]);
+
+  const vendidos = useMemo(() => lotes.filter((l) => l.estado === 'VENDIDO'), [lotes]);
 
   const handlePressLote = useCallback((loteId: string) => {
     Haptics.selectionAsync();
@@ -30,69 +52,112 @@ export default function MercadoScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Header */}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refrescando}
+            onRefresh={() => {
+              void refrescar();
+              void cargarSaldo();
+            }}
+          />
+        }
+      >
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <IconSymbol size={32} name="storefront" color={tertiary} />
             <View style={styles.headerText}>
               <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>MERCADO</Text>
-              <Text style={[typeScale.headlineMedium, { color: onSurface }]}>Tu saldo</Text>
+              <Text style={[typeScale.headlineMedium, { color: onSurface }]}>
+                {saldo ? 'Tu saldo' : 'Comercio justo'}
+              </Text>
             </View>
           </View>
         </View>
 
-        {/* Card de saldo */}
-        <View style={[styles.saldoCard, { backgroundColor: tertiaryContainer }]}>
-          <Text style={[typeScale.eyebrow, { color: onTertiaryContainer }]}>SALDO DISPONIBLE</Text>
-          <Text style={[typeScale.headlineMedium, { color: onTertiaryContainer }, styles.saldoValue]}>
-            ${saldo.toFixed(2)}
-          </Text>
-          <View style={styles.saldoActions}>
-            <View style={[styles.actionChip, { backgroundColor: tertiary }]}>
-              <Text style={[typeScale.labelMedium, { color: '#F8EBDC' }]}>Retirar</Text>
+        {saldo ? (
+          <View style={[styles.saldoCard, { backgroundColor: tertiaryContainer }]}>
+            <Text style={[typeScale.eyebrow, { color: onTertiaryContainer }]}>
+              SALDO CONFIRMADO
+            </Text>
+            <Text
+              style={[
+                typeScale.headlineMedium,
+                { color: onTertiaryContainer },
+                styles.saldoValue,
+              ]}
+            >
+              ${saldo.saldo_total.toFixed(2)} {saldo.moneda}
+            </Text>
+            <View style={styles.desglose}>
+              <Text style={[typeScale.bodySmall, { color: onTertiaryContainer }]}>
+                Ventas (97%): ${saldo.total_pagos.toFixed(2)}
+              </Text>
+              <Text style={[typeScale.bodySmall, { color: onTertiaryContainer }]}>
+                Propinas (100%): ${saldo.total_propinas.toFixed(2)}
+              </Text>
             </View>
-            <View style={[styles.actionChip, { backgroundColor: tertiary }]}>
-              <Text style={[typeScale.labelMedium, { color: '#F8EBDC' }]}>Historial</Text>
-            </View>
+            <Text style={[typeScale.bodySmall, { color: onTertiaryContainer }]}>
+              Entorno de prueba: los pagos son simulados.
+            </Text>
           </View>
-        </View>
+        ) : null}
 
-        {/* Lotes vendidos */}
-        <View style={styles.sectionHeader}>
-          <Text style={[typeScale.labelLarge, { color: onSurface }]}>LOTES VENDIDOS</Text>
-        </View>
-
-        {lotes.length === 0 ? (
+        {esComprador ? (
           <EmptyState
-            title="Sin lotes vendidos"
-            description="Tus lotes vendidos aparecerán aquí"
-            iconName="storefront"
+            title="Escanea para ver el comercio justo"
+            description="Como comprador llegas al panel 97/3 de un lote escaneando el QR de su Pasaporte de Café."
+            iconName="qr_code_scanner"
+            actionLabel="Abrir escáner"
+            onAction={() => router.push('/verificar' as Href)}
           />
         ) : (
-          <View style={styles.list}>
-            {lotes.map((lote) => (
-              <Pressable
-                key={lote.lote_id}
-                style={({ pressed }) => [
-                  styles.item,
-                  { backgroundColor: surfaceContainer },
-                  { opacity: pressed ? 0.85 : 1 }
-                ]}
-                onPress={() => handlePressLote(lote.lote_id)}
-              >
-                <View style={styles.itemText}>
-                  <Text style={[typeScale.titleMedium, { color: onSurface }]} numberOfLines={1} ellipsizeMode="tail">
-                    {lote.variedad}
-                  </Text>
-                  <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]} numberOfLines={1}>
-                    {lote.metodo} · {lote.peso_kg.toFixed(1)} kg
-                  </Text>
-                </View>
-                <IconSymbol size={24} name="chevron_right" color={onSurfaceVariant} />
-              </Pressable>
-            ))}
-          </View>
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={[typeScale.labelLarge, { color: onSurface }]}>LOTES VENDIDOS</Text>
+            </View>
+
+            {vendidos.length === 0 ? (
+              <EmptyState
+                title="Sin lotes vendidos"
+                description="Tus lotes vendidos aparecerán aquí"
+                iconName="storefront"
+              />
+            ) : (
+              <View style={styles.list}>
+                {vendidos.map((lote) => (
+                  <Pressable
+                    key={lote.id}
+                    style={({ pressed }) => [
+                      styles.item,
+                      { backgroundColor: surfaceContainer },
+                      { opacity: pressed ? 0.85 : 1 },
+                    ]}
+                    onPress={() => handlePressLote(lote.id)}
+                  >
+                    <View style={styles.itemText}>
+                      <Text
+                        style={[typeScale.titleMedium, { color: onSurface }]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {lote.variedad}
+                      </Text>
+                      <Text
+                        style={[typeScale.bodySmall, { color: onSurfaceVariant }]}
+                        numberOfLines={1}
+                      >
+                        {lote.metodo} · {lote.peso_actual_kg.toFixed(1)} kg
+                      </Text>
+                    </View>
+                    <IconSymbol size={24} name="chevron_right" color={onSurfaceVariant} />
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -127,21 +192,11 @@ const styles = StyleSheet.create({
     fontSize: 36,
     lineHeight: 44,
   },
-  saldoActions: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  actionChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.full,
-    minHeight: 48,
-    justifyContent: 'center',
+  desglose: {
+    gap: spacing.xs,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingTop: spacing.sm,
   },
   list: {
     gap: spacing.md,
@@ -152,11 +207,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: spacing.lg,
     borderRadius: radii.medium,
-    minHeight: 64,
+    gap: spacing.md,
   },
   itemText: {
     flex: 1,
-    marginRight: spacing.sm,
     gap: spacing.xs,
   },
 });

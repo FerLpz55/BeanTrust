@@ -1,15 +1,16 @@
 /**
  * Pantalla Detalle de Lote — muestra trazabilidad y detalles del lote.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { useLotesStore } from '@/src/store/lotes';
+import { usePerfilStore } from '@/src/store/perfil';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 import { StatusChip } from '@/src/components/status-chip';
 import { TrazaTimeline } from '@/src/components/traza-timeline';
@@ -17,7 +18,19 @@ import { PrimaryButton } from '@/src/components/primary-button';
 
 export default function LoteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const lote = useLotesStore((s) => s.lotes.find((l) => l.id === id));
+  // El detalle trae el historial real (`LoteDetalleRead`); la lista no.
+  const lote = useLotesStore((s) => (id ? s.detalles[id] : undefined));
+  const cargarDetalle = useLotesStore((s) => s.cargarDetalle);
+  const fincas = usePerfilStore((s) => s.fincas);
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+    setCargando(true);
+    void cargarDetalle(id).finally(() => setCargando(false));
+  }, [id, cargarDetalle]);
+
+  const fincaNombre = fincas.find((f) => f.id === lote?.finca_id)?.nombre ?? null;
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
@@ -29,7 +42,9 @@ export default function LoteDetailScreen() {
     return (
       <SafeAreaView style={styles.root}>
         <View style={styles.center}>
-          <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant }]}>Lote no encontrado</Text>
+          <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant }]}>
+            {cargando ? 'Cargando lote…' : 'Lote no encontrado'}
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -44,7 +59,10 @@ export default function LoteDetailScreen() {
     }
   };
 
-  const showCertificadoBtn = lote.estado === 'TOSTADO' && !lote.certificado;
+  // El backend emite el certificado solo al llegar a TOSTADO/VENDIDO
+  // (`_emitir_certificado_si_corresponde`), así que aquí no se "genera":
+  // se muestra el código real para que el consumidor lo verifique.
+  const puedeVerificar = lote.certificado && lote.codigo_certificado !== null;
 
   return (
     <SafeAreaView style={styles.root}>
@@ -87,9 +105,7 @@ export default function LoteDetailScreen() {
           {!!lote.puntaje_sca && (
             <InfoCard icon="star" label="Puntaje SCA" value={String(lote.puntaje_sca)} />
           )}
-          {!!lote.finca_nombre && (
-            <InfoCard icon="forest" label="Finca" value={lote.finca_nombre} />
-          )}
+          {!!fincaNombre && <InfoCard icon="forest" label="Finca" value={fincaNombre} />}
         </View>
 
         {/* TIMELINE */}
@@ -103,12 +119,22 @@ export default function LoteDetailScreen() {
         </View>
 
         {/* ACTION BUTTON */}
-        {showCertificadoBtn && (
+        {puedeVerificar ? (
           <View style={styles.actionSection}>
-            <PrimaryButton 
-              label="Generar Certificado QR" 
-              onPress={() => console.log('Generar Certificado QR')} 
+            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
+              Código del Pasaporte de Café:{' '}
+              <Text style={typeScale.dataMono}>{lote.codigo_certificado}</Text>
+            </Text>
+            <PrimaryButton
+              label="Ver Pasaporte de Café"
+              onPress={() => router.push(`/verificar/${lote.codigo_certificado}` as Href)}
             />
+          </View>
+        ) : (
+          <View style={styles.actionSection}>
+            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
+              El Pasaporte de Café se emite al llegar a TOSTADO.
+            </Text>
           </View>
         )}
 

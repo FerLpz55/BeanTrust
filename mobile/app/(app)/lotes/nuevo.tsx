@@ -4,9 +4,8 @@
 
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,29 +18,51 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton } from '@/src/components/primary-button';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
+import { ApiError } from '@/src/api/client';
 import { useLoteDraft } from '@/src/store/lote-draft';
 import { useLotesStore } from '@/src/store/lotes';
+import { usePerfilStore } from '@/src/store/perfil';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 
 const VARIEDADES = ['Caturra', 'Bourbon', 'Geisha'];
 const METODOS = ['Lavado', 'Semilavado', 'Honey', 'Natural'];
 
 export default function NuevoLoteScreen() {
-  const addLote = useLotesStore((s) => s.addLote);
+  const crear = useLotesStore((s) => s.crear);
+  const fincas = usePerfilStore((s) => s.fincas);
+  const cargarFincas = usePerfilStore((s) => s.cargarFincas);
   const {
     step,
+    loteId,
     variedad,
     metodo_beneficiado,
     peso_kg,
-    evidencia_url,
+    fecha_cosecha,
+    finca_id,
+    enviando,
+    error,
     setVariedad,
     setMetodo,
     setPeso,
+    setFechaCosecha,
+    setFinca,
+    setEnviando,
+    setError,
     nextStep,
     prevStep,
     reset,
     canAdvance,
   } = useLoteDraft();
+
+  // `POST /v1/lotes` exige `finca_id`: se resuelve con `GET /v1/fincas` (B15).
+  useEffect(() => {
+    if (fincas.length === 0) void cargarFincas();
+  }, [fincas.length, cargarFincas]);
+
+  // Con una sola finca no tiene sentido pedir que la elija.
+  useEffect(() => {
+    if (finca_id === null && fincas.length === 1) setFinca(fincas[0].id);
+  }, [finca_id, fincas, setFinca]);
 
   // Colors
   const background = useThemeColor('background');
@@ -53,6 +74,7 @@ export default function NuevoLoteScreen() {
   const surfaceContainerLow = useThemeColor('surfaceContainerLow');
   const outlineVariant = useThemeColor('outlineVariant');
   const secondary = useThemeColor('secondary');
+  const errorColor = useThemeColor('error');
 
   const handleClose = useCallback(() => {
     reset();
@@ -68,27 +90,49 @@ export default function NuevoLoteScreen() {
     }
   }, [step, handleClose, prevStep]);
 
-  const handleNext = useCallback(() => {
-    if (!canAdvance()) return;
+  const handleNext = useCallback(async () => {
+    if (!canAdvance() || enviando) return;
     Haptics.selectionAsync();
-    
-    if (step === 3) {
-      // Guardar lote
-      addLote({
-        variedad: variedad!,
-        metodo: metodo_beneficiado!,
-        peso_actual_kg: peso_kg!,
-        evidencia: evidencia_url ? [evidencia_url] : [],
-      });
-      nextStep(); // moves to 'success'
-    } else {
-      nextStep();
-    }
-  }, [step, canAdvance, addLote, variedad, metodo_beneficiado, peso_kg, evidencia_url, nextStep]);
 
-  const handleCajaEvidencia = () => {
-    Alert.alert('Aviso', 'Cámara no disponible en demo');
-  };
+    if (step !== 3) {
+      nextStep();
+      return;
+    }
+
+    setEnviando(true);
+    setError(null);
+    try {
+      // `id` va en el cuerpo (no en un header): reusarlo hace el alta idempotente.
+      await crear({
+        id: loteId,
+        finca_id: finca_id!,
+        fecha_cosecha,
+        peso_kg: peso_kg!,
+        variedad,
+        metodo_beneficiado,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      nextStep();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'No se pudo registrar el lote. Reintenta.');
+    } finally {
+      setEnviando(false);
+    }
+  }, [
+    step,
+    canAdvance,
+    enviando,
+    crear,
+    loteId,
+    finca_id,
+    fecha_cosecha,
+    peso_kg,
+    variedad,
+    metodo_beneficiado,
+    nextStep,
+    setEnviando,
+    setError,
+  ]);
 
   // Render Success State
   if (step === 'success') {
@@ -199,6 +243,28 @@ export default function NuevoLoteScreen() {
                 );
               })}
             </View>
+
+            <Text
+              style={[
+                typeScale.eyebrow,
+                { color: onSurfaceVariant, marginTop: spacing.xl, marginBottom: spacing.md },
+              ]}
+            >
+              FECHA DE COSECHA
+            </Text>
+            <TextInput
+              style={[
+                typeScale.bodyLarge,
+                styles.fechaInput,
+                { color: onSurface, backgroundColor: surfaceContainerLow },
+              ]}
+              value={fecha_cosecha}
+              onChangeText={setFechaCosecha}
+              placeholder="AAAA-MM-DD"
+              placeholderTextColor={onSurfaceVariant}
+              autoCapitalize="none"
+              accessibilityLabel="Fecha de cosecha"
+            />
           </View>
         )}
 
@@ -233,22 +299,59 @@ export default function NuevoLoteScreen() {
 
         {step === 3 && (
           <View style={styles.stepContainer}>
-            <Pressable
-              onPress={handleCajaEvidencia}
-              style={({ pressed }) => [
-                styles.evidenceBox,
-                {
-                  backgroundColor: surfaceContainerLow,
-                  borderColor: outlineVariant,
-                  opacity: pressed ? 0.85 : 1,
-                }
-              ]}
-            >
-              <IconSymbol name="photo_camera" size={32} color={onSurfaceVariant} />
-              <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant, marginTop: spacing.md }]}>
-                Tomar foto de evidencia
+            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant, marginBottom: spacing.md }]}>
+              FINCA DE ORIGEN
+            </Text>
+            {fincas.length === 0 ? (
+              <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
+                No tienes fincas asignadas todavia. Pide a tu cooperativa que registre una para
+                poder dar de alta lotes.
               </Text>
-            </Pressable>
+            ) : (
+              <View style={styles.chipsContainer}>
+                {fincas.map((f) => {
+                  const isSelected = finca_id === f.id;
+                  return (
+                    <Pressable
+                      key={f.id}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setFinca(f.id);
+                      }}
+                      style={({ pressed }) => [
+                        styles.chip,
+                        {
+                          backgroundColor: isSelected ? primary : surfaceContainerLow,
+                          opacity: pressed ? 0.85 : 1,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          typeScale.labelLarge,
+                          { color: isSelected ? onPrimary : onSurfaceVariant },
+                        ]}
+                      >
+                        {f.nombre}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, marginTop: spacing.xl }]}>
+              La foto de evidencia llega con el almacenamiento real (ADR-14, B11).
+            </Text>
+
+            {error ? (
+              <Text
+                style={[typeScale.bodySmall, { color: errorColor, marginTop: spacing.md }]}
+                accessibilityLiveRegion="polite"
+              >
+                {error}
+              </Text>
+            ) : null}
           </View>
         )}
 
@@ -274,6 +377,8 @@ export default function NuevoLoteScreen() {
           <View style={styles.nextBtnContainer}>
             <PrimaryButton
               label={step === 3 ? 'Guardar lote' : 'Siguiente'}
+              loadingLabel="Guardando..."
+              loading={enviando}
               onPress={handleNext}
               disabled={!canAdvance()}
             />
@@ -285,6 +390,11 @@ export default function NuevoLoteScreen() {
 }
 
 const styles = StyleSheet.create({
+  fechaInput: {
+    borderRadius: radii.medium,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
   root: { flex: 1 },
   header: {
     paddingHorizontal: spacing.xl,

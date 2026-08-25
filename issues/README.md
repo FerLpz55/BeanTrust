@@ -29,6 +29,8 @@ flowchart LR
 
 | Orden | Issue | GitHub | Qué entrega | Depende de |
 |---|---|---|---|---|
+| 0 | [B15](B15-fincas-del-usuario.md) | — | `GET /v1/fincas` (desbloquea el `finca_id` de F10) | — |
+| 0 | [B16](B16-mercado-proyeccion.md) | — | `GET /v1/mercado/{lote_id}` (donut 97/3 del comprador) | B13 |
 | 1 | [F07](F07-capa-api-real.md) | #28 | Capa API real + refresh 401 + tests | — |
 | 2 | [B13](B13-pagos-saldo-reales.md) | #26 | `GET /v1/pagos` y `/saldo` reales (simulado) | — |
 | 3 | [B14](B14-auth-recover.md) | #27 | Recover de contraseña (token one-shot) | — |

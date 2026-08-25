@@ -21,6 +21,7 @@ from app.models.dominio import (
     ahora_utc,
 )
 from app.schemas.auth import CurrentUser
+from app.utils.cursor import Cursor
 
 
 class PagoService:
@@ -86,6 +87,17 @@ class PagoService:
         lote.asociar_pago(pago)
         self._repo_lote.guardar(lote)
         return pago
+
+    def listar(
+        self, usuario: CurrentUser, cursor: Cursor | None, limit: int
+    ) -> tuple[list[Pago], Cursor | None]:
+        """Historial de pagos de la cooperativa autenticada (§10).
+
+        El tenant sale del usuario autenticado, nunca de un id del cliente.
+        """
+        if usuario.rol is Rol.COOPERATIVA:
+            return self._repo_pago.listar_por_cooperativa(usuario.id, cursor, limit)
+        raise NoAutorizado("Solo la cooperativa puede consultar su historial de pagos.")
 
     def confirmar_venta(self, lote_id: uuid.UUID) -> Pago:
         """Simula el poller de confirmación (PENDIENTE -> CONFIRMADO/FALLIDO)."""

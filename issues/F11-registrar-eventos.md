@@ -3,6 +3,9 @@
 > **GitHub:** [#32](https://github.com/FerLpz55/BeanTrust/issues/32) · **Estado:** Todo · **Label:** —
 > **Depende de:** F09 · **Desbloquea:** —
 
+> **Estado real:** la capa de API (`registrarEvento`) y el store (`useLotesStore.avanzar`)
+> ya estan listos e idempotentes; falta la UI de formularios por tipo de evento.
+
 ## Contexto
 
 `POST /v1/lotes/{lote_id}/eventos` es la **acción core del productor en campo** (avanzar el lote por la máquina de estados) y hoy **no existe ni el botón** en la app. El backend soporta los 11 tipos de evento (ADR-12) con campos obligatorios por transición (`docs/ARCHITECTURE.md` §4, tabla de transiciones) e idempotencia por `Idempotency-Key`.

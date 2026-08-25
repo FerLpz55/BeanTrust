@@ -67,7 +67,9 @@ export default function VerificarCodigoScreen() {
     );
   }
 
-  const { lote, historial } = data;
+  // `pasaporte` es el `VerificarRead` del backend; `timeline` ya viene
+  // proyectado sobre la cadena canónica de 11 etapas.
+  const { pasaporte: lote, timeline } = data;
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: background }]} edges={['top', 'bottom']}>
@@ -81,9 +83,9 @@ export default function VerificarCodigoScreen() {
           <Text style={[typeScale.headlineMedium, { color: onSurface }, styles.headerTitle]}>
             {lote.finca_nombre || 'Finca'}
           </Text>
-          {lote.finca_municipio ? (
+          {lote.municipio ? (
             <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant }]}>
-              {lote.finca_municipio}
+              {lote.municipio}
             </Text>
           ) : null}
           <View style={styles.estadoRow}>
@@ -146,7 +148,8 @@ export default function VerificarCodigoScreen() {
           </View>
           <View style={styles.comercioDetail}>
             <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
-              Cada compra reparte el 97% al productor y 3% a la cooperativa. Verificado en blockchain.
+              Cada compra reparte el 97% al productor y el 3% a la cooperativa. La cadena de
+              hashes de arriba es lo que permite verificar que el historial no fue alterado.
             </Text>
           </View>
         </View>
@@ -159,14 +162,7 @@ export default function VerificarCodigoScreen() {
           <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }, styles.sectionSubtitle]}>
             Cada etapa genera un hash criptográfico que encadena la historia completa
           </Text>
-          <TrazaTimeline events={historial.map((h, i) => ({
-            id: `ev-${i}`,
-            tipo: h.tipo as EventoTipo,
-            fecha: h.fecha,
-            descripcion: h.etapa,
-            hash_etapa: h.hash,
-            completed: h.completed
-          }))} />
+          <TrazaTimeline events={timeline} />
         </View>
 
         {/* Certificado */}
@@ -178,7 +174,7 @@ export default function VerificarCodigoScreen() {
           <View style={styles.certBody}>
             <Text style={[typeScale.eyebrow, { color: onTertiaryContainer }]}>CÓDIGO</Text>
             <Text style={[typeScale.dataMono, { color: onTertiaryContainer }, styles.certCode]}>
-              {lote.codigo_publico}
+              {lote.codigo}
             </Text>
             <Text style={[typeScale.eyebrow, { color: onTertiaryContainer }, styles.certHashLabel]}>
               HASH SHA-256

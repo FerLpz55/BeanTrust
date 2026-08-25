@@ -58,13 +58,19 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
 
 ## Estado real (MVP) — no asumir más
 
-- Backend: `POST /v1/propinas` y `GET /v1/propinas/lote/{lote_id}` montados y probados
-  (tenancy por tenant en `PropinaService.listar_propinas_lote`). `GET /v1/pagos` y
-  `GET /v1/pagos/saldo` son **STUBs** (ceros/vacío). `PropinaService.obtener_saldo_productor`
-  tiene un bug latente (usa `self._repo_pago` que no se inyecta) y está sin cablear.
-- Mobile: login/refresh **reales**; register/recover **demo**. F02 (wizard), F03
-  (verificar), F04 (mercado/donut) y F05 (trazabilidad) son **stubs/placeholders**.
-  Sin tests móviles. Colores hardcodeados fuera de tokens en varias pantallas (deuda).
+- Backend: propinas montadas y probadas (tenancy en `PropinaService.listar_propinas_lote`).
+  **B13 cerrado**: `GET /v1/pagos` (historial de la cooperativa, cursor) y `GET /v1/pagos/saldo`
+  (productor/admin) son reales; `repo_pago` ya se inyecta en `PropinaService` y la agregación
+  vive en los repos. La confirmación del pago/propina corre en `BackgroundTasks` (poller
+  simulado, web3 en pausa B7). **B15 cerrado**: `GET /v1/fincas` resuelve el `finca_id`. **B14 cerrado**: recover/confirm con
+  token de un solo uso. **B16 cerrado**: `GET /v1/mercado/{lote_id}` (Panel Comercio Justo, ADR-9).
+- Mobile: **todos los flujos consumen el backend real** (no quedan stores mock).
+  `src/api/` cubre auth, fincas, lotes, verificar, pagos, propinas y mercado;
+  `client.ts` renueva el token ante un 401 y manda `Idempotency-Key`. El adaptador
+  contrato→UI vive en `src/domain/lote.ts`. Escaner QR real con `expo-camera`.
+  Tests con vitest en `src/api/client.test.ts` (`pnpm test`).
+  **Pendiente**: F11 (UI de registro de eventos), FlashList, cola offline real
+  (§7.5) y evidencia fotográfica (ADR-14, con B11).
 - Deudas clave: B7 web3 en pausa, B11 Supabase real + RLS activo + wallet `public_address`,
   refresh sin rotación de tokens, rate limit en memoria.
 

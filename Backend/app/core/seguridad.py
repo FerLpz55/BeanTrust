@@ -15,6 +15,7 @@ Decisión respaldada en documentación oficial:
 
 from __future__ import annotations
 
+import hashlib
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -67,6 +68,23 @@ class AuthProvider(ABC):
         self, email: str, password: str, nombre: str, rol: Rol
     ) -> TokenPair: ...
 
+    @abstractmethod
+    def emitir_token_recuperacion(self, email: str) -> str | None:
+        """Token one-shot de recuperación, o `None` si el email no existe.
+
+        El endpoint responde igual en ambos casos (no revela si el email está
+        registrado); el `None` solo evita emitir un token inútil.
+        """
+
+    @abstractmethod
+    def restablecer_password(self, token: str, password_nueva: str) -> None:
+        """Valida el token de recuperación y actualiza el hash de la contraseña."""
+
+
+def _huella(password_hash: str) -> str:
+    """Huella corta del hash actual, para invalidar el token tras un solo uso."""
+    return hashlib.sha256(password_hash.encode()).hexdigest()[:32]
+
 
 class PasswordService:
     """Hash de contraseñas con Argon2id (OWASP recomendación)."""
@@ -86,6 +104,9 @@ class PasswordService:
 
 class LocalAuthProvider(AuthProvider):
     """Proveedor de desarrollo: emite y valida JWT HS256 con el secreto local."""
+
+    #: Vigencia del token de recuperación (15 min).
+    RECOVER_TTL = 900
 
     def __init__(
         self,
@@ -177,6 +198,50 @@ class LocalAuthProvider(AuthProvider):
             typ=payload.get("typ", "access"),
         )
 
+    def emitir_token_recuperacion(self, email: str) -> str | None:
+        usuario = self._repo_usuarios.buscar_por_email(email.strip().lower())
+        if usuario is None or usuario.password_hash is None:
+            return None
+        ahora = int(time.time())
+        return pyjwt.encode(
+            {
+                "sub": str(usuario.id),
+                "typ": "recover",
+                # Huella del hash actual: al cambiar la contraseña el token deja
+                # de validar, lo que lo hace de un solo uso sin almacén de jti.
+                "pwh": _huella(usuario.password_hash),
+                "iat": ahora,
+                "exp": ahora + self.RECOVER_TTL,
+                "iss": self._issuer,
+                "aud": self._audience,
+                "jti": str(uuid.uuid4()),
+            },
+            self._secret,
+            algorithm="HS256",
+        )
+
+    def restablecer_password(self, token: str, password_nueva: str) -> None:
+        try:
+            payload = pyjwt.decode(
+                token,
+                self._secret,
+                algorithms=["HS256"],
+                audience=self._audience,
+                issuer=self._issuer,
+                options={"require": ["sub", "exp", "iat", "iss", "typ"]},
+            )
+        except pyjwt.PyJWTError as exc:
+            raise CredencialesInvalidas("Token de recuperación inválido o expirado.") from exc
+        if payload.get("typ") != "recover":
+            raise CredencialesInvalidas("Token de recuperación inválido.")
+        usuario = self._repo_usuarios.buscar_por_id(uuid.UUID(payload["sub"]))
+        if usuario is None or usuario.password_hash is None:
+            raise CredencialesInvalidas("Token de recuperación inválido.")
+        if payload.get("pwh") != _huella(usuario.password_hash):
+            raise CredencialesInvalidas("El token de recuperación ya fue utilizado.")
+        usuario.password_hash = self._password_service.hash(password_nueva)
+        self._repo_usuarios.guardar(usuario)
+
     def _emitir_par(self, usuario: Usuario) -> TokenPair:
         return TokenPair(
             access_token=self._crear_token(usuario, "access", self._access_ttl),
@@ -258,6 +323,26 @@ class SupabaseAuthProvider(AuthProvider):
             access_token=sesion.session.access_token,
             refresh_token=sesion.session.refresh_token,
             expires_in=sesion.session.expires_in,
+        )
+
+    def emitir_token_recuperacion(self, email: str) -> str | None:
+        """Delega en Supabase Auth, que envía el correo de recuperación (B11).
+
+        No devuelve token: el enlace lo emite y entrega Supabase por correo.
+        """
+        from supabase import create_client
+
+        try:
+            cliente = create_client(self._url, self._anon_key)
+            cliente.auth.reset_password_email(email.strip().lower())
+        except Exception:  # respuesta uniforme: no revelar si el email existe
+            return None
+        return None
+
+    def restablecer_password(self, token: str, password_nueva: str) -> None:
+        """En Supabase el cambio ocurre en el flujo de recuperación del cliente."""
+        raise CredencialesInvalidas(
+            "Con Supabase Auth el restablecimiento se completa desde el enlace del correo."
         )
 
     def refresh(self, refresh_token: str) -> TokenPair:

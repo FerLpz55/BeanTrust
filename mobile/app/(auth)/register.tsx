@@ -1,32 +1,41 @@
-/** Crear cuenta de productor (diseño; el alta real llega con la capa de auth).
- * Campos mínimos: finca, correo y contraseña (sin doble confirmación). */
+/** Crear cuenta de productor — conectado a `POST /v1/auth/register` (F08).
+ *
+ * El contrato pide `{email, password, nombre, rol}` donde `nombre` es el de la
+ * persona, no el de la finca: la finca es una entidad aparte que el backend no
+ * crea al registrarse. Por eso el campo captura el nombre del productor. */
 
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { AuthShell } from '@/src/components/auth/auth-shell';
+import { useAuthStore } from '@/src/store/auth';
 import { PrimaryButton } from '@/src/components/primary-button';
 import { TextField } from '@/src/components/text-field';
 import { TextLink } from '@/src/components/text-link';
-import { spacing } from '@/src/theme/tokens';
+import { useThemeColor } from '@/src/hooks/use-theme-color';
+import { spacing, typeScale } from '@/src/theme/tokens';
 
 const MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const onErrorContainer = useThemeColor('onErrorContainer');
 
-  const [finca, setFinca] = useState('');
+  const register = useAuthStore((s) => s.register);
+  const errorServidor = useAuthStore((s) => s.error);
+
+  const [nombre, setNombre] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<{ finca?: string; email?: string; password?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ nombre?: string; email?: string; password?: string }>({});
   const [phase, setPhase] = useState<'idle' | 'loading'>('idle');
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (phase === 'loading') return;
     const nextErrors = {
-      finca: finca.trim() ? undefined : 'Ingresa el nombre de tu finca.',
+      nombre: nombre.trim().length >= 2 ? undefined : 'Ingresa tu nombre completo.',
       email: !email.trim()
         ? 'Ingresa tu correo electrónico.'
         : !EMAIL_RE.test(email.trim())
@@ -39,12 +48,13 @@ export default function RegisterScreen() {
           : undefined,
     };
     setFieldErrors(nextErrors);
-    if (nextErrors.finca || nextErrors.email || nextErrors.password) return;
+    if (nextErrors.nombre || nextErrors.email || nextErrors.password) return;
 
     setPhase('loading');
-    setTimeout(() => {
-      router.replace({ pathname: '/login', params: { created: '1' } });
-    }, 900);
+    // El backend devuelve el par de tokens: al registrarse la sesión ya queda
+    // abierta, así que el layout de `(auth)` redirige solo a la app.
+    const creada = await register(email.trim(), password, nombre.trim(), 'productor');
+    if (!creada) setPhase('idle');
   }
 
   return (
@@ -59,17 +69,17 @@ export default function RegisterScreen() {
     >
       <View style={styles.form}>
         <TextField
-          label="Nombre de tu finca"
-          value={finca}
+          label="Tu nombre"
+          value={nombre}
           onChangeText={(v) => {
-            setFinca(v);
-            setFieldErrors((e) => ({ ...e, finca: undefined }));
+            setNombre(v);
+            setFieldErrors((e) => ({ ...e, nombre: undefined }));
           }}
-          error={fieldErrors.finca}
+          error={fieldErrors.nombre}
           autoCapitalize="words"
-          textContentType="organizationName"
+          textContentType="name"
           returnKeyType="next"
-          testID="register-finca"
+          testID="register-nombre"
         />
         <TextField
           label="Correo electrónico"
@@ -102,6 +112,14 @@ export default function RegisterScreen() {
           onSubmitEditing={handleSubmit}
           testID="register-password"
         />
+        {errorServidor && phase === 'idle' ? (
+          <Text
+            style={[styles.error, { color: onErrorContainer }]}
+            accessibilityLiveRegion="polite"
+          >
+            {errorServidor}
+          </Text>
+        ) : null}
         <PrimaryButton
           label="Crear cuenta"
           loadingLabel="Creando…"
@@ -115,6 +133,10 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
+  error: {
+    ...typeScale.bodySmall,
+    textAlign: 'center',
+  },
   form: {
     width: '100%',
     gap: spacing.lg,

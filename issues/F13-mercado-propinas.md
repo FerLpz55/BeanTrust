@@ -1,6 +1,6 @@
 # [Mobile] F13 — Mercado y propinas reales: saldo + POST /v1/propinas idempotente + donut 97/3
 
-> **GitHub:** [#34](https://github.com/FerLpz55/BeanTrust/issues/34) · **Estado:** Todo · **Label:** —
+> **GitHub:** [#34](https://github.com/FerLpz55/BeanTrust/issues/34) · **Estado:** Done · **Label:** —
 > **Depende de:** B13, F08, F07 · **Desbloquea:** —
 
 ## Contexto
@@ -19,9 +19,9 @@
 
 ## Criterios de aceptación
 
-- [ ] Un comprador puede enviar una propina real y verla en el historial del lote; retry no duplica (idempotencia).
-- [ ] El saldo y el donut reflejan datos del backend (con B13 resuelto, no ceros).
-- [ ] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+- [x] Un comprador puede enviar una propina real y verla en el historial del lote; retry no duplica (idempotencia).
+- [x] El saldo y el donut reflejan datos del backend (con B13 resuelto, no ceros).
+- [x] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
 
 ## Referencias
 

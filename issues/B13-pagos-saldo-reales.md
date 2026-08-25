@@ -1,6 +1,6 @@
 # [Backend] B13: Implementar GET /v1/pagos y GET /v1/pagos/saldo reales + saldo del productor
 
-> **GitHub:** [#26](https://github.com/FerLpz55/BeanTrust/issues/26) · **Estado:** Todo · **Label:** `backend`
+> **GitHub:** [#26](https://github.com/FerLpz55/BeanTrust/issues/26) · **Estado:** Done · **Label:** `backend`
 > **Depende de:** — · **Desbloquea:** F13
 
 ## Contexto
@@ -20,9 +20,9 @@ Sin este issue, la pantalla de Mercado del móvil mostrará ceros aunque se cone
 
 ## Criterios de aceptación
 
-- [ ] Ambos endpoints devuelven datos reales del repositorio (in_memory y preparado para Supabase) con aislamiento por tenant probado en tests.
-- [ ] Tests unitarios + integración nuevos; `ruff check app tests` y `pytest` en verde.
-- [ ] `Backend/README.md` y `docs/ARCHITECTURE.md` §6/§10 actualizados en el mismo cambio (se quita la marca **STUB**) — regla de oro docs↔código.
+- [x] Ambos endpoints devuelven datos reales del repositorio (in_memory y preparado para Supabase) con aislamiento por tenant probado en tests.
+- [x] Tests unitarios + integración nuevos; `ruff check app tests` y `pytest` en verde.
+- [x] `Backend/README.md` y `docs/ARCHITECTURE.md` §6/§10 actualizados en el mismo cambio (se quita la marca **STUB**) — regla de oro docs↔código.
 
 ## Referencias
 

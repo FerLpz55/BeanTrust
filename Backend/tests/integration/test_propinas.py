@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+from .conftest import crear_lote_vendido
+
 FINCA1 = "11111111-1111-1111-1111-111111111111"
 
 
@@ -30,34 +32,10 @@ def _registrar_comprador2(client) -> dict:
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
-def _lote_vendido(client, header_productor, header_cooperativa, comprador_id) -> dict:
-    r = client.post(
-        "/v1/lotes",
-        headers=header_productor,
-        json={"finca_id": FINCA1, "fecha_cosecha": "2026-08-01", "peso_kg": 400.0},
-    )
-    assert r.status_code == 201, r.text
-    lote = r.json()
-    for tipo, peso in [("DESPULPADO", 380.0), ("DESCASCARADO", 360.0), ("TOSTADO", 340.0)]:
-        r = client.post(
-            f"/v1/lotes/{lote['id']}/eventos",
-            headers={**header_productor, "Idempotency-Key": str(uuid.uuid4())},
-            json={"tipo": tipo, "peso_kg": peso},
-        )
-        assert r.status_code == 201, r.text
-    r = client.post(
-        "/v1/pagos",
-        headers={**header_cooperativa, "Idempotency-Key": str(uuid.uuid4())},
-        json={"lote_id": lote["id"], "comprador_id": comprador_id, "monto_total": 5000.0},
-    )
-    assert r.status_code == 202, r.text
-    return lote
-
-
 def test_propina_happy_path(client, header_productor, header_cooperativa, header_admin):
     """El comprador de la venta puede dar propina (201, idempotente) y los dueños leerla."""
     comprador, comprador_id = _login(client, "comprador@beantrust.dev", "Comp123!")
-    lote = _lote_vendido(client, header_productor, header_cooperativa, comprador_id)
+    lote = crear_lote_vendido(client, header_productor, header_cooperativa, comprador_id)
     key = str(uuid.uuid4())
     r = client.post(
         "/v1/propinas",
@@ -87,7 +65,7 @@ def test_propina_solo_comprador_de_la_venta(client, header_productor, header_coo
     """Un comprador ajeno no puede dar propina ni leer propinas del lote."""
     comprador_id = _login(client, "comprador@beantrust.dev", "Comp123!")[1]
     comprador2 = _registrar_comprador2(client)
-    lote = _lote_vendido(client, header_productor, header_cooperativa, comprador_id)
+    lote = crear_lote_vendido(client, header_productor, header_cooperativa, comprador_id)
 
     r = client.post(
         "/v1/propinas",
@@ -102,7 +80,7 @@ def test_propina_solo_comprador_de_la_venta(client, header_productor, header_coo
 def test_propina_rol_sin_acceso_no_lista(client, header_productor, header_cooperativa):
     """Un rol sin tenancy del lote no puede listar propinas (fail-closed)."""
     comprador_id = _login(client, "comprador@beantrust.dev", "Comp123!")[1]
-    lote = _lote_vendido(client, header_productor, header_cooperativa, comprador_id)
+    lote = crear_lote_vendido(client, header_productor, header_cooperativa, comprador_id)
     r = client.post(
         "/v1/propinas",
         headers={**header_productor, "Idempotency-Key": str(uuid.uuid4())},

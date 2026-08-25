@@ -21,11 +21,14 @@ from app.schemas.auth import CurrentUser
 
 
 class PropinaService:
-    def __init__(self, repo_propina, repo_lote, repo_finca, repo_usuario, gateway) -> None:
+    def __init__(
+        self, repo_propina, repo_lote, repo_finca, repo_usuario, repo_pago, gateway
+    ) -> None:
         self._repo_propina = repo_propina
         self._repo_lote = repo_lote
         self._repo_finca = repo_finca
         self._repo_usuario = repo_usuario
+        self._repo_pago = repo_pago
         self._gateway = gateway
 
     def _autorizar_propina(self, usuario: CurrentUser, lote) -> None:
@@ -88,24 +91,35 @@ class PropinaService:
         self._repo_lote.guardar(lote)
         return propina
 
-    def listar_propinas_lote(self, usuario: CurrentUser, lote_id: uuid.UUID) -> list[Propina]:
-        """Lista propinas de un lote validando el tenant (matriz RLS de ADR-10)."""
+    def autorizar_lectura_lote(self, usuario: CurrentUser, lote_id: uuid.UUID):
+        """Valida que el usuario sea dueño del lote y devuelve `(lote, finca)`.
+
+        Regla única de tenant para las lecturas de comercio justo (matriz RLS,
+        ADR-10): admin, productor de la finca, cooperativa de la finca o el
+        comprador de la venta. La reusa el Panel Comercio Justo (ADR-9) para no
+        duplicar la autorización.
+        """
         lote = self._repo_lote.buscar_por_id(lote_id)
         if lote is None:
             raise LoteNoEncontrado("Lote no encontrado.")
         finca = self._repo_finca.buscar_por_id(lote.finca_id)
 
         if usuario.rol is Rol.ADMIN:
-            return self._repo_propina.buscar_por_lote(lote_id)
+            return lote, finca
         if usuario.rol is Rol.PRODUCTOR and finca and finca.productor_id == usuario.id:
-            return self._repo_propina.buscar_por_lote(lote_id)
+            return lote, finca
         if usuario.rol is Rol.COOPERATIVA and finca and finca.cooperativa_id == usuario.id:
-            return self._repo_propina.buscar_por_lote(lote_id)
+            return lote, finca
         if usuario.rol is Rol.COMPRADOR:
             evento_venta = next((e for e in lote.historial if e.tipo.value == "VENTA"), None)
             if evento_venta and evento_venta.comprador_id == usuario.id:
-                return self._repo_propina.buscar_por_lote(lote_id)
-        raise NoAutorizado("No tiene acceso a las propinas de este lote.")
+                return lote, finca
+        raise NoAutorizado("No tiene acceso a la información de este lote.")
+
+    def listar_propinas_lote(self, usuario: CurrentUser, lote_id: uuid.UUID) -> list[Propina]:
+        """Lista propinas de un lote validando el tenant (matriz RLS de ADR-10)."""
+        self.autorizar_lectura_lote(usuario, lote_id)
+        return self._repo_propina.buscar_por_lote(lote_id)
 
     def confirmar_propina(self, lote_id: uuid.UUID) -> Propina:
         """Simula el poller de confirmación (REGISTRADA -> CONFIRMADA)."""
@@ -128,31 +142,16 @@ class PropinaService:
         return propina
 
     def obtener_saldo_productor(self, usuario: CurrentUser) -> dict:
-        """Obtiene el saldo total del productor (pagos + propinas confirmadas)."""
+        """Saldo del productor: 97% de ventas confirmadas + propinas confirmadas.
+
+        La agregación vive en los repositorios (§12: el servicio no recorre
+        estructuras internas del almacén).
+        """
         if usuario.rol is not Rol.PRODUCTOR and usuario.rol is not Rol.ADMIN:
             raise NoAutorizado("Solo el productor o admin pueden ver el saldo.")
 
-        # En implementación real, usar consultas optimizadas
-        # Aquí implementación simplificada para memoria
-        total_pagos = 0.0
-        total_propinas = 0.0
-
-        if hasattr(self._repo_pago, "_memoria"):
-            for pago in self._repo_pago._memoria.pagos.values():
-                lote = self._repo_lote.buscar_por_id(pago.lote_id)
-                if lote:
-                    finca = self._repo_finca.buscar_por_id(lote.finca_id)
-                    es_su_finca = finca and finca.productor_id == usuario.id
-                    esta_confirmado = pago.estado_pago.value == "CONFIRMADO"
-                    if es_su_finca and esta_confirmado:
-                        total_pagos += pago.monto_productor
-
-        if hasattr(self._repo_propina, "_memoria"):
-            for propina in self._repo_propina._memoria.propinas.values():
-                es_propia = propina.productor_id == usuario.id
-                es_confirmada = propina.estado_propina.value == "CONFIRMADA"
-                if es_propia and es_confirmada:
-                    total_propinas += propina.monto
+        total_pagos = self._repo_pago.total_confirmado_por_productor(usuario.id)
+        total_propinas = self._repo_propina.total_confirmado_por_productor(usuario.id)
 
         return {
             "saldo_total": round(total_pagos + total_propinas, 2),

@@ -16,8 +16,9 @@ pnpm install
 pnpm start            # Expo (QR para Expo Go / emulador)
 ```
 
-La URL de la API se configura con `EXPO_PUBLIC_API_URL` (`.env`) y por defecto
-apunta a `http://192.168.1.109:8000` (ver `src/config.ts`).
+La URL de la API se configura con `EXPO_PUBLIC_API_URL` (copia `.env.example`
+a `.env`). Por defecto apunta a `http://localhost:8000` (ver `src/config.ts`);
+**en dispositivo físico debe ser la IP LAN de tu máquina**, no localhost.
 
 ## Verificación
 
@@ -28,18 +29,32 @@ pnpm typecheck        # tsc --noEmit (los tipos deben compilar limpio)
 
 ## Estado del MVP (real, no promesa)
 
-| Módulo | Ruta | Estado |
+| Modulo | Ruta | Estado |
 | --- | --- | --- |
-| Login / refresh | `app/(auth)/login.tsx` | **Real** — conectado al backend (`src/api/auth.ts`) |
-| Registro | `app/(auth)/register.tsx` | **Demo** — sin conexión real |
-| Recuperación | `app/(auth)/recover.tsx` | **Demo** — sin conexión real |
-| Dashboard (Estado del Día) | `(app)/(tabs)/index.tsx` | Hecho (widget decorativo, ADR-13) |
-| Alta de lote (wizard) | `(app)/lotes/nuevo.tsx` | **Placeholder** |
-| Detalle de lote | `(app)/lotes/[id].tsx` | Parcial |
-| Verificar QR | `app/verificar/index.tsx` y `[codigo].tsx` | **Stub** — botones sin `onPress`; `[codigo]` ignora el parámetro y usa datos mock |
-| Mercado | `(app)/mercado.tsx` y `mercado/[loteId].tsx` | **Stub** — datos mock; sin navegación al detalle |
-| Trazabilidad / timeline | `(app)/(tabs)/trazabilidad.tsx` | Parcial — tab con filtros funcional; el detalle `lotes/[id].tsx` es placeholder |
-| Ajustes | `(app)/(tabs)/ajustes.tsx` | Parcial |
+| Login / refresh | `app/(auth)/login.tsx` | **Real** |
+| Registro | `app/(auth)/register.tsx` | **Real** — `POST /v1/auth/register` |
+| Recuperacion | `app/(auth)/recover.tsx` | **Real** — recover + confirm (B14) |
+| Dashboard | `(app)/(tabs)/index.tsx` | **Real** — metricas desde `GET /v1/lotes` |
+| Alta de lote (wizard) | `(app)/lotes/nuevo.tsx` | **Real** — `POST /v1/lotes`, idempotente por `body.id` |
+| Detalle de lote | `(app)/lotes/[id].tsx` | **Real** — timeline con `hash_etapa` |
+| Verificar QR | `app/verificar/` | **Real** — `expo-camera` + `GET /v1/verificar/{codigo}` |
+| Mercado | `(app)/mercado.tsx` y `mercado/[loteId].tsx` | **Real** — saldo y panel 97/3 (B13/B16) |
+| Trazabilidad | `(app)/(tabs)/trazabilidad.tsx` | **Real** — filtros + paginacion por cursor |
+| Ajustes | `(app)/(tabs)/ajustes.tsx` | **Real** — perfil y fincas del backend |
+| Registrar evento | — | **Pendiente** (F11): la capa de API existe, falta la UI |
+| Offline / cola de sync | — | **Pendiente** (§7.5, fase posterior) |
+| Evidencia fotografica | — | **Pendiente** (ADR-14, con B11) |
+
+### Pruebas
+
+```bash
+pnpm test             # vitest: capa de API (fetch mockeado)
+pnpm typecheck        # tsc --noEmit
+pnpm lint             # ESLint
+```
+
+> El dinero de pagos y propinas es **simulado** (`FakeGatewayPagos`): no hay
+> pasarela ni blockchain (web3 en pausa, B7).
 
 ### Convenciones
 

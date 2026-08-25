@@ -30,7 +30,7 @@ priorizados y recomendaciones concretas.
 
 ## Estado real conocido (no marcar como bug lo que es deuda)
 
-- `GET /v1/pagos` y `GET /v1/pagos/saldo` son STUBs (documentado como tal).
+- `GET /v1/pagos` y `GET /v1/pagos/saldo` están implementados (B13); `GET /v1/fincas` montado (B15).
 - `PropinaService.obtener_saldo_productor` tiene bug latente (`self._repo_pago` no inyectado) — deuda conocida.
 - Supabase: repos/migraciones sin validar contra BD real (B11); RLS inerte (defensa en servicio); web3 pausado (B7).
 - Móvil: F02–F05 son stubs/placeholders documentados; register/recover demo.
