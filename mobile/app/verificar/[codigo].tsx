@@ -107,17 +107,17 @@ export default function VerificarCodigoScreen() {
             <Text style={[typeScale.titleLarge, { color: onSurface }]}>{lote.variedad ?? '—'}</Text>
           </View>
           <View style={[styles.infoCard, { backgroundColor: surfaceContainerLow }]}>
-            <IconSymbol size={24} name="water_drop" color={primary} />
+            <IconSymbol size={24} name="water-drop" color={primary} />
             <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>BENEFICIADO</Text>
             <Text style={[typeScale.titleLarge, { color: onSurface }]}>{lote.metodo_beneficiado ?? '—'}</Text>
           </View>
           <View style={[styles.infoCard, { backgroundColor: surfaceContainerLow }]}>
-            <IconSymbol size={24} name="local_cafe" color={primary} />
+            <IconSymbol size={24} name="local-cafe" color={primary} />
             <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>PESO</Text>
             <Text style={[typeScale.titleLarge, { color: onSurface }]}>{lote.peso_actual_kg.toFixed(1)} kg</Text>
           </View>
           <View style={[styles.infoCard, { backgroundColor: surfaceContainerLow }]}>
-            <IconSymbol size={24} name="location_on" color={onSurfaceVariant} />
+            <IconSymbol size={24} name="location-on" color={onSurfaceVariant} />
             <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>COSECHA</Text>
             <Text style={[typeScale.titleLarge, { color: onSurface }]}>
               {new Date(lote.fecha_cosecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
@@ -168,7 +168,7 @@ export default function VerificarCodigoScreen() {
         {/* Certificado */}
         <View style={[styles.sectionCard, { backgroundColor: tertiaryContainer }]}>
           <View style={styles.certHeader}>
-            <IconSymbol size={24} name="verified_user" color={tertiary} />
+            <IconSymbol size={24} name="verified-user" color={tertiary} />
             <Text style={[typeScale.labelLarge, { color: onTertiaryContainer }]}>CERTIFICADO DE ORIGEN</Text>
           </View>
           <View style={styles.certBody}>

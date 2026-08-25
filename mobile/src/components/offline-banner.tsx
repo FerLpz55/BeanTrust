@@ -21,7 +21,7 @@ export function OfflineBanner({ pendingCount, onRetry }: OfflineBannerProps) {
   return (
     <View style={[styles.root, { backgroundColor: secondaryContainer }]}>
       <View style={styles.row}>
-        <IconSymbol size={20} name="cloud_off" color={secondary} />
+        <IconSymbol size={20} name="cloud-off" color={secondary} />
         <View style={styles.text}>
           <Text style={[typeScale.bodyMedium, { color: onSecondaryContainer }]}>
             Lote #402 guardado offline — Esperando red

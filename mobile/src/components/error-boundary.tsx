@@ -4,12 +4,26 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { useThemeColor } from '@/src/hooks/use-theme-color';
+
 interface Props {
   children: ReactNode;
 }
 
 interface State {
   error: Error | null;
+}
+
+// Componente funcional aparte: las clases no pueden usar hooks (useThemeColor).
+function ErrorFallback({ message }: { message: string }) {
+  const errorContainer = useThemeColor('errorContainer');
+  const onErrorContainer = useThemeColor('onErrorContainer');
+  return (
+    <View style={[styles.container, { backgroundColor: errorContainer }]}>
+      <Text style={[styles.title, { color: onErrorContainer }]}>Algo salió mal</Text>
+      <Text style={[styles.message, { color: onErrorContainer }]}>{message}</Text>
+    </View>
+  );
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -25,12 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.error) {
-      return (
-        <View style={styles.container}>
-          <Text style={styles.title}>Algo salió mal</Text>
-          <Text style={styles.message}>{this.state.error.message}</Text>
-        </View>
-      );
+      return <ErrorFallback message={this.state.error.message} />;
     }
     return this.props.children;
   }
@@ -39,7 +48,6 @@ export class ErrorBoundary extends Component<Props, State> {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffdad6',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -48,11 +56,9 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#93000a',
   },
   message: {
     fontSize: 14,
-    color: '#93000a',
     textAlign: 'center',
   },
 });

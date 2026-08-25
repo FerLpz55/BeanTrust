@@ -21,6 +21,7 @@ ENDPOINTS_DOCUMENTADOS: set[tuple[str, str]] = {
     ("POST", "/v1/auth/recover/confirm"),
     ("GET", "/v1/auth/me"),
     ("GET", "/v1/cooperativas"),
+    ("GET", "/v1/compradores"),
     ("GET", "/v1/fincas"),
     ("POST", "/v1/lotes"),
     ("GET", "/v1/lotes"),

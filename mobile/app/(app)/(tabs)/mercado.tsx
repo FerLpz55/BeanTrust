@@ -99,9 +99,6 @@ export default function MercadoScreen() {
                 Propinas (100%): ${saldo.total_propinas.toFixed(2)}
               </Text>
             </View>
-            <Text style={[typeScale.bodySmall, { color: onTertiaryContainer }]}>
-              Entorno de prueba: los pagos son simulados.
-            </Text>
           </View>
         ) : null}
 
@@ -109,7 +106,7 @@ export default function MercadoScreen() {
           <EmptyState
             title="Escanea para ver el comercio justo"
             description="Como comprador llegas al panel 97/3 de un lote escaneando el QR de su Pasaporte de Café."
-            iconName="qr_code_scanner"
+            iconName="qr-code-scanner"
             actionLabel="Abrir escáner"
             onAction={() => router.push('/verificar' as Href)}
           />
@@ -152,7 +149,7 @@ export default function MercadoScreen() {
                         {lote.metodo} · {lote.peso_actual_kg.toFixed(1)} kg
                       </Text>
                     </View>
-                    <IconSymbol size={24} name="chevron_right" color={onSurfaceVariant} />
+                    <IconSymbol size={24} name="chevron-right" color={onSurfaceVariant} />
                   </Pressable>
                 ))}
               </View>

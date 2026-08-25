@@ -15,9 +15,13 @@ import { aLoteDetalleVista, aLoteVista, type Lote } from '@/src/domain/lote';
 
 // Re-exportado para que las pantallas sigan importando desde un único sitio.
 export {
+  CAMPOS_POR_TIPO,
   EVENTO_DESCRIPCION,
   EVENTO_ICONO,
   EVENTO_ORDEN,
+  RECHAZO_DISPONIBLE_DESDE,
+  TRANSICIONES_VALIDAS,
+  type CampoEvento,
   type EventoTipo,
   type Lote,
   type LoteEstado,

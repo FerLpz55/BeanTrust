@@ -103,6 +103,8 @@ class RepositorioUsuario(Protocol):
 
     def listar_cooperativas(self) -> list[Cooperativa]: ...
 
+    def listar_compradores(self) -> list[Usuario]: ...
+
 
 class GatewayPagos(ABC):
     """Frontera con Polygon (§9). La implementación web3 real está en pausa."""

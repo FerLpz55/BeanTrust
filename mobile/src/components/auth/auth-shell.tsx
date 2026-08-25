@@ -131,7 +131,7 @@ function AuthBackground({ wide }: { wide: boolean }) {
         style={StyleSheet.absoluteFill}
       />
       <LinearGradient
-        colors={['#00000000', '#00000000', cremaWash]}
+        colors={['transparent', 'transparent', cremaWash]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}

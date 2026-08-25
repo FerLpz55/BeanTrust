@@ -72,7 +72,7 @@ export default function VerificarScreen() {
         </View>
         <View style={styles.headerRight}>
           <Pressable onPress={toggleFlashlight} style={({ pressed }) => [styles.iconButton, { opacity: pressed ? 0.7 : 1 }]}>
-            <IconSymbol name={flashlightOn ? 'flash_on' : 'flash_off'} size={24} color={onSurface} />
+            <IconSymbol name={flashlightOn ? 'flash-on' : 'flash-off'} size={24} color={onSurface} />
           </Pressable>
           <Pressable onPress={handleClose} style={({ pressed }) => [styles.iconButton, { opacity: pressed ? 0.7 : 1 }]}>
             <IconSymbol name="close" size={24} color={onSurface} />
@@ -99,7 +99,7 @@ export default function VerificarScreen() {
           </View>
           {!permiso?.granted ? (
             <View style={styles.scannerContent}>
-              <IconSymbol size={64} name="photo_camera" color={onSurfaceVariant} />
+              <IconSymbol size={64} name="photo-camera" color={onSurfaceVariant} />
               <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant }, styles.scannerText]}>
                 {permiso
                   ? 'Necesitamos la cámara para leer el código QR'

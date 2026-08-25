@@ -10,16 +10,24 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { AyudaModal } from '@/src/components/ayuda-modal';
 import { BrandMark } from '@/src/components/brand-mark';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useAuthStore } from '@/src/store/auth';
 import { useSyncStore } from '@/src/store/sync';
 import { useLotesStore } from '@/src/store/lotes';
 import { usePerfilStore } from '@/src/store/perfil';
+import { useTemaStore, type PreferenciaTema } from '@/src/store/tema';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
+
+const ETIQUETA_TEMA: Record<PreferenciaTema, string> = {
+  automatico: 'Automático',
+  claro: 'Claro',
+  oscuro: 'Oscuro',
+};
 
 export default function AjustesScreen() {
   const logout = useAuthStore((s) => s.logout);
@@ -29,10 +37,18 @@ export default function AjustesScreen() {
   const fincas = usePerfilStore((s) => s.fincas);
   const cargarFincas = usePerfilStore((s) => s.cargarFincas);
   const lotes = useLotesStore((s) => s.lotes);
+  const preferenciaTema = useTemaStore((s) => s.preferencia);
+  const cargarPreferenciaTema = useTemaStore((s) => s.cargarPreferencia);
+  const ciclarPreferenciaTema = useTemaStore((s) => s.ciclarPreferencia);
+  const [ayudaVisible, setAyudaVisible] = useState(false);
 
   useEffect(() => {
     void cargarFincas();
   }, [cargarFincas]);
+
+  useEffect(() => {
+    void cargarPreferenciaTema();
+  }, [cargarPreferenciaTema]);
 
   // Estadísticas derivadas de los lotes reales ya cargados.
   const lotesTotales = lotes.length;
@@ -44,6 +60,7 @@ export default function AjustesScreen() {
   const surfaceContainerLow = useThemeColor('surfaceContainerLow');
   const surfaceContainer = useThemeColor('surfaceContainer');
   const outlineVariant = useThemeColor('outlineVariant');
+  const primary = useThemeColor('primary');
   const error = useThemeColor('error');
   const primaryContainer = useThemeColor('primaryContainer');
   const onPrimaryContainer = useThemeColor('onPrimaryContainer');
@@ -58,10 +75,6 @@ export default function AjustesScreen() {
     await logout();
     router.replace('/login');
   }, [logout]);
-
-  const handleForceSync = useCallback(() => {
-    Haptics.selectionAsync();
-  }, []);
 
   const getRoleColors = (rol: string) => {
     switch (rol) {
@@ -180,21 +193,15 @@ export default function AjustesScreen() {
         {/* Sync Section */}
         <View style={styles.section}>
           <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.sectionTitle]}>SINCRONIZACIÓN</Text>
-          <View style={[styles.card, { backgroundColor: surfaceContainerLow, borderRadius: radii.large, padding: 0 }]}>
+          <View style={[styles.card, { backgroundColor: surfaceContainerLow, borderRadius: radii.large }]}>
             <View style={styles.syncRow}>
-              <View style={[styles.syncDot, { backgroundColor: isOnline ? '#4CAF50' : '#F44336' }]} />
+              <View style={[styles.syncDot, { backgroundColor: isOnline ? primary : onSurfaceVariant }]} />
               <Text style={[typeScale.bodyMedium, { color: onSurface }]}>{isOnline ? 'En línea' : 'Sin conexión'}</Text>
             </View>
             <View style={styles.syncRow}>
               <Text style={[typeScale.titleMedium, { color: onSurface }]}>{pendingCount}</Text>
               <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant, marginLeft: spacing.xs }]}>pendientes</Text>
             </View>
-            <Pressable
-              onPress={handleForceSync}
-              style={({ pressed }) => [styles.syncAction, { opacity: pressed ? 0.85 : 1, borderTopColor: outlineVariant }]}
-            >
-              <Text style={[typeScale.labelLarge, { color: onSurface }]}>Forzar sincronización</Text>
-            </Pressable>
           </View>
         </View>
 
@@ -202,13 +209,18 @@ export default function AjustesScreen() {
         <View style={styles.section}>
           <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.sectionTitle]}>PREFERENCIAS</Text>
           <View style={[styles.menu, { backgroundColor: surfaceContainerLow, borderRadius: radii.large }]}>
-            <MenuItem icon="notifications" label="Notificaciones" />
+            <MenuItem icon="notifications" label="Notificaciones" rightText="Próximamente" disabled />
             <View style={[styles.divider, { backgroundColor: outlineVariant }]} />
-            <MenuItem icon="dark-mode" label="Modo oscuro" rightText="Automático" />
+            <MenuItem
+              icon="dark-mode"
+              label="Modo oscuro"
+              rightText={ETIQUETA_TEMA[preferenciaTema]}
+              onPress={ciclarPreferenciaTema}
+            />
             <View style={[styles.divider, { backgroundColor: outlineVariant }]} />
-            <MenuItem icon="language" label="Idioma" rightText="Español" />
+            <MenuItem icon="language" label="Idioma" rightText="Español (único disponible)" disabled />
             <View style={[styles.divider, { backgroundColor: outlineVariant }]} />
-            <MenuItem icon="help-outline" label="Ayuda y soporte" />
+            <MenuItem icon="help-outline" label="Ayuda y soporte" onPress={() => setAyudaVisible(true)} />
           </View>
         </View>
 
@@ -224,22 +236,46 @@ export default function AjustesScreen() {
           <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center' }]}>Trazabilidad inmutable del café</Text>
         </View>
       </ScrollView>
+
+      <AyudaModal visible={ayudaVisible} onClose={() => setAyudaVisible(false)} />
     </SafeAreaView>
   );
 }
 
-function MenuItem({ icon, label, rightText }: { icon: string; label: string; rightText?: string }) {
+function MenuItem({
+  icon,
+  label,
+  rightText,
+  onPress,
+  disabled = false,
+}: {
+  icon: string;
+  label: string;
+  rightText?: string;
+  onPress?: () => void;
+  disabled?: boolean;
+}) {
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
   return (
-    <Pressable style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.85 : 1 }]}>
+    <Pressable
+      onPress={() => {
+        if (disabled || !onPress) return;
+        Haptics.selectionAsync();
+        onPress();
+      }}
+      disabled={disabled || !onPress}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || !onPress }}
+      style={({ pressed }) => [styles.menuItem, { opacity: pressed && !disabled ? 0.85 : disabled ? 0.5 : 1 }]}
+    >
       <View style={styles.menuItemLeft}>
         <IconSymbol size={24} name={icon} color={onSurfaceVariant} />
         <Text style={[typeScale.bodyLarge, { color: onSurface }]}>{label}</Text>
       </View>
       <View style={styles.menuItemRight}>
         {rightText && <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>{rightText}</Text>}
-        <IconSymbol size={24} name="chevron-right" color={onSurfaceVariant} />
+        {!disabled ? <IconSymbol size={24} name="chevron-right" color={onSurfaceVariant} /> : null}
       </View>
     </Pressable>
   );

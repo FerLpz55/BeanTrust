@@ -77,7 +77,7 @@ export default function LoteComercioJustoScreen() {
       <SafeAreaView style={[styles.root, { backgroundColor: background }]}>
         <View style={styles.header}>
           <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <IconSymbol name="arrow_back" size={24} color={onSurface} />
+            <IconSymbol name="arrow-back" size={24} color={onSurface} />
           </Pressable>
         </View>
         <EmptyState title="Lote no encontrado" description="El lote seleccionado no existe o ya no está disponible." iconName="error" />
@@ -96,7 +96,7 @@ export default function LoteComercioJustoScreen() {
           {/* Header */}
           <View style={styles.header}>
             <Pressable onPress={() => router.back()} style={styles.backButton}>
-              <IconSymbol name="arrow_back" size={24} color={onSurface} />
+              <IconSymbol name="arrow-back" size={24} color={onSurface} />
             </Pressable>
           </View>
 
@@ -173,12 +173,6 @@ export default function LoteComercioJustoScreen() {
                 >
                   <Text style={[typeScale.labelLarge, { color: onPrimary }]}>Enviar Propina al Productor</Text>
                 </Pressable>
-                <View style={styles.secureContainer}>
-                  <IconSymbol name="lock" size={16} color={onTertiaryContainer} />
-                  <Text style={[typeScale.bodySmall, { color: onTertiaryContainer }]}>
-                    Entorno de prueba: el pago es simulado
-                  </Text>
-                </View>
               </>
             ) : (
               <View style={styles.tipModal}>

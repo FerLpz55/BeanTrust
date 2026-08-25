@@ -63,6 +63,7 @@ el mismo cambio.
 | POST   | `/auth/recover/confirm`       | público                      | Fija nueva contraseña con token de un solo uso |
 | GET    | `/auth/me`                    | autenticado                  | Perfil del usuario autenticado           |
 | GET    | `/cooperativas`               | admin                        | Directorio de cooperativas               |
+| GET    | `/compradores`                | cooperativa/admin            | Directorio de compradores (elegir `comprador_id` al vender) |
 | GET    | `/fincas`                     | productor/cooperativa/admin  | Fincas del usuario (resuelve `finca_id` para crear lotes) |
 | POST   | `/lotes`                      | productor/cooperativa/admin  | Registra cosecha (crea lote: variedad, método, peso, evidencia) |
 | GET    | `/lotes`                      | productor/cooperativa/admin  | Lista paginada por cursor                |

@@ -723,6 +723,7 @@ flowchart LR
 | `POST` | `/v1/auth/recover/confirm` | Fija la nueva contraseña con un token de un solo uso | No | `200` · `401` · `422` |
 | `GET` | `/v1/auth/me` | Perfil del usuario autenticado (resuelve rol real por `auth.uid()`) | Sí | `200` |
 | `GET` | `/v1/cooperativas` | Listar cooperativas (admin) | Sí | `200` · `403` |
+| `GET` | `/v1/compradores` | Directorio de compradores (cooperativa/admin, para elegir `comprador_id` al vender) | Sí | `200` · `403` |
 | `GET` | `/v1/fincas` | Fincas del usuario autenticado (resuelve `finca_id` para el alta de lote) | Sí | `200` · `403` |
 | `POST` | `/v1/lotes` | Crear lote en estado CEREZA (variedad, método, peso, evidencia) | No (da id) | `201` · `400` · `422` |
 | `POST` | `/v1/lotes/{lote_id}/eventos` | Registrar transición/sub-etapa (11 tipos) | `Idempotency-Key` | `201` · `409` · `422` |

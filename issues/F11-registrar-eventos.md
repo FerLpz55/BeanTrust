@@ -1,6 +1,6 @@
 # [Mobile] F11 — Registrar eventos / avanzar estado del lote (POST /v1/lotes/{id}/eventos, UI nueva)
 
-> **GitHub:** [#32](https://github.com/FerLpz55/BeanTrust/issues/32) · **Estado:** Todo · **Label:** —
+> **GitHub:** [#32](https://github.com/FerLpz55/BeanTrust/issues/32) · **Estado:** Done · **Label:** —
 > **Depende de:** F09 · **Desbloquea:** —
 
 > **Estado real:** la capa de API (`registrarEvento`) y el store (`useLotesStore.avanzar`)
@@ -20,9 +20,20 @@
 
 ## Criterios de aceptación
 
-- [ ] Un productor puede llevar un lote de CEREZA a TOSTADO registrando cada evento desde la app, y el timeline refleja el hash por etapa real.
-- [ ] Reintentar la misma operación no duplica el evento (idempotencia).
-- [ ] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+- [x] Un productor puede llevar un lote de CEREZA a TOSTADO registrando cada evento desde la app, y el timeline refleja el hash por etapa real.
+- [x] Reintentar la misma operación no duplica el evento (idempotencia).
+- [x] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+
+## Nota de cierre
+
+UI implementada en `lotes/[id].tsx` vía `RegistrarEventoModal`
+(`src/components/registrar-evento-modal.tsx`): CTA "Registrar evento"
+visible para productor/cooperativa/admin, con las transiciones válidas
+filtradas por `TRANSICIONES_VALIDAS`/`CAMPOS_POR_TIPO` (`src/domain/lote.ts`,
+espejo de `MaquinaEstados` del backend). "Rechazar lote" como acción
+separada. `VENTA` se excluyó del móvil-productor tal como pedía el alcance;
+la cooperativa la registra con la nueva pantalla de F14 (`RegistrarVentaModal`,
+`POST /v1/pagos`, que a su vez necesitó el endpoint nuevo `GET /v1/compradores`).
 
 ## Referencias
 

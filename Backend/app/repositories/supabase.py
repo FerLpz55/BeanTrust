@@ -633,3 +633,10 @@ class SupabaseUsuarioRepo:
         except APIError as exc:
             raise RepoError("No se pudo listar las cooperativas.") from exc
         return [fila_a_cooperativa(fila) for fila in (resp.data or [])]
+
+    def listar_compradores(self) -> list[Usuario]:
+        try:
+            resp = self._cliente.table("usuarios").select("*").eq("rol", "comprador").execute()
+        except APIError as exc:
+            raise RepoError("No se pudo listar los compradores.") from exc
+        return [fila_a_usuario(fila) for fila in (resp.data or [])]

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 
 from app.dependencies import CurrentUserDep, IdempotenciaDep, LoteServiceDep, require_rol
 from app.models.dominio import Rol
-from app.schemas.lote import EventoCreate, LoteRead
+from app.schemas.lote import EventoCreate, LoteDetalleRead
 
 router = APIRouter(
     prefix="/lotes/{lote_id}/eventos",
@@ -24,5 +24,5 @@ def registrar_evento(
     idempotencia: IdempotenciaDep,
     usuario: CurrentUserDep,
     servicio: LoteServiceDep,
-) -> LoteRead:
+) -> LoteDetalleRead:
     return servicio.avanzar_estado(usuario, lote_id, body, idempotencia)

@@ -1,6 +1,6 @@
 # [Mobile] F14 — Pulido app funcional: acciones muertas, Generar QR y colores a tokens Copa de cata
 
-> **GitHub:** [#35](https://github.com/FerLpz55/BeanTrust/issues/35) · **Estado:** Todo · **Label:** —
+> **GitHub:** [#35](https://github.com/FerLpz55/BeanTrust/issues/35) · **Estado:** Done · **Label:** —
 > **Depende de:** F09–F13 · **Desbloquea:** —
 
 > **Estado real:** ya se cablearon el boton del certificado QR, los `onRetry` del banner
@@ -25,8 +25,20 @@ Con los flujos ya conectados (F07–F13), quedan acciones que **parecen funciona
 
 ## Criterios de aceptación
 
-- [ ] Cero acciones muertas visibles; cero colores fuera de tokens en las pantallas listadas.
-- [ ] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+- [x] Cero acciones muertas visibles; cero colores fuera de tokens en las pantallas listadas.
+- [x] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+
+## Nota de cierre
+
+De lo que quedaba abierto en "Estado real": los 4 `MenuItem` de `ajustes.tsx`
+ahora son reales (Modo oscuro tri-estado persistido con `expo-secure-store`
+vía `src/store/tema.ts`; Ayuda y soporte con FAQ + enlace a GitHub Issues,
+`src/components/ayuda-modal.tsx`; Notificaciones/Idioma deshabilitados con
+estado honesto "Próximamente" — sin `expo-notifications` ni i18n, fingir que
+funcionan violaría esta misma issue). "Forzar sincronización" se quitó (no
+hacía nada real: la cola offline de §7.5 sigue pendiente). Colores a tokens:
+`error-boundary.tsx` ahora usa `errorContainer`/`onErrorContainer`;
+`auth-shell.tsx` usa `'transparent'` en vez de `#00000000`.
 
 ## Referencias
 

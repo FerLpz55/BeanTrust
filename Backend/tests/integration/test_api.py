@@ -55,6 +55,25 @@ def test_verificar_404_y_409(client):
     # No existe caso 409 sin manipular datos: se cubre unitariamente vía hash.
 
 
+def test_registrar_evento_devuelve_historial(client, header_productor):
+    """`POST /eventos` debe responder `LoteDetalleRead` (con `historial`).
+
+    Regresión: el endpoint declaraba `-> LoteRead`, que no trae `historial`;
+    el móvil espera esa lista para pintar el timeline sin un GET extra.
+    """
+    lote = crear_lote(client, header_productor)
+    r = client.post(
+        f"/v1/lotes/{lote['id']}/eventos",
+        headers={**header_productor, "Idempotency-Key": str(uuid.uuid4())},
+        json={"tipo": "LIMPIEZA", "peso_kg": 490.0},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert "historial" in body
+    assert len(body["historial"]) == 2  # cosecha + limpieza
+    assert {e["tipo"] for e in body["historial"]} == {"COSECHA", "LIMPIEZA"}
+
+
 def test_idempotencia_de_evento(client, header_productor):
     lote = crear_lote(client, header_productor)
     clave = str(uuid.uuid4())
@@ -105,6 +124,32 @@ def test_venta_y_pago_con_comision(client, header_cooperativa, header_productor)
     )
     assert r2.status_code == 202
     assert r2.json()["id"] == pago["id"]
+
+
+def test_certificado_sigue_verificando_tras_la_venta(client, header_cooperativa, header_productor):
+    """Regresión: vender un lote TOSTADO no debe invalidar su Pasaporte de Café.
+
+    `material_lote` usaba `lote.estado`/`lote.peso_actual_kg` en vivo (denorm.)
+    en vez de reconstruirlos "al corte" (`emitido_en`); el evento VENTA
+    posterior a la emisión cambiaba el hash recalculado y el certificado
+    dejaba de verificar (409) aunque nadie lo hubiera manipulado.
+    """
+    lote = crear_lote(client, header_productor)
+    detalle = avanzar_a_tostado(client, header_productor, lote["id"])
+    codigo = detalle["certificado"]["codigo"]
+
+    assert client.get(f"/v1/verificar/{codigo}").status_code == 200
+
+    r = client.post(
+        "/v1/pagos",
+        headers={**header_cooperativa, "Idempotency-Key": str(uuid.uuid4())},
+        json={"lote_id": lote["id"], "comprador_id": str(uuid.uuid4()), "monto_total": 8000.0},
+    )
+    assert r.status_code == 202, r.text
+
+    r = client.get(f"/v1/verificar/{codigo}")
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "VENDIDO"  # el lote vivo sí refleja la venta
 
     detalle = client.get(f"/v1/lotes/{lote['id']}", headers=header_productor).json()
     assert detalle["estado"] == "VENDIDO"

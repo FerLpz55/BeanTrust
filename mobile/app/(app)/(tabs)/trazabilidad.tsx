@@ -17,10 +17,11 @@ import { LoteCard } from '@/src/components/lote-card';
 import { OfflineBanner } from '@/src/components/offline-banner';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { useLotes } from '@/src/hooks/use-lotes';
+import { useAuthStore } from '@/src/store/auth';
 import { type LoteEstado } from '@/src/store/lotes';
 import { useSyncStore } from '@/src/store/sync';
 import { spacing, typeScale } from '@/src/theme/tokens';
-import { router, type Href } from 'expo-router';
+import { Redirect, router, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 
 type Filtro = 'TODOS' | LoteEstado;
@@ -28,6 +29,7 @@ type Filtro = 'TODOS' | LoteEstado;
 const ESTADOS: Filtro[] = ['TODOS', 'CEREZA', 'PERGAMINO', 'ORO', 'TOSTADO', 'VENDIDO', 'RECHAZADO'];
 
 export default function TrazabilidadScreen() {
+  const rol = useAuthStore((s) => s.rol);
   const { lotes, isLoading, error, refrescar, refrescando, hayMas, cargarMas, isLoadingMore } =
     useLotes();
   const { pendingCount } = useSyncStore();
@@ -46,11 +48,17 @@ export default function TrazabilidadScreen() {
 
   const lotesFiltrados = filtro === 'TODOS' ? lotes : lotes.filter((l) => l.estado === filtro);
 
+  // El comprador no lista lotes (el backend lo rechaza, §10): llega a ellos
+  // escaneando el QR desde Mercado. Se revisa después de todos los hooks.
+  if (rol === 'comprador') {
+    return <Redirect href="/mercado" />;
+  }
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.loadingRoot}>
         <View style={styles.loadingContent}>
-          <IconSymbol size={48} name="account_tree" color={primary} />
+          <IconSymbol size={48} name="account-tree" color={primary} />
         </View>
       </SafeAreaView>
     );
@@ -68,7 +76,7 @@ export default function TrazabilidadScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <IconSymbol size={32} name="account_tree" color={primary} />
+            <IconSymbol size={32} name="account-tree" color={primary} />
             <View style={styles.headerText}>
               <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>TRAZABILIDAD</Text>
               <Text style={[typeScale.headlineMedium, { color: onSurface }]}>Tus lotes</Text>

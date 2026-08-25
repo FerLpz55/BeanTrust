@@ -2,7 +2,7 @@
  * y reenvío de ref para encadenar el foco entre campos. */
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { forwardRef, useState } from 'react';
+import { forwardRef, useId, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -54,6 +54,11 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
 ) {
   const [focused, setFocused] = useState(false);
   const [hidden, setHidden] = useState(secureTextEntry);
+  // Único por instancia aunque no llegue `testID`: sin esto, dos campos sin
+  // testID en la misma pantalla comparten `id` (HTML inválido) y el
+  // `aria-labelledby` deja de apuntar a la etiqueta correcta.
+  const generatedId = useId();
+  const baseId = testID ?? generatedId;
 
   const outline = useThemeColor('outline');
   const outlineFocus = useThemeColor('primary');
@@ -65,11 +70,11 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   const borderColor = error ? errorColor : focused ? outlineFocus : outline;
 
   return (
-    <View style={styles.wrapper} testID={`${testID ?? 'field'}-wrap`}>
+    <View style={styles.wrapper} testID={`${baseId}-wrap`}>
       <Text
         style={[typeScale.labelMedium, { color: labelColor }]}
         accessibilityLabel={label}
-        nativeID={`${testID ?? 'field'}-label`}
+        nativeID={`${baseId}-label`}
       >
         {label}
       </Text>
@@ -96,7 +101,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
           returnKeyType={returnKeyType}
           onSubmitEditing={onSubmitEditing}
           accessibilityLabel={error ? `${label}. ${error}` : label}
-          accessibilityLabelledBy={`${testID ?? 'field'}-label`}
+          accessibilityLabelledBy={`${baseId}-label`}
           testID={testID}
           style={[typeScale.bodyLarge, styles.input, { color: onSurface }]}
         />

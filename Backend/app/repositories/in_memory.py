@@ -214,6 +214,13 @@ class InMemoryUsuarioRepo:
             if usuario.rol.value == "cooperativa"
         ]
 
+    def listar_compradores(self) -> list[Usuario]:
+        return [
+            usuario
+            for usuario in self._memoria.usuarios.values()
+            if usuario.rol.value == "comprador"
+        ]
+
 
 class InMemoryPropinaRepo:
     def __init__(self, memoria: Memoria) -> None:

@@ -7,7 +7,14 @@
  * Traducir aquí evita deformar cualquiera de los dos lados.
  */
 
-import type { Estado, LoteDetalleRead, LoteEventoRead, LoteRead, TipoEvento } from '@/src/api/types';
+import type {
+  Estado,
+  EventoCampos,
+  LoteDetalleRead,
+  LoteEventoRead,
+  LoteRead,
+  TipoEvento,
+} from '@/src/api/types';
 
 export type LoteEstado = Estado;
 export type EventoTipo = TipoEvento;
@@ -30,16 +37,16 @@ export const EVENTO_ORDEN: EventoTipo[] = [
 /** Icono MaterialIcons por tipo de evento. */
 export const EVENTO_ICONO: Record<EventoTipo, string> = {
   COSECHA: 'eco',
-  LIMPIEZA: 'cleaning_services',
+  LIMPIEZA: 'cleaning-services',
   DESPULPADO: 'settings',
   FERMENTACION: 'science',
-  LAVADO: 'water_drop',
-  SECADO: 'wb_sunny',
-  REPOSO: 'hourglass_empty',
+  LAVADO: 'water-drop',
+  SECADO: 'wb-sunny',
+  REPOSO: 'hourglass-empty',
   DESCASCARADO: 'grain',
-  CLASIFICACION: 'filter_list',
-  TOSTADO: 'local_cafe',
-  VENTA: 'shopping_cart',
+  CLASIFICACION: 'filter-list',
+  TOSTADO: 'local-cafe',
+  VENTA: 'shopping-cart',
   RECHAZADO: 'cancel',
 };
 
@@ -57,6 +64,78 @@ export const EVENTO_DESCRIPCION: Record<EventoTipo, string> = {
   TOSTADO: 'Tostado de especialidad',
   VENTA: 'Venta al comprador',
   RECHAZADO: 'Lote rechazado',
+};
+
+/**
+ * Transiciones válidas por estado (espejo de `MaquinaEstados` del backend,
+ * `Backend/app/models/dominio.py`, y de la tabla §4 de ARCHITECTURE.md).
+ *
+ * Solo filtra qué botones mostrar; el backend sigue siendo la única fuente
+ * de verdad (409 si de todos modos se manda una transición inválida, F11).
+ * `VENTA` queda fuera a propósito: la dispara la cooperativa vía
+ * `POST /v1/pagos`, no un evento de lote (ver `src/api/pagos.ts`).
+ */
+export const TRANSICIONES_VALIDAS: Partial<Record<LoteEstado, EventoTipo[]>> = {
+  CEREZA: ['LIMPIEZA', 'DESPULPADO'],
+  PERGAMINO: ['FERMENTACION', 'LAVADO', 'SECADO', 'REPOSO', 'DESCASCARADO'],
+  ORO: ['CLASIFICACION', 'TOSTADO'],
+};
+
+/** Estados desde los que se puede rechazar el lote (cualquiera no terminal). */
+export const RECHAZO_DISPONIBLE_DESDE: LoteEstado[] = ['CEREZA', 'PERGAMINO', 'ORO', 'TOSTADO'];
+
+export interface CampoEvento {
+  key: keyof EventoCampos;
+  label: string;
+  tipo: 'numero' | 'texto';
+  opciones?: string[];
+}
+
+/** Campos de formulario visibles por tipo de evento (tabla §4, ADR-12). */
+export const CAMPOS_POR_TIPO: Partial<Record<EventoTipo, CampoEvento[]>> = {
+  LIMPIEZA: [{ key: 'peso_kg', label: 'Peso (kg)', tipo: 'numero' }],
+  DESPULPADO: [
+    { key: 'peso_kg', label: 'Peso (kg)', tipo: 'numero' },
+    { key: 'merma_pct', label: 'Merma (%)', tipo: 'numero' },
+    {
+      key: 'metodo_beneficiado',
+      label: 'Método de beneficiado',
+      tipo: 'texto',
+      opciones: ['Lavado', 'Semilavado', 'Honey', 'Natural'],
+    },
+  ],
+  FERMENTACION: [
+    {
+      key: 'metodo_fermentacion',
+      label: 'Método de fermentación',
+      tipo: 'texto',
+      opciones: ['Anaeróbica', 'Aeróbica', 'Doble fermentación'],
+    },
+    { key: 'fermentacion_horas', label: 'Horas de fermentación', tipo: 'numero' },
+  ],
+  LAVADO: [{ key: 'peso_kg', label: 'Peso (kg)', tipo: 'numero' }],
+  SECADO: [
+    { key: 'humedad_inicial_pct', label: 'Humedad inicial (%)', tipo: 'numero' },
+    { key: 'humedad_final_pct', label: 'Humedad final (%)', tipo: 'numero' },
+    {
+      key: 'metodo_secado',
+      label: 'Método de secado',
+      tipo: 'texto',
+      opciones: ['Patio', 'Mecánico', 'Camas africanas'],
+    },
+  ],
+  REPOSO: [{ key: 'dias_reposo', label: 'Días de reposo', tipo: 'numero' }],
+  DESCASCARADO: [
+    { key: 'peso_kg', label: 'Peso (kg)', tipo: 'numero' },
+    { key: 'merma_pct', label: 'Merma (%)', tipo: 'numero' },
+  ],
+  CLASIFICACION: [
+    { key: 'puntaje_sca', label: 'Puntaje SCA (0-100)', tipo: 'numero' },
+    { key: 'defectos', label: 'Defectos observados', tipo: 'texto' },
+    { key: 'densidad', label: 'Densidad', tipo: 'numero' },
+    { key: 'tamiz', label: 'Tamiz', tipo: 'texto' },
+  ],
+  TOSTADO: [],
 };
 
 /**

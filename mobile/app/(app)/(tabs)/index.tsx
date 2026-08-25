@@ -18,10 +18,11 @@ import { PrimaryButton } from '@/src/components/primary-button';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { useLotes } from '@/src/hooks/use-lotes';
+import { useAuthStore } from '@/src/store/auth';
 import { type LoteEstado } from '@/src/store/lotes';
 import { useSyncStore } from '@/src/store/sync';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
-import { router, type Href } from 'expo-router';
+import { Redirect, router, type Href } from 'expo-router';
 
 function formatFechaRelativa(iso: string): string {
   const dias = Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
@@ -32,6 +33,7 @@ function formatFechaRelativa(iso: string): string {
 }
 
 export default function DashboardScreen() {
+  const rol = useAuthStore((s) => s.rol);
   const { lotes, isLoading, error: errorLotes, refrescar, refrescando } = useLotes();
   const { pendingCount } = useSyncStore();
 
@@ -104,6 +106,12 @@ export default function DashboardScreen() {
       onPress: () => router.push('/mercado' as Href),
     },
   ] as const;
+
+  // El comprador no gestiona cosechas (§10): esta pantalla es de
+  // productor/cooperativa/admin. Se le manda a Mercado, desde donde escanea.
+  if (rol === 'comprador') {
+    return <Redirect href="/mercado" />;
+  }
 
   if (isLoading) {
     return (
@@ -193,7 +201,7 @@ export default function DashboardScreen() {
                     <Text style={[typeScale.titleLarge, { color: stat.color }]} numberOfLines={1}>
                       {stat.value}
                     </Text>
-                    <IconSymbol size={18} name="chevron_right" color={onSurfaceVariant} />
+                    <IconSymbol size={18} name="chevron-right" color={onSurfaceVariant} />
                   </Pressable>
                 );
               })}
@@ -209,7 +217,7 @@ export default function DashboardScreen() {
             onPress={() => router.push('/trazabilidad' as Href)}
           >
             <Text style={[typeScale.labelMedium, { color: primary }]}>Ver todos</Text>
-            <IconSymbol size={16} name="chevron_right" color={primary} />
+            <IconSymbol size={16} name="chevron-right" color={primary} />
           </Pressable>
         </View>
 
@@ -238,7 +246,7 @@ export default function DashboardScreen() {
                 ]}
               >
                 <View style={[styles.statIconBadge, { backgroundColor: surfaceContainerLowest }]}>
-                  <IconSymbol size={18} name="local_cafe" color={onSurfaceVariant} />
+                  <IconSymbol size={18} name="local-cafe" color={onSurfaceVariant} />
                 </View>
                 <View style={styles.loteCardLeft}>
                   <View style={styles.loteCardTitleRow}>
@@ -258,7 +266,7 @@ export default function DashboardScreen() {
                 <Text style={[typeScale.dataMono, { color: onSurface }]} numberOfLines={1}>
                   {lote.peso_actual_kg.toFixed(1)} kg
                 </Text>
-                <IconSymbol size={18} name="chevron_right" color={onSurfaceVariant} />
+                <IconSymbol size={18} name="chevron-right" color={onSurfaceVariant} />
               </Pressable>
             ))}
           </View>

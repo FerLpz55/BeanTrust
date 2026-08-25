@@ -15,12 +15,13 @@ const EMAIL_KEY = 'bt.email';
 const isWeb = Platform.OS === 'web';
 const memoryStore = new Map<string, string>();
 
-async function getItem(key: string): Promise<string | null> {
+/** Genéricos: reusados por otras preferencias simples (p.ej. tema, `store/tema.ts`). */
+export async function getItem(key: string): Promise<string | null> {
   if (isWeb) return memoryStore.get(key) ?? null;
   return SecureStore.getItemAsync(key);
 }
 
-async function setItem(key: string, value: string): Promise<void> {
+export async function setItem(key: string, value: string): Promise<void> {
   if (isWeb) {
     memoryStore.set(key, value);
     return;

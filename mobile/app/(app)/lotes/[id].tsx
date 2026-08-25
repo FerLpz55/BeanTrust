@@ -1,28 +1,55 @@
 /**
  * Pantalla Detalle de Lote — muestra trazabilidad y detalles del lote.
  */
-import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
-import { useLotesStore } from '@/src/store/lotes';
+import { ApiError } from '@/src/api/client';
+import type { EventoCreate } from '@/src/api/types';
+import { RECHAZO_DISPONIBLE_DESDE, TRANSICIONES_VALIDAS, useLotesStore } from '@/src/store/lotes';
+import { useAuthStore } from '@/src/store/auth';
 import { usePerfilStore } from '@/src/store/perfil';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 import { StatusChip } from '@/src/components/status-chip';
 import { TrazaTimeline } from '@/src/components/traza-timeline';
 import { PrimaryButton } from '@/src/components/primary-button';
+import { RegistrarEventoModal } from '@/src/components/registrar-evento-modal';
+import { RegistrarVentaModal } from '@/src/components/registrar-venta-modal';
+import { nuevaClaveIdempotencia } from '@/src/utils/idempotencia';
+
+/** Rol que puede avanzar el lote por su máquina de estados (F11, §10). */
+function puedeRegistrarEventos(rol: string | null): boolean {
+  return rol === 'productor' || rol === 'cooperativa' || rol === 'admin';
+}
+
+/** Solo la cooperativa dueña de la finca (o admin) puede vender el lote (§9). */
+function puedeVender(rol: string | null): boolean {
+  return rol === 'cooperativa' || rol === 'admin';
+}
 
 export default function LoteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   // El detalle trae el historial real (`LoteDetalleRead`); la lista no.
   const lote = useLotesStore((s) => (id ? s.detalles[id] : undefined));
   const cargarDetalle = useLotesStore((s) => s.cargarDetalle);
+  const avanzar = useLotesStore((s) => s.avanzar);
+  const rol = useAuthStore((s) => s.rol);
   const fincas = usePerfilStore((s) => s.fincas);
   const [cargando, setCargando] = useState(true);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [ventaModalVisible, setVentaModalVisible] = useState(false);
+  const [rechazando, setRechazando] = useState(false);
+  const [errorRechazo, setErrorRechazo] = useState<string | null>(null);
+  const [rechazoConfirmado, setRechazoConfirmado] = useState(false);
+  // Bloqueo síncrono: ver la misma nota en `registrar-evento-modal.tsx`. Sin
+  // esto, un segundo toque mientras el primero seguía en vuelo chocaba
+  // contra el backend (409) aunque el primero ya hubiera rechazado el lote.
+  const rechazandoRef = useRef(false);
 
   useEffect(() => {
     if (!id) return;
@@ -37,6 +64,7 @@ export default function LoteDetailScreen() {
   const surfaceContainerLow = useThemeColor('surfaceContainerLow');
   const tertiaryContainerBg = useThemeColor('tertiaryContainer');
   const onTertiaryContainer = useThemeColor('onTertiaryContainer');
+  const errorColor = useThemeColor('error');
 
   if (!lote) {
     return (
@@ -64,6 +92,52 @@ export default function LoteDetailScreen() {
   // se muestra el código real para que el consumidor lo verifique.
   const puedeVerificar = lote.certificado && lote.codigo_certificado !== null;
 
+  const transicionesDisponibles = TRANSICIONES_VALIDAS[lote.estado] ?? [];
+  // Tipos ya registrados al menos una vez: alimenta la sugerencia progresiva
+  // del modal (`completados`, F11 — "que sugiera el siguiente evento").
+  const completados = lote.historial.filter((e) => e.completed).map((e) => e.tipo);
+  const puedeGestionar = puedeRegistrarEventos(rol);
+  const puedeRechazar = puedeGestionar && RECHAZO_DISPONIBLE_DESDE.includes(lote.estado);
+  const puedeRegistrarVenta = puedeVender(rol) && lote.estado === 'TOSTADO';
+
+  const handleAvanzar = async (evento: EventoCreate, claveIdempotencia: string) => {
+    await avanzar(lote.id, evento, claveIdempotencia);
+  };
+
+  const ejecutarRechazo = async () => {
+    if (rechazandoRef.current) return;
+    rechazandoRef.current = true;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    setRechazando(true);
+    setErrorRechazo(null);
+    try {
+      await avanzar(lote.id, { tipo: 'RECHAZADO' }, nuevaClaveIdempotencia());
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setRechazoConfirmado(true);
+    } catch (err) {
+      setErrorRechazo(
+        err instanceof ApiError ? err.message : 'No se pudo rechazar el lote. Reintenta.'
+      );
+    } finally {
+      setRechazando(false);
+      rechazandoRef.current = false;
+    }
+  };
+
+  // Es destructivo e irreversible: confirmación explícita en vez de un solo
+  // toque, así también se evita el doble-toque accidental (§ nota arriba).
+  const handleRechazar = () => {
+    if (rechazandoRef.current) return;
+    Alert.alert(
+      'Rechazar lote',
+      `¿Seguro que quieres rechazar el lote ${lote.codigo_publico}? Esta acción no se puede deshacer.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Rechazar', style: 'destructive', onPress: () => void ejecutarRechazo() },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.root}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -75,7 +149,7 @@ export default function LoteDetailScreen() {
             accessibilityRole="button"
             accessibilityLabel="Volver"
           >
-            <IconSymbol name="arrow_back" size={24} color={onSurface} />
+            <IconSymbol name="arrow-back" size={24} color={onSurface} />
           </Pressable>
         </View>
         
@@ -100,7 +174,7 @@ export default function LoteDetailScreen() {
             <InfoCard icon="terrain" label="Altitud" value={`${lote.altitud_min}-${lote.altitud_max} msnm`} />
           )}
           {!!lote.humedad_final_pct && (
-            <InfoCard icon="water_drop" label="Humedad" value={`${lote.humedad_final_pct}%`} />
+            <InfoCard icon="water-drop" label="Humedad" value={`${lote.humedad_final_pct}%`} />
           )}
           {!!lote.puntaje_sca && (
             <InfoCard icon="star" label="Puntaje SCA" value={String(lote.puntaje_sca)} />
@@ -117,6 +191,49 @@ export default function LoteDetailScreen() {
           
           <TrazaTimeline events={lote.historial} />
         </View>
+
+        {/* GESTIÓN DEL LOTE (F11) */}
+        {puedeGestionar ? (
+          <View style={styles.gestionSection}>
+            {transicionesDisponibles.length > 0 ? (
+              <PrimaryButton label="Registrar evento" onPress={() => setModalVisible(true)} />
+            ) : null}
+            {puedeRegistrarVenta ? (
+              <PrimaryButton label="Registrar venta" onPress={() => setVentaModalVisible(true)} />
+            ) : null}
+            {puedeRechazar ? (
+              <Pressable
+                onPress={handleRechazar}
+                disabled={rechazando}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.rechazarBtn,
+                  { opacity: pressed || rechazando ? 0.7 : 1 },
+                ]}
+              >
+                <Text style={[typeScale.labelLarge, { color: errorColor }]}>
+                  {rechazando ? 'Rechazando…' : 'Rechazar lote'}
+                </Text>
+              </Pressable>
+            ) : null}
+            {rechazoConfirmado ? (
+              <Text
+                style={[typeScale.bodySmall, { color: onSurfaceVariant }]}
+                accessibilityLiveRegion="polite"
+              >
+                Lote rechazado.
+              </Text>
+            ) : null}
+            {errorRechazo ? (
+              <Text
+                style={[typeScale.bodySmall, { color: errorColor }]}
+                accessibilityLiveRegion="polite"
+              >
+                {errorRechazo}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* ACTION BUTTON */}
         {puedeVerificar ? (
@@ -150,6 +267,20 @@ export default function LoteDetailScreen() {
         </View>
 
       </ScrollView>
+
+      <RegistrarEventoModal
+        visible={modalVisible}
+        estadoActual={lote.estado}
+        completados={completados}
+        onClose={() => setModalVisible(false)}
+        onSubmit={handleAvanzar}
+      />
+      <RegistrarVentaModal
+        visible={ventaModalVisible}
+        loteId={lote.id}
+        onClose={() => setVentaModalVisible(false)}
+        onVendido={() => void cargarDetalle(lote.id)}
+      />
     </SafeAreaView>
   );
 }
@@ -226,6 +357,15 @@ const styles = StyleSheet.create({
   },
   timelineSection: {
     marginBottom: spacing.xxl,
+  },
+  gestionSection: {
+    gap: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  rechazarBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
   },
   actionSection: {
     marginBottom: spacing.xxl,

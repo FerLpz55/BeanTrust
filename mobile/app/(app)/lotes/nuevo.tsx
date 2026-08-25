@@ -139,7 +139,7 @@ export default function NuevoLoteScreen() {
     return (
       <SafeAreaView style={[styles.root, { backgroundColor: background }]}>
         <View style={styles.successContainer}>
-          <IconSymbol name="check_circle" size={100} color={secondary} />
+          <IconSymbol name="check-circle" size={100} color={secondary} />
           <Text style={[typeScale.headlineMedium, { color: onSurface, marginTop: spacing.xl }]}>
             Lote registrado
           </Text>

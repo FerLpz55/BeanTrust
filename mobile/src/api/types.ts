@@ -23,6 +23,14 @@ export interface CurrentUser {
   email: string | null;
 }
 
+/** `GET /v1/compradores` (cooperativa/admin): directorio para elegir a quién vender. */
+export interface UsuarioRead {
+  id: string;
+  email: string;
+  rol: Rol;
+  nombre: string;
+}
+
 export interface RecoverResponse {
   mensaje: string;
   /** Solo en desarrollo (sin envío de correo). */
@@ -176,6 +184,13 @@ export interface VerificarRead {
 
 export type EstadoPago = 'PENDIENTE' | 'CONFIRMADO' | 'FALLIDO';
 export type EstadoPropina = 'REGISTRADA' | 'PENDIENTE' | 'CONFIRMADA';
+
+/** Entrada de `POST /v1/pagos` (rol cooperativa): venta que dispara el pago simulado. */
+export interface PagoCreate {
+  lote_id: string;
+  comprador_id: string;
+  monto_total: number;
+}
 
 export interface PagoRead {
   id: string;
