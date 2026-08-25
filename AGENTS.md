@@ -16,6 +16,7 @@ directas del comprador al productor).
 - `Backend/` — FastAPI (Python ≥3.12), capas: endpoints → services → repositories (interfaz + in_memory + supabase). BD Supabase/PostgreSQL, migraciones en `Backend/db/`.
 - `mobile/` — React Native / Expo Router (pnpm). Tokens de diseño "Copa de cata" en `src/theme/tokens.ts`.
 - `docs/` — `ARCHITECTURE.md` (diseño), `06-contratos.md` (web3).
+- `issues/` — backlog ejecutable (espejo local de las issues #26–#35 de GitHub) con orden y dependencias; `CLAUDE.md` en la raíz instruye su ejecución con buenas prácticas.
 - `.opencode/agent/` — agentes del proyecto (cada uno con sus skills a instalar/usar):
   `login-flow.md` (auth flow), `backend.md`, `mobile.md`, `supabase.md`, `revisar.md`.
 

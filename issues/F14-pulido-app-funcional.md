@@ -1,0 +1,33 @@
+# [Mobile] F14 — Pulido app funcional: acciones muertas, Generar QR y colores a tokens Copa de cata
+
+> **GitHub:** [#35](https://github.com/FerLpz55/BeanTrust/issues/35) · **Estado:** Todo · **Label:** —
+> **Depende de:** F09–F13 · **Desbloquea:** —
+
+## Contexto
+
+Con los flujos ya conectados (F07–F13), quedan acciones que **parecen funcionales pero no hacen nada**, y deuda visual fuera del sistema de diseño "Copa de cata":
+
+- **Botones muertos:** "Retirar" e "Historial" en `mercado.tsx` (Views sin `onPress`); los 4 `MenuItem` de `ajustes.tsx` (Notificaciones, Modo oscuro, Idioma, Ayuda) sin `onPress`; "Forzar sincronización" solo hace haptics; `OfflineBanner onRetry={() => {}}` no-op en dashboard y trazabilidad.
+- **"Generar Certificado QR"** en `lotes/[id].tsx` es un `console.log`.
+- **Colores hardcodeados fuera de tokens:** `#000` (sombras en dashboard y verificar), `#F8EBDC` (mercado), `#4CAF50`/`#F44336` (dot de sync en ajustes), `#ffdad6`/`#93000a` (error-boundary), `#00000000` (auth-shell).
+- **Comentarios desactualizados** (p.ej. `login.tsx` afirma que el backend aún no se conecta).
+
+## Alcance
+
+- Cablear u **ocultar** cada acción muerta: lo que no tenga backend aún (p.ej. sync real, que es fase posterior) se oculta o muestra estado honesto; nada de botones que mienten.
+- "Generar Certificado QR": si el lote está en `TOSTADO+` y tiene certificado, mostrar el QR del `codigo` real (para que el consumidor lo escanee con `verificar/`); si no, estado deshabilitado explicado.
+- Sustituir todos los colores hardcodeados por tokens de `src/theme/tokens.ts`.
+- Limpiar comentarios desactualizados.
+
+## Criterios de aceptación
+
+- [ ] Cero acciones muertas visibles; cero colores fuera de tokens en las pantallas listadas.
+- [ ] `pnpm exec tsc --noEmit` + `pnpm exec expo lint` en verde.
+
+## Referencias
+
+- `mobile/src/theme/tokens.ts`, `docs/ARCHITECTURE.md` §7.3 (paleta "Copa de cata")
+
+## Dependencias
+
+F09–F13 (para cablear contra datos reales en vez de ocultar).
