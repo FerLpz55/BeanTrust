@@ -20,6 +20,7 @@ import { TrazaTimeline } from '@/src/components/traza-timeline';
 import { PrimaryButton } from '@/src/components/primary-button';
 import { RegistrarEventoModal } from '@/src/components/registrar-evento-modal';
 import { RegistrarVentaModal } from '@/src/components/registrar-venta-modal';
+import { QrCodeLote } from '@/src/components/qr-code-lote';
 import { nuevaClaveIdempotencia } from '@/src/utils/idempotencia';
 
 /** Rol que puede avanzar el lote por su máquina de estados (F11, §10). */
@@ -238,7 +239,10 @@ export default function LoteDetailScreen() {
         {/* ACTION BUTTON */}
         {puedeVerificar ? (
           <View style={styles.actionSection}>
-            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
+            <QrCodeLote codigo={lote.codigo_certificado!} />
+            <Text
+              style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center' }]}
+            >
               Código del Pasaporte de Café:{' '}
               <Text style={typeScale.dataMono}>{lote.codigo_certificado}</Text>
             </Text>
@@ -369,6 +373,7 @@ const styles = StyleSheet.create({
   },
   actionSection: {
     marginBottom: spacing.xxl,
+    gap: spacing.md,
   },
   hashCard: {
     padding: spacing.lg,

@@ -4,7 +4,7 @@
 
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -53,6 +53,10 @@ export default function NuevoLoteScreen() {
     reset,
     canAdvance,
   } = useLoteDraft();
+  // Bloqueo síncrono: mismo motivo que en registrar-evento-modal.tsx — evita
+  // que un doble-tap en "Guardar lote" dispare dos altas antes de que
+  // `enviando` (estado) alcance a reflejarse en el siguiente render.
+  const enviandoRef = useRef(false);
 
   // `POST /v1/lotes` exige `finca_id`: se resuelve con `GET /v1/fincas` (B15).
   useEffect(() => {
@@ -91,7 +95,7 @@ export default function NuevoLoteScreen() {
   }, [step, handleClose, prevStep]);
 
   const handleNext = useCallback(async () => {
-    if (!canAdvance() || enviando) return;
+    if (!canAdvance() || enviandoRef.current) return;
     Haptics.selectionAsync();
 
     if (step !== 3) {
@@ -99,6 +103,7 @@ export default function NuevoLoteScreen() {
       return;
     }
 
+    enviandoRef.current = true;
     setEnviando(true);
     setError(null);
     try {
@@ -117,11 +122,11 @@ export default function NuevoLoteScreen() {
       setError(err instanceof ApiError ? err.message : 'No se pudo registrar el lote. Reintenta.');
     } finally {
       setEnviando(false);
+      enviandoRef.current = false;
     }
   }, [
     step,
     canAdvance,
-    enviando,
     crear,
     loteId,
     finca_id,

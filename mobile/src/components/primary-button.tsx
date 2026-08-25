@@ -23,6 +23,7 @@ export function PrimaryButton({
   loadingLabel = 'Iniciando…',
   disabled = false,
   testID,
+  style,
 }: PrimaryButtonProps) {
   const primary = useThemeColor('primary');
   const onPrimary = useThemeColor('onPrimary');
@@ -40,7 +41,13 @@ export function PrimaryButton({
       accessibilityRole="button"
       accessibilityState={{ disabled: isDisabled, busy: loading }}
       testID={testID}
-      style={({ pressed }) => [styles.button, { backgroundColor: primary }, pressed && styles.pressed, isDisabled && styles.disabled]}
+      style={({ pressed }) => [
+        styles.button,
+        { backgroundColor: primary },
+        pressed && styles.pressed,
+        isDisabled && styles.disabled,
+        style,
+      ]}
     >
       <View style={styles.content}>
         {loading ? (

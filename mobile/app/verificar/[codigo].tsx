@@ -6,14 +6,17 @@ import { BrandMark } from '@/src/components/brand-mark';
 import { DonutChart } from '@/src/components/donut-chart';
 import { EmptyState } from '@/src/components/empty-state';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
+import { PrimaryButton } from '@/src/components/primary-button';
+import { QrCodeLote } from '@/src/components/qr-code-lote';
 import { StatusChip } from '@/src/components/status-chip';
 import { TrazaTimeline } from '@/src/components/traza-timeline';
 import { VerifiedSeal } from '@/src/components/verified-seal';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { spacing, typeScale, radii } from '@/src/theme/tokens';
 import { useVerificarStore } from '@/src/store/verificar';
+import { useAuthStore } from '@/src/store/auth';
 import { LoteEstado, EventoTipo } from '@/src/store/lotes';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, type Href } from 'expo-router';
 
 interface LocalParams {
   codigo: string;
@@ -22,6 +25,7 @@ interface LocalParams {
 export default function VerificarCodigoScreen() {
   const params = useLocalSearchParams() as unknown as LocalParams;
   const { data, isLoading, error, buscarPorCodigo, reset } = useVerificarStore();
+  const rol = useAuthStore((s) => s.rol);
 
   const background = useThemeColor('background');
   const onSurface = useThemeColor('onSurface');
@@ -152,6 +156,13 @@ export default function VerificarCodigoScreen() {
               hashes de arriba es lo que permite verificar que el historial no fue alterado.
             </Text>
           </View>
+          {rol === 'comprador' && lote.estado === 'VENDIDO' ? (
+            <PrimaryButton
+              label="Dejar propina al productor"
+              onPress={() => router.push(`/mercado/${lote.lote_id}` as Href)}
+              style={styles.propinaBtn}
+            />
+          ) : null}
         </View>
 
         {/* Timeline trazabilidad */}
@@ -171,6 +182,7 @@ export default function VerificarCodigoScreen() {
             <IconSymbol size={24} name="verified-user" color={tertiary} />
             <Text style={[typeScale.labelLarge, { color: onTertiaryContainer }]}>CERTIFICADO DE ORIGEN</Text>
           </View>
+          <QrCodeLote codigo={lote.codigo} style={styles.certQr} />
           <View style={styles.certBody}>
             <Text style={[typeScale.eyebrow, { color: onTertiaryContainer }]}>CÓDIGO</Text>
             <Text style={[typeScale.dataMono, { color: onTertiaryContainer }, styles.certCode]}>
@@ -304,11 +316,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     textAlign: 'center',
   },
+  propinaBtn: {
+    marginTop: spacing.lg,
+  },
   certHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     marginBottom: spacing.md,
+  },
+  certQr: {
+    marginBottom: spacing.lg,
   },
   certBody: {
     gap: spacing.xs,

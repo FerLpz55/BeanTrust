@@ -6,7 +6,7 @@
  * reservada al comprador de la venta (§10). Dinero simulado: web3 en pausa (B7).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, Pressable, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -35,6 +35,10 @@ export default function LoteComercioJustoScreen() {
   const [tipAmount, setTipAmount] = useState('');
   // Una clave por intencion de propina: los reintentos no duplican el cargo.
   const [claveIdempotencia, setClaveIdempotencia] = useState(nuevaClaveIdempotencia);
+  // Bloqueo síncrono: mismo motivo que en registrar-evento-modal.tsx — un
+  // `useState` puede quedar "viejo" un instante entre un doble-tap y el
+  // siguiente render y dejar pasar dos envíos de la misma propina.
+  const enviandoRef = useRef(false);
 
   useEffect(() => {
     if (loteId) void cargarPanel(loteId);
@@ -59,7 +63,8 @@ export default function LoteComercioJustoScreen() {
 
   const handleConfirmTip = useCallback(async () => {
     const amount = parseFloat(tipAmount.replace(',', '.'));
-    if (Number.isNaN(amount) || amount <= 0 || !lote) return;
+    if (Number.isNaN(amount) || amount <= 0 || !lote || enviandoRef.current) return;
+    enviandoRef.current = true;
     try {
       await enviarPropina(lote.lote_id, amount, claveIdempotencia);
       setTipAmount('');
@@ -69,6 +74,8 @@ export default function LoteComercioJustoScreen() {
     } catch (err) {
       // El store ya expone el mensaje; aqui solo se evita cerrar el formulario.
       if (!(err instanceof ApiError)) throw err;
+    } finally {
+      enviandoRef.current = false;
     }
   }, [tipAmount, lote, enviarPropina, claveIdempotencia]);
 
