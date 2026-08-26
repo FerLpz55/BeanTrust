@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Supabase CLI (estado local del proyecto enlazado)
+supabase/.temp/

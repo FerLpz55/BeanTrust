@@ -1,0 +1,23 @@
+# Configuración del proyecto Supabase de BeanTrust, aplicada con
+#   supabase config push --project-ref yvczofwzfljuubxnmakj
+#
+# Solo se declara lo que el despliegue necesita fijar; el resto queda en los
+# valores por defecto del proyecto.
+project_id = "yvczofwzfljuubxnmakj"
+
+[auth]
+enabled = true
+# El alta pública queda cerrada a propósito: las únicas cuentas válidas son las
+# cuatro de demo creadas por Admin API (db/seed/seed_supabase.sql documenta el
+# resto del seed). Un productor que se registrara solo se quedaría sin finca
+# asociada y no podría crear lotes.
+enable_signup = false
+enable_anonymous_sign_ins = false
+
+[auth.email]
+# OJO: esto es el interruptor del *proveedor* de email. Ponerlo en false apaga
+# también el login con correo (`email_provider_disabled`), no solo el alta. El
+# cierre del registro va en `[auth] enable_signup`, arriba.
+enable_signup = true
+# Sin confirmación por correo: no hay dominio propio ni servidor SMTP.
+enable_confirmations = false

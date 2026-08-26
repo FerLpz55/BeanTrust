@@ -19,7 +19,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "dev.beantrust.app"
     },
     "web": {
       "output": "static",
@@ -43,13 +44,21 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "BeanTrust usa la camara para escanear el QR del Pasaporte de Cafe."
+          "cameraPermission": "BeanTrust usa la camara para escanear el QR del Pasaporte de Cafe.",
+          "recordAudioAndroid": false
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "da7b8cc3-f554-4f98-8080-5b85d37e4f23"
+      }
+    },
+    "owner": "fernandozz"
   }
 }

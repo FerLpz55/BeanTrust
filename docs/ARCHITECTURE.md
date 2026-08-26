@@ -1106,6 +1106,25 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 - `GET /v1/pagos` (historial de la cooperativa, cursor) y `GET /v1/pagos/saldo` (saldo del productor) están **implementados** (B13). El rol se declara por operación: el router de pagos ya no aplica un `require_rol` global, que hacía inalcanzable el saldo. La agregación vive en los repositorios (`total_confirmado_por_productor`).
 - **Móvil (Expo)**: login y refresh consumen el backend real; **register y recover son demo** (sin conexión real). El rol se resuelve con `GET /v1/auth/me`.
 
+**Despliegue real (2026-08-25, cierra B11 en su parte de auth/datos):** el backend
+corre en Vercel contra el proyecto Supabase `yvczofwzfljuubxnmakj` con
+`BEAN_AUTH_BACKEND=supabase` y `BEAN_REPO_BACKEND=supabase`, así que la RLS deja
+de ser el único guardián teórico y `auth.uid()` es de verdad el `USUARIOS.id`:
+
+- El espejo `auth.users → usuarios` lo hace el trigger de la migración
+  `005_sync_auth_usuarios.sql` (antes no lo hacía nadie: `SupabaseUsuarioRepo`
+  no implementa `guardar()`). El trigger **nunca** concede `admin` desde la
+  metadata del cliente —se asigna en la BD— ni acepta un rol desconocido: cae a
+  `productor`, el de menor privilegio.
+- **El alta pública está cerrada** (`supabase/config.toml`, `[auth] enable_signup
+  = false`): las únicas credenciales válidas son las cuatro de demo. Un alta
+  propia se quedaría sin finca asociada y no podría registrar lotes, así que
+  `POST /v1/auth/register` responde 401 y la pantalla de registro del móvil ya
+  no se ofrece desde el login.
+- El backend sigue hablando con Supabase por *service key*, de modo que la RLS
+  queda como defensa en profundidad y la autorización efectiva es la de la capa
+  de servicio (deuda B11 restante: adjuntar el JWT del usuario por operación).
+
 ### Flujo de autenticación (diagrama de secuencia)
 
 ```mermaid

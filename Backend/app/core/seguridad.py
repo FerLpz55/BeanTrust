@@ -267,6 +267,23 @@ class LocalAuthProvider(AuthProvider):
         )
 
 
+def _par_desde_respuesta(respuesta, mensaje: str = "Credenciales inválidas.") -> TokenPair:
+    """Extrae el par de tokens de un `AuthResponse` del SDK de Supabase.
+
+    El SDK no devuelve la sesión en la raíz: `sign_in_with_password`,
+    `sign_up` y `refresh_session` responden un `AuthResponse` cuya sesión vive
+    en `.session` (y es `None` si el alta quedó pendiente de confirmar correo).
+    """
+    sesion = getattr(respuesta, "session", None)
+    if sesion is None or not getattr(sesion, "access_token", None):
+        raise CredencialesInvalidas(mensaje)
+    return TokenPair(
+        access_token=sesion.access_token,
+        refresh_token=sesion.refresh_token,
+        expires_in=sesion.expires_in or 3600,
+    )
+
+
 class SupabaseAuthProvider(AuthProvider):
     """Proveedor de producción: valida JWTs de Supabase Auth con JWKS.
 
@@ -288,16 +305,12 @@ class SupabaseAuthProvider(AuthProvider):
 
         try:
             cliente = create_client(self._url, self._anon_key)
-            sesion = cliente.auth.sign_in_with_password(
+            respuesta = cliente.auth.sign_in_with_password(
                 {"email": email.strip().lower(), "password": password}
             )
         except Exception as exc:
             raise CredencialesInvalidas("Credenciales inválidas.") from exc
-        return TokenPair(
-            access_token=sesion.access_token,
-            refresh_token=sesion.refresh_token,
-            expires_in=sesion.expires_in,
-        )
+        return _par_desde_respuesta(respuesta)
 
     def register(
         self, email: str, password: str, nombre: str, rol: Rol
@@ -317,13 +330,7 @@ class SupabaseAuthProvider(AuthProvider):
             )
         except Exception as exc:
             raise CredencialesInvalidas("Credenciales inválidas.") from exc
-        if sesion.session is None:
-            raise CredencialesInvalidas("Credenciales inválidas.")
-        return TokenPair(
-            access_token=sesion.session.access_token,
-            refresh_token=sesion.session.refresh_token,
-            expires_in=sesion.session.expires_in,
-        )
+        return _par_desde_respuesta(sesion)
 
     def emitir_token_recuperacion(self, email: str) -> str | None:
         """Delega en Supabase Auth, que envía el correo de recuperación (B11).
@@ -350,14 +357,10 @@ class SupabaseAuthProvider(AuthProvider):
 
         try:
             cliente = create_client(self._url, self._anon_key)
-            sesion = cliente.auth.refresh_session(refresh_token)
+            respuesta = cliente.auth.refresh_session(refresh_token)
         except Exception as exc:
             raise CredencialesInvalidas("Sesión expirada.") from exc
-        return TokenPair(
-            access_token=sesion.access_token,
-            refresh_token=sesion.refresh_token,
-            expires_in=sesion.expires_in,
-        )
+        return _par_desde_respuesta(respuesta, "Sesión expirada.")
 
     def verify(self, token: str) -> Claims:
         if self._jwks is None:

@@ -6,11 +6,13 @@ arranque temprano cuando falta un valor obligatorio.
 
 from __future__ import annotations
 
+import json
+from contextlib import suppress
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -20,7 +22,13 @@ class Settings(BaseSettings):
     app_name: str = "BeanTrust API"
     app_version: str = "0.1.0"
 
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:8081"])
+    # `NoDecode` apaga el intento de `json.loads` que pydantic-settings hace con
+    # los tipos complejos: sin él, un `BEAN_CORS_ORIGINS=a,b` (el formato que
+    # documenta .env.example) revienta el arranque con SettingsError antes de
+    # que corra el validador de abajo.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:8081"]
+    )
 
     repo_backend: Literal["memory", "supabase"] = "memory"
     auth_backend: Literal["local", "supabase"] = "local"
@@ -43,7 +51,13 @@ class Settings(BaseSettings):
     @classmethod
     def _parsear_origins(cls, valor: object) -> object:
         if isinstance(valor, str):
-            return [parte.strip() for parte in valor.split(",") if parte.strip()]
+            texto = valor.strip()
+            # Con `NoDecode` ya no se decodifica solo: aceptamos también la
+            # forma JSON para que un `["a","b"]` no acabe siendo un origen literal.
+            if texto.startswith("["):
+                with suppress(json.JSONDecodeError):
+                    return json.loads(texto)
+            return [parte.strip() for parte in texto.split(",") if parte.strip()]
         return valor
 
     @field_validator("jwt_secret")
@@ -53,24 +67,25 @@ class Settings(BaseSettings):
             raise ValueError("BEAN_JWT_SECRET debe tener al menos 32 bytes.")
         return valor
 
-    @field_validator("environment", mode="after")
-    @classmethod
-    def _proteger_produccion(cls, entorno: str, info) -> str:
-        valores = info.data
-        if entorno == "production":
-            if valores.get("auth_backend") != "supabase":
+    # Va sobre el modelo completo, no sobre `environment`: al ser el primer
+    # campo declarado, un `field_validator` lo vería con `info.data` vacío y
+    # rechazaría *siempre* `production`.
+    @model_validator(mode="after")
+    def _proteger_produccion(self) -> Settings:
+        if self.environment == "production":
+            if self.auth_backend != "supabase":
                 raise ValueError(
                     "En producción el auth debe usar Supabase (BEAN_AUTH_BACKEND=supabase)."
                 )
-            if valores.get("repo_backend") != "supabase":
+            if self.repo_backend != "supabase":
                 raise ValueError(
                     "En producción la BD debe usar Supabase (BEAN_REPO_BACKEND=supabase)."
                 )
-            if not valores.get("supabase_url") or not valores.get("supabase_service_key"):
+            if not self.supabase_url or not self.supabase_service_key:
                 raise ValueError(
                     "En producción se requieren BEAN_SUPABASE_URL y BEAN_SUPABASE_SERVICE_KEY."
                 )
-        return entorno
+        return self
 
 
 @lru_cache

@@ -1,0 +1,10 @@
+.venv
+tests
+db
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+beantrust_backend.egg-info
+backend.log
+.env

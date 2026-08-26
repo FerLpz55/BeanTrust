@@ -33,6 +33,16 @@ from app.models.dominio import (
 from app.utils.cursor import Cursor
 
 
+def _dato_unico(resp: Any) -> Any:
+    """Fila de un `.maybe_single()`, o `None` si no hubo coincidencia.
+
+    El SDK devuelve `None` en lugar de una respuesta con `data=None` cuando la
+    consulta no encuentra fila, así que acceder a `resp.data` a secas revienta
+    con AttributeError en todos los "buscar_por_*" que pueden no encontrar nada.
+    """
+    return getattr(resp, "data", None)
+
+
 def _uuid(valor: Any) -> uuid.UUID:
     return uuid.UUID(str(valor))
 
@@ -242,6 +252,33 @@ class SupabaseLoteRepo:
     def __init__(self, cliente) -> None:
         self._cliente = cliente
 
+    def _certificados(self, lote_ids: list[uuid.UUID]) -> dict[uuid.UUID, CertificadoQR]:
+        """Certificados QR de esos lotes, en una sola consulta (evita N+1).
+
+        El repositorio en memoria devuelve el mismo objeto `Lote` que ya traía
+        el certificado adjunto, así que nunca hizo falta cargarlo. Contra una BD
+        real hay que hidratarlo: sin él la app no puede pintar el QR y, peor,
+        `QrService.material_lote` se queda sin el corte por `emitido_en` y el
+        certificado deja de verificar en cuanto el lote registra un evento nuevo.
+        """
+        if not lote_ids:
+            return {}
+        try:
+            resp = (
+                self._cliente.table("qr_certificado")
+                .select("*")
+                .in_("lote_id", [str(lote_id) for lote_id in lote_ids])
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudo consultar el certificado.") from exc
+        certificados = [fila_a_qr(fila) for fila in (resp.data or [])]
+        return {qr.lote_id: qr for qr in certificados}
+
+    def _hidratar_certificado(self, lote: Lote) -> Lote:
+        lote.certificado = self._certificados([lote.id]).get(lote.id)
+        return lote
+
     def guardar(self, lote: Lote) -> Lote:
         try:
             self._cliente.table("lotes").upsert(lote_a_fila(lote)).execute()
@@ -260,13 +297,14 @@ class SupabaseLoteRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar el lote.") from exc
-        if not resp.data:
+        fila = _dato_unico(resp)
+        if not fila:
             return None
-        lote = fila_a_lote(resp.data)
+        lote = fila_a_lote(fila)
         # Cargar el historial: lo necesita la idempotencia por Idempotency-Key
         # (si un retry llega, buscar_por_id debe ver los eventos ya insertados).
         lote.historial = self.listar_eventos(lote.id)
-        return lote
+        return self._hidratar_certificado(lote)
 
     def buscar_por_codigo(self, codigo: str) -> Lote | None:
         try:
@@ -279,7 +317,8 @@ class SupabaseLoteRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar el lote.") from exc
-        return fila_a_lote(resp.data) if resp.data else None
+        fila = _dato_unico(resp)
+        return self._hidratar_certificado(fila_a_lote(fila)) if fila else None
 
     def listar(self, cursor: Cursor | None, limit: int) -> tuple[list[Lote], Cursor | None]:
         try:
@@ -297,6 +336,9 @@ class SupabaseLoteRepo:
             raise RepoError("No se pudo listar los lotes.") from exc
         filas = resp.data or []
         lotes = [fila_a_lote(fila) for fila in filas]
+        certificados = self._certificados([lote.id for lote in lotes])
+        for lote in lotes:
+            lote.certificado = certificados.get(lote.id)
         siguiente: Cursor | None = None
         if len(lotes) == limit and lotes:
             ultimo = lotes[-1]
@@ -345,12 +387,18 @@ class SupabaseQRRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar el certificado.") from exc
-        return fila_a_qr(resp.data) if resp.data else None
+        return fila_a_qr(_dato_unico(resp)) if _dato_unico(resp) else None
 
     def registrar_verificacion(self, lote_id: uuid.UUID, dispositivo: str | None) -> None:
         try:
+            # `verificacion.id` es uuid PK sin default: lo genera el cliente,
+            # como el resto de tablas (§7.5).
             self._cliente.table("verificacion").insert(
-                {"lote_id": str(lote_id), "dispositivo": dispositivo}
+                {
+                    "id": str(uuid.uuid4()),
+                    "lote_id": str(lote_id),
+                    "dispositivo": dispositivo,
+                }
             ).execute()
         except APIError as exc:
             raise RepoError("No se pudo registrar la verificación.") from exc
@@ -415,7 +463,7 @@ class SupabasePagoRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar el pago.") from exc
-        return fila_a_pago(resp.data) if resp.data else None
+        return fila_a_pago(_dato_unico(resp)) if _dato_unico(resp) else None
 
     def listar_por_cooperativa(
         self, cooperativa_id: uuid.UUID, cursor: Cursor | None, limit: int
@@ -430,9 +478,11 @@ class SupabasePagoRepo:
         try:
             resp = (
                 self._cliente.table("pago")
-                .select("monto_productor, lote!inner(finca!inner(productor_id))")
+                # El embed de PostgREST usa el nombre real de la tabla (`lotes`,
+                # no `lote`): con el singular responde PGRST200.
+                .select("monto_productor, lotes!inner(finca!inner(productor_id))")
                 .eq("estado_pago", EstadoPago.CONFIRMADO.value)
-                .eq("lote.finca.productor_id", str(productor_id))
+                .eq("lotes.finca.productor_id", str(productor_id))
                 .execute()
             )
         except APIError as exc:
@@ -450,7 +500,7 @@ class SupabasePagoRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar el pago.") from exc
-        return fila_a_pago(resp.data) if resp.data else None
+        return fila_a_pago(_dato_unico(resp)) if _dato_unico(resp) else None
 
 
 def propina_a_fila(propina: Propina) -> dict[str, Any]:
@@ -520,7 +570,7 @@ class SupabasePropinaRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar la propina.") from exc
-        return fila_a_propina(resp.data) if resp.data else None
+        return fila_a_propina(_dato_unico(resp)) if _dato_unico(resp) else None
 
     def buscar_por_productor(
         self, productor_id: uuid.UUID, cursor: Cursor | None, limit: int
@@ -568,7 +618,7 @@ class SupabaseFincaRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar la finca.") from exc
-        return fila_a_finca(resp.data) if resp.data else None
+        return fila_a_finca(_dato_unico(resp)) if _dato_unico(resp) else None
 
     def _listar_por(self, columna: str, valor: uuid.UUID) -> list[Finca]:
         try:
@@ -612,7 +662,7 @@ class SupabaseUsuarioRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar el usuario.") from exc
-        return fila_a_usuario(resp.data) if resp.data else None
+        return fila_a_usuario(_dato_unico(resp)) if _dato_unico(resp) else None
 
     def buscar_por_email(self, email: str) -> Usuario | None:
         try:
@@ -625,7 +675,7 @@ class SupabaseUsuarioRepo:
             )
         except APIError as exc:
             raise RepoError("No se pudo consultar el usuario.") from exc
-        return fila_a_usuario(resp.data) if resp.data else None
+        return fila_a_usuario(_dato_unico(resp)) if _dato_unico(resp) else None
 
     def listar_cooperativas(self) -> list[Cooperativa]:
         try:

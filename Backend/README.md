@@ -47,6 +47,28 @@ pytest
 | productor   | productor@beantrust.dev  | Prod123!  |
 | comprador   | comprador@beantrust.dev  | Comp123!  |
 
+## Despliegue (Vercel + Supabase)
+
+Producción: **https://beantrust-api.vercel.app** (proyecto Vercel
+`beantrust-api`, Root Directory `Backend`, framework FastAPI autodetectado) sobre
+el proyecto Supabase `yvczofwzfljuubxnmakj`.
+
+```sh
+cd Backend && vercel deploy --prod
+```
+
+Notas que no son obvias:
+
+- `requirements.txt` es obligatorio: el builder de Python de Vercel **no** lee
+  `[project].dependencies` de `pyproject.toml`. Hay que mantener los dos en sync.
+- `.vercelignore` deja fuera `.venv/`, `tests/` y `db/`.
+- Las variables `BEAN_*` viven en el proyecto de Vercel (`vercel env ls`), no en
+  un `.env`. En `production` la config **exige** Supabase para auth y datos.
+- `BEAN_CORS_ORIGINS` admite lista separada por comas (`a,b`) o JSON.
+- Las mismas cuatro credenciales de la tabla de arriba son las únicas válidas en
+  producción: el alta pública está cerrada en Supabase, así que
+  `POST /v1/auth/register` responde 401.
+
 ## Endpoints (`/v1`)
 
 La superficie exacta de la API está blindada por `tests/integration/test_contrato_api.py`:

@@ -158,10 +158,15 @@ def _memoria() -> Memoria:
 
 
 @lru_cache
-def _cliente_supabase(settings: Settings):
+def _crear_cliente_supabase(url: str, service_key: str):
     from supabase import create_client
 
-    return create_client(settings.supabase_url, settings.supabase_service_key)
+    return create_client(url, service_key)
+
+
+def _cliente_supabase(settings: Settings):
+    """`Settings` no es hashable: la caché va sobre los valores, no el modelo."""
+    return _crear_cliente_supabase(settings.supabase_url, settings.supabase_service_key)
 
 def get_repo_lote(settings: SettingsDep) -> RepositorioLote:
     if settings.repo_backend == "supabase":
