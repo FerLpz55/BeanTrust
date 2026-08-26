@@ -1,0 +1,42 @@
+<!--
+  Mascota de BeanTrust: grano de café con cara.
+
+  El rasgo que hace que un grano sea un grano es el pliegue vertical ondulado
+  donde se juntan las dos mitades: sin él la silueta se lee como galleta. Así
+  que el pliegue manda y la cara se acomoda a él.
+
+  Orden de pintado a propósito: cuerpo -> sonrisa -> pliegue -> ojos. El pliegue
+  va por encima de la boca y la parte en dos, que es como se vería en un grano
+  de verdad; dibujarla encima haría que se pelearan.
+
+  Formas planas y gruesas, sin degradados: a 48 px en el cajón de aplicaciones
+  solo sobreviven las masas. Colores de los tokens "Copa de cata"
+  (src/theme/tokens.ts). La elipse (rx 285, ry 315) cabe en el círculo seguro de
+  radio 338 que exige el icono adaptativo de Android.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <g transform="rotate(-7 512 512)">
+    <ellipse cx="512" cy="512" rx="285" ry="315" fill="#4A2A12"/>
+
+    <path d="M 392 622 Q 512 726 632 622"
+          fill="none" stroke="#F2CE9B" stroke-width="34" stroke-linecap="round"/>
+
+    <path d="M 512 212
+             C 474 300, 474 362, 512 430
+             C 550 498, 550 566, 512 636
+             C 486 690, 496 762, 512 812"
+          fill="none" stroke="#4A2A12" stroke-width="58" stroke-linecap="butt"/>
+    <path d="M 512 212
+             C 474 300, 474 362, 512 430
+             C 550 498, 550 566, 512 636
+             C 486 690, 496 762, 512 812"
+          fill="none" stroke="#F2CE9B" stroke-width="34" stroke-linecap="round"/>
+
+    <circle cx="376" cy="424" r="80" fill="#FDF5EA"/>
+    <circle cx="648" cy="424" r="80" fill="#FDF5EA"/>
+    <circle cx="386" cy="432" r="42" fill="#2C1404"/>
+    <circle cx="658" cy="432" r="42" fill="#2C1404"/>
+    <circle cx="370" cy="412" r="15" fill="#FDF5EA"/>
+    <circle cx="642" cy="412" r="15" fill="#FDF5EA"/>
+  </g>
+</svg>

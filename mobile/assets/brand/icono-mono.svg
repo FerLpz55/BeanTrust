@@ -1,0 +1,28 @@
+<!--
+  Versión monocroma (iconos "temáticos" de Android 13+). El sistema tiñe la
+  silueta con el color del tema del usuario, así que los rasgos no pueden ir
+  pintados: se recortan con una máscara para que sean huecos de verdad (alfa 0).
+
+  La rotación va dentro de la máscara y dentro de la elipse, nunca en el grupo
+  enmascarado: el contenido de una máscara se resuelve en el espacio de usuario
+  del elemento que la referencia, así que un transform ahí la aplicaría dos veces.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <mask id="rasgos" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <g transform="rotate(-7 512 512)">
+        <path d="M 392 622 Q 512 726 632 622" fill="none" stroke="#000"
+              stroke-width="34" stroke-linecap="round"/>
+        <path d="M 512 212 C 474 300, 474 362, 512 430 C 550 498, 550 566, 512 636 C 486 690, 496 762, 512 812"
+              fill="none" stroke="#000" stroke-width="34" stroke-linecap="round"/>
+        <circle cx="376" cy="424" r="80" fill="#000"/>
+        <circle cx="648" cy="424" r="80" fill="#000"/>
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#rasgos)">
+    <ellipse cx="512" cy="512" rx="285" ry="315" fill="#000000"
+             transform="rotate(-7 512 512)"/>
+  </g>
+</svg>

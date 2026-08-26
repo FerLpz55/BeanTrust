@@ -11,6 +11,7 @@ import uuid
 from app.models.dominio import (
     CertificadoInvalido,
     CertificadoNoEncontrado,
+    Finca,
     Lote,
     LoteNoEncontrado,
     NoAutorizado,
@@ -153,14 +154,27 @@ class LoteService:
         if usuario.rol is Rol.COMPRADOR:
             raise NoAutorizado("Los compradores solo verifican vía QR público.")
         lotes, siguiente = self._repo_lote.listar(cursor, limit)
-        # En el MVP el filtrado fino por finca lo garantiza RLS (Supabase); en
-        # memoria se filtran las fincas del usuario.
-        permitidos = [
-            lote
-            for lote in lotes
-            if self._puede_ver(usuario, lote)
-        ]
+        # Se resuelven las fincas del usuario UNA vez y se filtra por
+        # pertenencia: comprobarlas lote a lote disparaba una consulta por lote
+        # (N+1 contra PostgREST, invisible con el almacén en memoria).
+        #
+        # Nota de alcance: la página se pide a la BD y se filtra después, así
+        # que con varios productores en la misma base una página puede llegar
+        # corta o vacía aunque el usuario tenga más lotes más atrás. Hoy no se
+        # nota (una sola finca por productor); la solución de fondo es filtrar
+        # en la consulta, no aquí.
+        if usuario.rol is Rol.ADMIN:
+            return lotes, siguiente
+        fincas_propias = {finca.id for finca in self._fincas_de(usuario)}
+        permitidos = [lote for lote in lotes if lote.finca_id in fincas_propias]
         return permitidos, siguiente
+
+    def _fincas_de(self, usuario: CurrentUser) -> list[Finca]:
+        if usuario.rol is Rol.PRODUCTOR:
+            return self._repo_finca.listar_por_productor(usuario.id)
+        if usuario.rol is Rol.COOPERATIVA:
+            return self._repo_finca.listar_por_cooperativa(usuario.id)
+        return []
 
     def _puede_ver(self, usuario: CurrentUser, lote: Lote) -> bool:
         if usuario.rol is Rol.ADMIN:

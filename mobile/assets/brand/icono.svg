@@ -1,0 +1,28 @@
+<!-- Icono suelto (iOS y respaldo): la mascota sobre el fondo de marca. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" fill="#F2CE9B"/>
+  <g transform="rotate(-7 512 512)">
+    <ellipse cx="512" cy="512" rx="285" ry="315" fill="#4A2A12"/>
+
+    <path d="M 392 622 Q 512 726 632 622"
+          fill="none" stroke="#F2CE9B" stroke-width="34" stroke-linecap="round"/>
+
+    <path d="M 512 212
+             C 474 300, 474 362, 512 430
+             C 550 498, 550 566, 512 636
+             C 486 690, 496 762, 512 812"
+          fill="none" stroke="#4A2A12" stroke-width="58" stroke-linecap="butt"/>
+    <path d="M 512 212
+             C 474 300, 474 362, 512 430
+             C 550 498, 550 566, 512 636
+             C 486 690, 496 762, 512 812"
+          fill="none" stroke="#F2CE9B" stroke-width="34" stroke-linecap="round"/>
+
+    <circle cx="376" cy="424" r="80" fill="#FDF5EA"/>
+    <circle cx="648" cy="424" r="80" fill="#FDF5EA"/>
+    <circle cx="386" cy="432" r="42" fill="#2C1404"/>
+    <circle cx="658" cy="432" r="42" fill="#2C1404"/>
+    <circle cx="370" cy="412" r="15" fill="#FDF5EA"/>
+    <circle cx="642" cy="412" r="15" fill="#FDF5EA"/>
+  </g>
+</svg>
