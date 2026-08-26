@@ -33,7 +33,10 @@ class TokenResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(min_length=20, max_length=4096)
+    # Sin mínimo largo: los refresh tokens de Supabase son cadenas opacas de
+    # ~12 caracteres, no los JWT largos del proveedor local. Un `min_length=20`
+    # hacía imposible renovar la sesión en producción (422 en cada intento).
+    refresh_token: str = Field(min_length=1, max_length=4096)
 
 
 class RecoverRequest(BaseModel):

@@ -272,10 +272,28 @@ def _limiter_login(limit: int) -> RateLimiter:
     return RateLimiter(max_requests=limit, window_seconds=60)
 
 
+def ip_del_cliente(request: Request) -> str:
+    """IP real del cliente, también detrás del proxy del hosting.
+
+    Sin esto, `request.client.host` es la IP **del proxy** y todos los usuarios
+    caen en el mismo cubo: unos pocos logins simultáneos disparan un 429 a gente
+    que no ha hecho nada. Se prefiere la cabecera que escribe la plataforma
+    (`x-vercel-forwarded-for`), que el cliente no puede falsificar porque Vercel
+    la reescribe; `x-forwarded-for` es el estándar y su primera entrada es el
+    cliente original.
+    """
+    for cabecera in ("x-vercel-forwarded-for", "x-forwarded-for"):
+        valor = request.headers.get(cabecera)
+        if valor:
+            primera = valor.split(",")[0].strip()
+            if primera:
+                return primera
+    return request.client.host if request.client else "desconocido"
+
+
 def limitar_login(request: Request) -> None:
     """Aplica el límite por IP en endpoints sensibles (login, A07)."""
-    ip = request.client.host if request.client else "desconocido"
-    if not _limiter_login(get_settings().login_rate_limit).permite(ip):
+    if not _limiter_login(get_settings().login_rate_limit).permite(ip_del_cliente(request)):
         raise HTTPException(status_code=429, detail="Demasiados intentos. Intente más tarde.")
 
 

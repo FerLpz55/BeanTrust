@@ -60,3 +60,44 @@ def test_cors_admite_coma_y_json(valor: str, esperado: list[str]) -> None:
     """Sin `NoDecode`, pydantic-settings intenta `json.loads` del valor y el
     formato coma-separado que documenta .env.example revienta el arranque."""
     assert Settings(**BASE, cors_origins=valor).cors_origins == esperado
+
+
+class RequestFalso:
+    """Lo mínimo que `ip_del_cliente` mira de una Request."""
+
+    def __init__(self, headers: dict[str, str], client_host: str | None) -> None:
+        self.headers = headers
+        self.client = type("C", (), {"host": client_host})() if client_host else None
+
+
+def test_ip_prefiere_la_cabecera_de_la_plataforma() -> None:
+    from app.dependencies import ip_del_cliente
+
+    req = RequestFalso(
+        {"x-vercel-forwarded-for": "203.0.113.7", "x-forwarded-for": "1.2.3.4"},
+        "10.0.0.1",
+    )
+    assert ip_del_cliente(req) == "203.0.113.7"
+
+
+def test_ip_toma_la_primera_entrada_de_forwarded_for() -> None:
+    """Detrás del proxy, `client.host` es el proxy y todos compartirían cubo."""
+    from app.dependencies import ip_del_cliente
+
+    req = RequestFalso({"x-forwarded-for": "203.0.113.7, 70.41.3.18"}, "10.0.0.1")
+    assert ip_del_cliente(req) == "203.0.113.7"
+
+
+def test_ip_cae_al_cliente_directo_sin_proxy() -> None:
+    from app.dependencies import ip_del_cliente
+
+    assert ip_del_cliente(RequestFalso({}, "10.0.0.1")) == "10.0.0.1"
+    assert ip_del_cliente(RequestFalso({}, None)) == "desconocido"
+
+
+def test_refresh_admite_el_token_corto_de_supabase() -> None:
+    """Los refresh tokens de Supabase son opacos y cortos (~12 chars); el
+    `min_length=20` heredado del proveedor local impedía renovar la sesión."""
+    from app.schemas.auth import RefreshRequest
+
+    assert RefreshRequest(refresh_token="uoh6wvqbwflz").refresh_token == "uoh6wvqbwflz"
