@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -91,7 +91,11 @@ export default function VerificarScreen() {
               onBarcodeScanned={handleEscaneo}
             />
           ) : null}
-          <View style={styles.corners}>
+          {/* Decorativo: sin `pointerEvents="none"` este absoluteFill con
+              zIndex 10 queda encima de todo y se come el toque del botón
+              "Permitir cámara" (invisible en Expo Go, donde el permiso ya
+              venía concedido y ese botón nunca se renderizaba). */}
+          <View style={styles.corners} pointerEvents="none">
             <View style={[styles.corner, styles.cornerTL, { borderColor: primaryContainer }]} />
             <View style={[styles.corner, styles.cornerTR, { borderColor: primaryContainer }]} />
             <View style={[styles.corner, styles.cornerBL, { borderColor: primaryContainer }]} />
@@ -101,12 +105,22 @@ export default function VerificarScreen() {
             <View style={styles.scannerContent}>
               <IconSymbol size={64} name="photo-camera" color={onSurfaceVariant} />
               <Text style={[typeScale.bodyLarge, { color: onSurfaceVariant }, styles.scannerText]}>
-                {permiso
-                  ? 'Necesitamos la cámara para leer el código QR'
-                  : 'Preparando la cámara…'}
+                {!permiso
+                  ? 'Preparando la cámara…'
+                  : permiso.canAskAgain
+                    ? 'Necesitamos la cámara para leer el código QR'
+                    : 'Activa el permiso de cámara en los ajustes para escanear el QR'}
               </Text>
               {permiso && !permiso.granted ? (
-                <PrimaryButton label="Permitir cámara" onPress={() => void pedirPermiso()} />
+                <PrimaryButton
+                  label={permiso.canAskAgain ? 'Permitir cámara' : 'Abrir ajustes'}
+                  onPress={() => {
+                    // Tras dos negativas Android ignora la petición en silencio:
+                    // ahí la única salida es la pantalla de ajustes de la app.
+                    if (permiso.canAskAgain) void pedirPermiso();
+                    else void Linking.openSettings();
+                  }}
+                />
               ) : null}
             </View>
           ) : null}
