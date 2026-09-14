@@ -14,6 +14,7 @@ import type { EventoCreate } from '@/src/api/types';
 import { RECHAZO_DISPONIBLE_DESDE, TRANSICIONES_VALIDAS, useLotesStore } from '@/src/store/lotes';
 import { useAuthStore } from '@/src/store/auth';
 import { usePerfilStore } from '@/src/store/perfil';
+import { useSyncStore } from '@/src/store/sync';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 import { StatusChip } from '@/src/components/status-chip';
 import { TrazaTimeline } from '@/src/components/traza-timeline';
@@ -41,6 +42,8 @@ export default function LoteDetailScreen() {
   const avanzar = useLotesStore((s) => s.avanzar);
   const rol = useAuthStore((s) => s.rol);
   const fincas = usePerfilStore((s) => s.fincas);
+  const lotesConPendientes = useSyncStore((s) => s.lotesConPendientes);
+  const eventosPendientes = useSyncStore((s) => s.eventosPendientes);
   const [cargando, setCargando] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [ventaModalVisible, setVentaModalVisible] = useState(false);
@@ -57,6 +60,17 @@ export default function LoteDetailScreen() {
     setCargando(true);
     void cargarDetalle(id).finally(() => setCargando(false));
   }, [id, cargarDetalle]);
+
+  const pendiente = id ? lotesConPendientes.includes(id) : false;
+  const numEventosPendientes = id ? (eventosPendientes[id] ?? 0) : 0;
+
+  // Cuando el lote deja de tener pendientes (sync completado), se recarga del
+  // backend para reemplazar la proyección optimista por la fuente de verdad.
+  const eraPendiente = useRef(false);
+  useEffect(() => {
+    if (eraPendiente.current && !pendiente && id) void cargarDetalle(id);
+    eraPendiente.current = pendiente;
+  }, [pendiente, id, cargarDetalle]);
 
   const fincaNombre = fincas.find((f) => f.id === lote?.finca_id)?.nombre ?? null;
 
@@ -166,6 +180,16 @@ export default function LoteDetailScreen() {
           <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
             {lote.metodo} • {lote.peso_actual_kg.toFixed(1)} kg
           </Text>
+          {pendiente ? (
+            <View style={[styles.pendingChip, { backgroundColor: tertiaryContainerBg }]}>
+              <IconSymbol name="cloud-upload" size={14} color={onTertiaryContainer} />
+              <Text style={[typeScale.labelMedium, { color: onTertiaryContainer }]}>
+                {numEventosPendientes > 0
+                  ? `${numEventosPendientes} evento(s) por sincronizar`
+                  : 'Pendiente de sincronizar'}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {/* INFO CARDS */}
@@ -334,6 +358,15 @@ const styles = StyleSheet.create({
   titleSection: {
     gap: spacing.sm,
     marginBottom: spacing.xl,
+  },
+  pendingChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radii.full,
   },
   row: {
     flexDirection: 'row',

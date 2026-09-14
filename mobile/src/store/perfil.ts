@@ -13,6 +13,8 @@ import { create } from 'zustand';
 import { ApiError } from '@/src/api/client';
 import { listarFincas } from '@/src/api/fincas';
 import type { FincaRead } from '@/src/api/types';
+import * as offline from '@/src/offline';
+import { useAuthStore } from '@/src/store/auth';
 
 interface PerfilState {
   fincas: FincaRead[];
@@ -30,15 +32,24 @@ export const usePerfilStore = create<PerfilState>((set, get) => ({
 
   cargarFincas: async () => {
     set({ isLoading: true, error: null });
+    const userId = useAuthStore.getState().usuarioId;
     try {
-      set({ fincas: await listarFincas(), isLoading: false });
+      const fincas = await listarFincas();
+      set({ fincas, isLoading: false });
+      // Caché para el modo campo: solo respuestas ya autorizadas del usuario.
+      if (userId) await offline.guardarRecurso(userId, 'fincas', 'all', fincas);
     } catch (err) {
       // 403 es esperado para el rol comprador (no tiene fincas, matriz §10).
       const esSinAcceso = err instanceof ApiError && err.status === 403;
+      const sinRed = err instanceof ApiError && err.status === 0;
+      const cacheadas =
+        sinRed && userId
+          ? await offline.leerRecurso<FincaRead[]>(userId, 'fincas', 'all')
+          : null;
       set({
-        fincas: [],
+        fincas: cacheadas ?? [],
         isLoading: false,
-        error: esSinAcceso ? null : 'No se pudieron cargar tus fincas.',
+        error: esSinAcceso || (sinRed && cacheadas) ? null : 'No se pudieron cargar tus fincas.',
       });
     }
   },

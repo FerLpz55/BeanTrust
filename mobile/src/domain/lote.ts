@@ -84,6 +84,27 @@ export const TRANSICIONES_VALIDAS: Partial<Record<LoteEstado, EventoTipo[]>> = {
 /** Estados desde los que se puede rechazar el lote (cualquiera no terminal). */
 export const RECHAZO_DISPONIBLE_DESDE: LoteEstado[] = ['CEREZA', 'PERGAMINO', 'ORO', 'TOSTADO'];
 
+/**
+ * Estado resultante por tipo de evento (espejo de `MaquinaEstados` del
+ * backend, `Backend/app/models/dominio.py`). Se usa **solo** para proyectar de
+ * forma optimista un evento encolado offline; el backend sigue siendo la
+ * fuente de verdad y corrige la proyección al sincronizar.
+ */
+export const ESTADO_TRAS_EVENTO: Record<EventoTipo, LoteEstado> = {
+  COSECHA: 'CEREZA',
+  LIMPIEZA: 'CEREZA',
+  DESPULPADO: 'PERGAMINO',
+  FERMENTACION: 'PERGAMINO',
+  LAVADO: 'PERGAMINO',
+  SECADO: 'PERGAMINO',
+  REPOSO: 'PERGAMINO',
+  DESCASCARADO: 'ORO',
+  CLASIFICACION: 'ORO',
+  TOSTADO: 'TOSTADO',
+  VENTA: 'VENDIDO',
+  RECHAZADO: 'RECHAZADO',
+};
+
 export interface CampoEvento {
   key: keyof EventoCampos;
   label: string;
@@ -177,6 +198,8 @@ export interface Lote {
   altitud_max?: number;
   humedad_final_pct?: number;
   puntaje_sca?: number;
+  /** `true` si hay operaciones locales sin confirmar por el backend (§7.5). */
+  pendiente?: boolean;
   historial: LoteEvento[];
 }
 
@@ -247,6 +270,7 @@ export function aLoteVista(lote: LoteRead): Lote {
     certificado: lote.certificado !== null,
     codigo_certificado: lote.certificado?.codigo ?? null,
     emitido_en: lote.certificado?.emitido_en,
+    pendiente: false,
     historial: [],
   };
 }

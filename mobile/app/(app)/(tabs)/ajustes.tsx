@@ -6,7 +6,7 @@
  * nombre de la persona ni la fecha de alta, así que la UI no los inventa.
  */
 
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
@@ -22,6 +22,7 @@ import { usePerfilStore } from '@/src/store/perfil';
 import { useTemaStore, type PreferenciaTema } from '@/src/store/tema';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
+import type { RegistroCola } from '@/src/offline/types';
 
 const ETIQUETA_TEMA: Record<PreferenciaTema, string> = {
   automatico: 'Automático',
@@ -29,11 +30,31 @@ const ETIQUETA_TEMA: Record<PreferenciaTema, string> = {
   oscuro: 'Oscuro',
 };
 
+/** Etiqueta legible de una operación en cola, sin exponer detalles internos. */
+function etiquetaOperacion(item: RegistroCola): string {
+  if (item.payload.tipo === 'registrar_cosecha') {
+    return `Cosecha ${item.payload.id.slice(0, 8)}`;
+  }
+  return `Evento ${item.payload.evento.tipo} · lote ${item.payload.lote_id.slice(0, 8)}`;
+}
+
 export default function AjustesScreen() {
   const logout = useAuthStore((s) => s.logout);
   const email = useAuthStore((s) => s.email);
   const rol = useAuthStore((s) => s.rol);
-  const { pendingCount, isOnline } = useSyncStore();
+  const usuarioId = useAuthStore((s) => s.usuarioId);
+  const {
+    isOnline,
+    sincronizando,
+    pendientes,
+    conflictos,
+    ultimoIntento,
+    error: errorSync,
+    sincronizarAhora,
+    reintentar,
+    descartar,
+    limpiar,
+  } = useSyncStore();
   const fincas = usePerfilStore((s) => s.fincas);
   const cargarFincas = usePerfilStore((s) => s.cargarFincas);
   const lotes = useLotesStore((s) => s.lotes);
@@ -72,9 +93,25 @@ export default function AjustesScreen() {
 
   const handleLogout = useCallback(async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    // Al salir se borran caché y cola del usuario: otro usuario no debe verlas.
+    if (usuarioId) await limpiar(usuarioId);
     await logout();
     router.replace('/login');
-  }, [logout]);
+  }, [logout, limpiar, usuarioId]);
+
+  const confirmarDescarte = useCallback(
+    (sequence: number) => {
+      Alert.alert(
+        'Descartar operación',
+        'Se eliminará de la cola local y no se enviará al backend. Esta acción no se puede deshacer.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Descartar', style: 'destructive', onPress: () => void descartar(sequence) },
+        ],
+      );
+    },
+    [descartar],
+  );
 
   const getRoleColors = (rol: string) => {
     switch (rol) {
@@ -195,13 +232,83 @@ export default function AjustesScreen() {
           <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }, styles.sectionTitle]}>SINCRONIZACIÓN</Text>
           <View style={[styles.card, { backgroundColor: surfaceContainerLow, borderRadius: radii.large }]}>
             <View style={styles.syncRow}>
-              <View style={[styles.syncDot, { backgroundColor: isOnline ? primary : onSurfaceVariant }]} />
-              <Text style={[typeScale.bodyMedium, { color: onSurface }]}>{isOnline ? 'En línea' : 'Sin conexión'}</Text>
+              <View style={[styles.syncDot, { backgroundColor: isOnline ? primary : error }]} />
+              <Text style={[typeScale.bodyMedium, { color: onSurface }]}>
+                {isOnline ? 'En línea' : 'Sin conexión'}
+              </Text>
             </View>
             <View style={styles.syncRow}>
-              <Text style={[typeScale.titleMedium, { color: onSurface }]}>{pendingCount}</Text>
-              <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant, marginLeft: spacing.xs }]}>pendientes</Text>
+              <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>Último intento: </Text>
+              <Text style={[typeScale.bodyMedium, { color: onSurface }]}>
+                {ultimoIntento ? new Date(ultimoIntento).toLocaleTimeString('es-ES') : 'Nunca'}
+              </Text>
             </View>
+
+            {pendientes.length > 0 ? (
+              <View style={styles.syncList}>
+                {pendientes.map((item) => (
+                  <View key={item.sequence} style={styles.syncItem}>
+                    <IconSymbol size={18} name="cloud-upload" color={onSurfaceVariant} />
+                    <Text style={[typeScale.bodySmall, styles.syncItemText, { color: onSurface }]} numberOfLines={1}>
+                      {etiquetaOperacion(item)}
+                    </Text>
+                    <Text style={[typeScale.dataMono, { color: onSurfaceVariant }]}>
+                      {item.attempts > 0 ? `${item.attempts} intento(s)` : 'pendiente'}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={[styles.syncEmpty, { color: onSurfaceVariant }]}>
+                No hay operaciones pendientes.
+              </Text>
+            )}
+
+            {conflictos.map((item) => (
+              <View key={item.sequence} style={[styles.syncItem, styles.syncConflicto]}>
+                <IconSymbol size={18} name="error-outline" color={error} />
+                <View style={styles.syncItemText}>
+                  <Text style={[typeScale.bodySmall, { color: onSurface }]} numberOfLines={1}>
+                    {etiquetaOperacion(item)}
+                  </Text>
+                  {item.lastError ? (
+                    <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]} numberOfLines={2}>
+                      {item.lastError}
+                    </Text>
+                  ) : null}
+                </View>
+                <Pressable onPress={() => void reintentar(item.sequence)} accessibilityRole="button">
+                  <Text style={[typeScale.labelMedium, { color: primary }]}>Reintentar</Text>
+                </Pressable>
+                <Pressable onPress={() => confirmarDescarte(item.sequence)} accessibilityRole="button">
+                  <Text style={[typeScale.labelMedium, { color: error }]}>Descartar</Text>
+                </Pressable>
+              </View>
+            ))}
+
+            <Pressable
+              onPress={() => void sincronizarAhora()}
+              disabled={sincronizando}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: sincronizando }}
+              style={[
+                styles.syncAction,
+                { borderTopColor: outlineVariant, opacity: sincronizando ? 0.6 : 1 },
+              ]}
+            >
+              <Text style={[typeScale.labelLarge, { color: primary }]}>
+                {sincronizando ? 'Sincronizando…' : 'Sincronizar ahora'}
+              </Text>
+            </Pressable>
+
+            {errorSync ? (
+              <Text
+                style={[typeScale.bodySmall, styles.syncError, { color: error }]}
+                accessibilityLiveRegion="polite"
+              >
+                {errorSync}
+              </Text>
+            ) : null}
           </View>
         </View>
 
@@ -379,6 +486,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 48,
     justifyContent: 'center',
+  },
+  syncList: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.xs,
+  },
+  syncItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  syncItemText: {
+    flex: 1,
+  },
+  syncConflicto: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#00000022',
+    paddingVertical: spacing.sm,
+  },
+  syncEmpty: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+  },
+  syncError: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
   },
   menu: {
     overflow: 'hidden',

@@ -35,7 +35,7 @@ function formatFechaRelativa(iso: string): string {
 export default function DashboardScreen() {
   const rol = useAuthStore((s) => s.rol);
   const { lotes, isLoading, error: errorLotes, refrescar, refrescando } = useLotes();
-  const { pendingCount } = useSyncStore();
+  const { pendingCount, sincronizando, sincronizarAhora } = useSyncStore();
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
@@ -125,7 +125,11 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <OfflineBanner pendingCount={pendingCount} onRetry={refrescar} />
+      <OfflineBanner
+        pendingCount={pendingCount}
+        onRetry={() => void sincronizarAhora()}
+        sincronizando={sincronizando}
+      />
 
       <ScrollView
         style={styles.scroll}

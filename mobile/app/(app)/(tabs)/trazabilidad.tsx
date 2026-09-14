@@ -32,7 +32,7 @@ export default function TrazabilidadScreen() {
   const rol = useAuthStore((s) => s.rol);
   const { lotes, isLoading, error, refrescar, refrescando, hayMas, cargarMas, isLoadingMore } =
     useLotes();
-  const { pendingCount } = useSyncStore();
+  const { pendingCount, sincronizando, sincronizarAhora } = useSyncStore();
   const [filtro, setFiltro] = useState<Filtro>('TODOS');
 
   const handleLotePress = useCallback((id: string) => {
@@ -66,7 +66,11 @@ export default function TrazabilidadScreen() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <OfflineBanner pendingCount={pendingCount} onRetry={refrescar} />
+      <OfflineBanner
+        pendingCount={pendingCount}
+        onRetry={() => void sincronizarAhora()}
+        sincronizando={sincronizando}
+      />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
