@@ -45,7 +45,9 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
   el **alta pública está deshabilitada** y las cuentas piloto se crean por Auth Admin.
 - La app móvil cubre login/recuperación, fincas, alta de lote, registro de eventos
   (F11), trazabilidad, Pasaporte de Café con QR verificable y panel de comercio justo.
-- **Pendiente:** cola offline real, evidencia fotográfica y FlashList.
+- **Modo campo offline-first:** caché local en SQLite, cola de sincronización
+  FIFO con reintento/descarte y sincronización al recuperar red (`src/offline/`).
+- **Pendiente:** evidencia fotográfica y FlashList.
 - **Simulado:** pagos y propinas usan un gateway fake; no hay blockchain (web3 en
   pausa, B7). No se mueve dinero real.
 - Verificación operativa del flujo: `Backend/scripts/smoke_production.py`.

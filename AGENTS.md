@@ -70,9 +70,11 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   contrato→UI vive en `src/domain/lote.ts`. Escaner QR real con `expo-camera`.
   Tests con vitest en `src/api/client.test.ts` (`pnpm test`). **F11 cerrado**: la
   UI de registro de eventos vive en `src/components/registrar-evento-modal.tsx`
-  y se usa desde `app/(app)/lotes/[id].tsx`.
-  **Pendiente**: FlashList, cola offline real (§7.5) y evidencia fotográfica
-  (ADR-14, con B11).
+  y se usa desde `app/(app)/lotes/[id].tsx`. **Modo campo offline-first (§7.5)
+  cerrado**: `src/offline/` es la única capa con SQLite (`expo-sqlite`) y NetInfo
+  (`cached_resource` + `sync_queue`), con motor FIFO single-flight, encolado
+  optimista y UI de pendientes/conflictos; `POST /v1/sync` es la única ruta.
+  **Pendiente**: FlashList y evidencia fotográfica (ADR-14, con B11).
 - Producción (piloto Android): Supabase real conectado (proyecto
   `yvczofwzfljuubxnmakj`, auth + repos con `service_role`) y **registro público
   cerrado** (`enable_signup=false`); las cuentas piloto se crean por Auth Admin,

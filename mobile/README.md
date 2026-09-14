@@ -46,7 +46,7 @@ pnpm typecheck        # tsc --noEmit (los tipos deben compilar limpio)
 | Trazabilidad | `(app)/(tabs)/trazabilidad.tsx` | **Real** — filtros + paginacion por cursor |
 | Ajustes | `(app)/(tabs)/ajustes.tsx` | **Real** — perfil y fincas del backend |
 | Registrar evento | `src/components/registrar-evento-modal.tsx` | **Real** — `POST /v1/lotes/{id}/eventos` (F11) |
-| Offline / cola de sync | — | **Pendiente** (§7.5, fase posterior) |
+| Offline / cola de sync | `src/offline/` | **Real** — SQLite + NetInfo, cola FIFO, reintento y descarte (§7.5) |
 | Evidencia fotografica | — | **Pendiente** (ADR-14, con B11) |
 
 ### Pruebas
