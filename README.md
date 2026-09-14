@@ -26,11 +26,11 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
 
 ## Stack Tecnológico
 
-* **Backend:** Python 3.10+ (FastAPI, Pydantic)
-* **Base de Datos:** PostgreSQL
-* **Frontend:** React Native 
-* **Blockchain:** Red Polygon
-* **Entorno de Despliegue:** Cloud PaaS (Railway / Contenedores)
+* **Backend:** Python ≥3.12 (FastAPI, Pydantic)
+* **Base de Datos:** Supabase / PostgreSQL
+* **Frontend:** React Native / Expo Router
+* **Blockchain:** Polygon — **en pausa** (B7); hoy el pago/propina es simulado por un gateway fake
+* **Entorno de Despliegue:** Vercel (API) + Supabase (BD/Auth)
 
 ## Características del Sistema
 
@@ -38,3 +38,14 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
 * **Operación Offline-First (Móvil):** Arquitectura de almacenamiento local y sincronización diferida para mitigar la falta de conectividad en zonas rurales.
 * **Pasaporte de Café:** Generación de códigos QR vinculados a la historia del lote para validación criptográfica por parte del consumidor final, con datos enriquecidos (variedad, método, humedad, puntaje SCA).
 * **Comercio Justo:** Panel 97/3 (97% al productor, 3% operación) + propinas directas del comprador al productor.
+
+## Estado del MVP (honesto)
+
+- El backend corre sobre Supabase/PostgreSQL en producción (piloto Android cerrado);
+  el **alta pública está deshabilitada** y las cuentas piloto se crean por Auth Admin.
+- La app móvil cubre login/recuperación, fincas, alta de lote, registro de eventos
+  (F11), trazabilidad, Pasaporte de Café con QR verificable y panel de comercio justo.
+- **Pendiente:** cola offline real, evidencia fotográfica y FlashList.
+- **Simulado:** pagos y propinas usan un gateway fake; no hay blockchain (web3 en
+  pausa, B7). No se mueve dinero real.
+- Verificación operativa del flujo: `Backend/scripts/smoke_production.py`.

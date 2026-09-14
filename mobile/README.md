@@ -20,6 +20,10 @@ La URL de la API se configura con `EXPO_PUBLIC_API_URL` (copia `.env.example`
 a `.env`). Por defecto apunta a `http://localhost:8000` (ver `src/config.ts`);
 **en dispositivo físico debe ser la IP LAN de tu máquina**, no localhost.
 
+En el piloto Android el `.env` apunta a `https://beantrust-api.vercel.app`
+(backend en Vercel sobre Supabase real). El registro público está cerrado: las
+cuentas piloto las crea Auth Admin, no la pantalla de registro.
+
 ## Verificación
 
 ```bash
@@ -41,7 +45,7 @@ pnpm typecheck        # tsc --noEmit (los tipos deben compilar limpio)
 | Mercado | `(app)/mercado.tsx` y `mercado/[loteId].tsx` | **Real** — saldo y panel 97/3 (B13/B16) |
 | Trazabilidad | `(app)/(tabs)/trazabilidad.tsx` | **Real** — filtros + paginacion por cursor |
 | Ajustes | `(app)/(tabs)/ajustes.tsx` | **Real** — perfil y fincas del backend |
-| Registrar evento | — | **Pendiente** (F11): la capa de API existe, falta la UI |
+| Registrar evento | `src/components/registrar-evento-modal.tsx` | **Real** — `POST /v1/lotes/{id}/eventos` (F11) |
 | Offline / cola de sync | — | **Pendiente** (§7.5, fase posterior) |
 | Evidencia fotografica | — | **Pendiente** (ADR-14, con B11) |
 

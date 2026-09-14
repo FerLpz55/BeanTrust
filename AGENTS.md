@@ -68,11 +68,18 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   `src/api/` cubre auth, fincas, lotes, verificar, pagos, propinas y mercado;
   `client.ts` renueva el token ante un 401 y manda `Idempotency-Key`. El adaptador
   contrato→UI vive en `src/domain/lote.ts`. Escaner QR real con `expo-camera`.
-  Tests con vitest en `src/api/client.test.ts` (`pnpm test`).
-  **Pendiente**: F11 (UI de registro de eventos), FlashList, cola offline real
-  (§7.5) y evidencia fotográfica (ADR-14, con B11).
-- Deudas clave: B7 web3 en pausa, B11 Supabase real + RLS activo + wallet `public_address`,
-  refresh sin rotación de tokens, rate limit en memoria.
+  Tests con vitest en `src/api/client.test.ts` (`pnpm test`). **F11 cerrado**: la
+  UI de registro de eventos vive en `src/components/registrar-evento-modal.tsx`
+  y se usa desde `app/(app)/lotes/[id].tsx`.
+  **Pendiente**: FlashList, cola offline real (§7.5) y evidencia fotográfica
+  (ADR-14, con B11).
+- Producción (piloto Android): Supabase real conectado (proyecto
+  `yvczofwzfljuubxnmakj`, auth + repos con `service_role`) y **registro público
+  cerrado** (`enable_signup=false`); las cuentas piloto se crean por Auth Admin,
+  no desde la app. Smoke test operativo en `Backend/scripts/smoke_production.py`.
+- Deudas clave: B7 web3 en pausa, B11 RLS activo (hoy inerte: el backend usa
+  `service_role`) + wallet `public_address`, refresh sin rotación de tokens,
+  rate limit en memoria.
 
 ## Skills útiles
 
