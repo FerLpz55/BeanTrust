@@ -62,7 +62,6 @@ export default function LoteDetailScreen() {
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
-  const surfaceContainerLow = useThemeColor('surfaceContainerLow');
   const tertiaryContainerBg = useThemeColor('tertiaryContainer');
   const onTertiaryContainer = useThemeColor('onTertiaryContainer');
   const errorColor = useThemeColor('error');

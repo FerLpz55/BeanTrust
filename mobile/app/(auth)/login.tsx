@@ -20,7 +20,6 @@ import { TextField } from '@/src/components/text-field';
 import { TextLink } from '@/src/components/text-link';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { useAuthStore } from '@/src/store/auth';
-import { login } from '@/src/api/auth';
 import { ApiError } from '@/src/api/client';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 

@@ -21,7 +21,6 @@ export default function VerificarScreen() {
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
   const primaryContainer = useThemeColor('primaryContainer');
-  const onPrimaryContainer = useThemeColor('onPrimaryContainer');
   const outline = useThemeColor('outline');
   const background = useThemeColor('background');
 

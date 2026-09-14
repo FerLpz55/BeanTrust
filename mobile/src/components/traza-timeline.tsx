@@ -4,7 +4,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
-import { radii, spacing, typeScale } from '@/src/theme/tokens';
+import { spacing, typeScale } from '@/src/theme/tokens';
 import { LoteEvento, EVENTO_ICONO } from '@/src/store/lotes';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 

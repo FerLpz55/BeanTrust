@@ -15,7 +15,7 @@ import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { spacing, typeScale, radii } from '@/src/theme/tokens';
 import { useVerificarStore } from '@/src/store/verificar';
 import { useAuthStore } from '@/src/store/auth';
-import { LoteEstado, EventoTipo } from '@/src/store/lotes';
+import { LoteEstado } from '@/src/store/lotes';
 import { useLocalSearchParams, router, type Href } from 'expo-router';
 
 interface LocalParams {
@@ -31,7 +31,6 @@ export default function VerificarCodigoScreen() {
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
   const primary = useThemeColor('primary');
-  const onPrimary = useThemeColor('onPrimary');
   const primaryContainer = useThemeColor('primaryContainer');
   const onPrimaryContainer = useThemeColor('onPrimaryContainer');
   const surfaceContainerLow = useThemeColor('surfaceContainerLow');
