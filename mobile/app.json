@@ -48,7 +48,8 @@
           "cameraPermission": "BeanTrust usa la camara para escanear el QR del Pasaporte de Cafe.",
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true,
