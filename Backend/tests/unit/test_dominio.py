@@ -226,6 +226,30 @@ def test_hash_determinista_y_sensible_al_historial() -> None:
     assert qr.hash_lote(a) != qr.hash_lote(b)
 
 
+def test_hash_etapa_reproducible_desde_el_evento_persistido() -> None:
+    """Regresión ADR-11: el hash almacenado debe recalcularse con los datos guardados.
+
+    Antes se calculaba sobre un `LoteEvento` temporal cuyo `registrado_en` se
+    autogeneraba de nuevo al crear el evento final, así que el `hash_etapa`
+    persistido no coincidía con el que producía el propio evento guardado.
+    """
+    lote = crear_lote()
+    lote.registrar_cosecha(ACTOR, 500.0)
+    lote.avanzar(TipoEvento.DESPULPADO, ACTOR, peso_kg=480.0)
+    lote.avanzar(TipoEvento.DESCASCARADO, ACTOR, peso_kg=450.0)
+    lote.avanzar(TipoEvento.TOSTADO, ACTOR, peso_kg=420.0)
+
+    for indice, evento in enumerate(lote.historial):
+        espejo = Lote(
+            id=lote.id,
+            finca_id=lote.finca_id,
+            codigo_publico=lote.codigo_publico,
+            fecha_cosecha=lote.fecha_cosecha,
+            historial=list(lote.historial[:indice]),
+        )
+        assert espejo._calcular_hash_etapa(evento) == evento.hash_etapa
+
+
 # ------------------------------------------------------------------ estados de error
 
 

@@ -8,7 +8,7 @@ la biblioteca estándar de Python (arquitectura §4 y §12).
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import ClassVar
@@ -348,9 +348,12 @@ class Lote:
             "actor_id": actor_id,
             "peso_kg": peso_kg,
         }
-        evento = LoteEvento(
-            **campos, hash_etapa=self._calcular_hash_etapa(LoteEvento(**campos))
-        )
+        # `LoteEvento` es frozen y `registrado_en` se autogenera en cada
+        # instancia: hay que reusar el timestamp del evento con el que se
+        # calcula el hash, o el `hash_etapa` almacenado no es reproducible
+        # (el timestamp del hash diferiría del persistido).
+        base = LoteEvento(**campos)
+        evento = replace(base, hash_etapa=self._calcular_hash_etapa(base))
         self.historial.append(evento)
         self.actualizado_en = ahora_utc()
         return evento
@@ -458,32 +461,12 @@ class Lote:
             densidad=densidad,
             tamiz=tamiz,
         )
-        # Calcular hash_etapa (cadena lineal, ADR-11) ANTES de crear el objeto final
+        # Calcular hash_etapa (cadena lineal, ADR-11) ANTES de crear el objeto final.
+        # `replace` conserva id y `registrado_en` del evento temporal: si se
+        # instanciara otro `LoteEvento`, el timestamp autogenerado diferiría del
+        # que entró al hash y la cadena no sería reproducible desde lo persistido.
         hash_etapa = self._calcular_hash_etapa(evento_temp)
-        # Crear el evento final con el hash ya calculado
-        evento = LoteEvento(
-            id=evento_id or uuid.uuid4(),
-            lote_id=self.id,
-            tipo=tipo,
-            de_estado=de,
-            a_estado=a,
-            actor_id=actor_id,
-            peso_kg=peso_kg,
-            merma_pct=merma_pct,
-            comprador_id=comprador_id,
-            metodo_beneficiado=metodo_beneficiado,
-            metodo_fermentacion=metodo_fermentacion,
-            fermentacion_horas=fermentacion_horas,
-            humedad_inicial_pct=humedad_inicial_pct,
-            humedad_final_pct=humedad_final_pct,
-            metodo_secado=metodo_secado,
-            dias_reposo=dias_reposo,
-            puntaje_sca=puntaje_sca,
-            defectos=defectos,
-            densidad=densidad,
-            tamiz=tamiz,
-            hash_etapa=hash_etapa,
-        )
+        evento = replace(evento_temp, hash_etapa=hash_etapa)
         self.historial.append(evento)
         self.actualizado_en = ahora_utc()
         return evento
