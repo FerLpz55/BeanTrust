@@ -206,6 +206,135 @@ def test_sync_batch_207_con_conflicto(client, header_productor):
     assert r.json()["resultados"][0]["estado"] == "conflicto"
 
 
+def test_sync_cosecha_enriquecida(client, header_productor):
+    """Una cosecha offline conserva variedad, método y evidencia (§7.5)."""
+    lote_id = str(uuid.uuid4())
+    op = {
+        "id": lote_id,
+        "tipo": "registrar_cosecha",
+        "finca_id": FINCA,
+        "fecha_cosecha": "2026-08-03",
+        "peso_kg": 250.0,
+        "variedad": "Geisha",
+        "metodo_beneficiado": "honey",
+        "evidencia_url": "https://cdn.example/foto.jpg",
+        "evidencia_sha256": "a" * 64,
+    }
+    r = client.post("/v1/sync", headers=header_productor, json={"operaciones": [op]})
+    assert r.status_code == 202, r.text
+    assert r.json()["resultados"][0]["estado"] == "ok"
+
+    detalle = client.get(f"/v1/lotes/{lote_id}", headers=header_productor).json()
+    assert detalle["variedad"] == "Geisha"
+    assert detalle["metodo_beneficiado"] == "honey"
+    assert detalle["evidencia_url"] == "https://cdn.example/foto.jpg"
+    assert detalle["evidencia_sha256"] == "a" * 64
+
+
+def test_sync_eventos_dependientes_hasta_certificado(client, header_productor):
+    """Cosecha + eventos dependientes en un batch llegan a TOSTADO con QR."""
+    lote_id = str(uuid.uuid4())
+    ops = [
+        {
+            "id": lote_id,
+            "tipo": "registrar_cosecha",
+            "finca_id": FINCA,
+            "fecha_cosecha": "2026-08-03",
+            "peso_kg": 500.0,
+            "variedad": "Caturra",
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "tipo": "avanzar_estado",
+            "lote_id": lote_id,
+            "evento": {"tipo": "DESPULPADO", "peso_kg": 480.0},
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "tipo": "avanzar_estado",
+            "lote_id": lote_id,
+            "evento": {"tipo": "DESCASCARADO", "peso_kg": 450.0},
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "tipo": "avanzar_estado",
+            "lote_id": lote_id,
+            "evento": {"tipo": "TOSTADO", "peso_kg": 420.0},
+        },
+    ]
+    r = client.post("/v1/sync", headers=header_productor, json={"operaciones": ops})
+    assert r.status_code == 202, r.text
+    detalle = client.get(f"/v1/lotes/{lote_id}", headers=header_productor).json()
+    assert detalle["estado"] == "TOSTADO"
+    assert [e["tipo"] for e in detalle["historial"]] == [
+        "COSECHA",
+        "DESPULPADO",
+        "DESCASCARADO",
+        "TOSTADO",
+    ]
+    assert detalle["certificado"] is not None
+    assert client.get(f"/v1/verificar/{detalle['certificado']['codigo']}").status_code == 200
+
+
+def test_sync_replay_no_duplica(client, header_productor):
+    """Reenviar el mismo batch (replay) no duplica lote ni evento."""
+    lote_id = str(uuid.uuid4())
+    ops = [
+        {
+            "id": lote_id,
+            "tipo": "registrar_cosecha",
+            "finca_id": FINCA,
+            "fecha_cosecha": "2026-08-03",
+            "peso_kg": 300.0,
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "tipo": "avanzar_estado",
+            "lote_id": lote_id,
+            "evento": {"tipo": "DESPULPADO", "peso_kg": 290.0},
+        },
+    ]
+    for _ in range(2):
+        r = client.post("/v1/sync", headers=header_productor, json={"operaciones": ops})
+        assert r.status_code == 202, r.text
+        assert all(x["estado"] == "ok" for x in r.json()["resultados"])
+
+    detalle = client.get(f"/v1/lotes/{lote_id}", headers=header_productor).json()
+    assert [e["tipo"] for e in detalle["historial"]] == ["COSECHA", "DESPULPADO"]
+    pagina = client.get("/v1/lotes?limit=100", headers=header_productor).json()
+    assert len([lote for lote in pagina["items"] if lote["id"] == lote_id]) == 1
+
+
+def test_sync_conflicto_no_altera_confirmadas(client, header_productor):
+    """Un conflicto no reescribe ni duplica las operaciones ya confirmadas."""
+    lote_id = str(uuid.uuid4())
+    ops = [
+        {
+            "id": lote_id,
+            "tipo": "registrar_cosecha",
+            "finca_id": FINCA,
+            "fecha_cosecha": "2026-08-03",
+            "peso_kg": 300.0,
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "tipo": "avanzar_estado",
+            "lote_id": str(uuid.uuid4()),
+            "evento": {"tipo": "DESPULPADO"},
+        },
+    ]
+    r = client.post("/v1/sync", headers=header_productor, json={"operaciones": ops})
+    assert r.status_code == 207, r.text
+    assert {x["estado"] for x in r.json()["resultados"]} == {"ok", "conflicto"}
+
+    antes = client.get(f"/v1/lotes/{lote_id}", headers=header_productor).json()
+    r2 = client.post("/v1/sync", headers=header_productor, json={"operaciones": ops})
+    assert r2.status_code == 207
+    despues = client.get(f"/v1/lotes/{lote_id}", headers=header_productor).json()
+    assert [e["tipo"] for e in despues["historial"]] == ["COSECHA"]
+    assert antes["historial"][0]["hash_etapa"] == despues["historial"][0]["hash_etapa"]
+
+
 def test_paginacion_por_cursor(client, header_admin):
     for i in range(3):
         crear_lote(client, header_admin, peso=100.0 + i)

@@ -13,13 +13,21 @@ from app.schemas.lote import EventoCreate
 
 
 class SyncRegistroCosechaOp(BaseModel):
-    """Operación tipada: registrar una cosecha nueva (crea el lote)."""
+    """Operación tipada: registrar una cosecha nueva (crea el lote).
+
+    Equivale a `LoteCreate`: una cosecha encolada offline debe conservar la
+    misma información (variedad, método y evidencia) que una creada online.
+    """
 
     id: uuid.UUID
     tipo: Literal["registrar_cosecha"]
     finca_id: uuid.UUID
     fecha_cosecha: date
     peso_kg: float = Field(gt=0)
+    variedad: str | None = None
+    metodo_beneficiado: str | None = None
+    evidencia_url: str | None = None
+    evidencia_sha256: str | None = None
 
 
 class SyncAvanceOp(BaseModel):
