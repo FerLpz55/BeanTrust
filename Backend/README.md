@@ -98,7 +98,7 @@ el mismo cambio.
 | GET    | `/pagos/saldo`                | productor/admin              | Saldo del productor (97% ventas confirmadas + propinas) |
 | POST   | `/propinas`                   | comprador                    | Propina al productor (201, idempotente, bivalente) |
 | GET    | `/propinas/lote/{lote_id}`    | dueños del lote: productor/cooperativa/comprador de la venta/admin | Lista propinas del lote (tenancy) |
-| POST   | `/sync`                       | productor/cooperativa        | Batch offline (202/207)                  |
+| POST   | `/sync`                       | productor/cooperativa/admin  | Batch offline (202/207)                  |
 | GET    | `/health`                     | público                      | Health check                             |
 
 ## Estructura

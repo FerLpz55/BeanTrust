@@ -206,6 +206,44 @@ def test_sync_batch_207_con_conflicto(client, header_productor):
     assert r.json()["resultados"][0]["estado"] == "conflicto"
 
 
+def test_sync_admin_202_y_comprador_403(client, header_admin, header_comprador):
+    """Admin puede sincronizar (como crear/avanzar lotes); comprador no."""
+    r_admin = client.post(
+        "/v1/sync",
+        headers=header_admin,
+        json={
+            "operaciones": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "tipo": "registrar_cosecha",
+                    "finca_id": FINCA,
+                    "fecha_cosecha": "2026-08-04",
+                    "peso_kg": 120.0,
+                }
+            ]
+        },
+    )
+    assert r_admin.status_code == 202, r_admin.text
+    assert r_admin.json()["resultados"][0]["estado"] == "ok"
+
+    r_comprador = client.post(
+        "/v1/sync",
+        headers=header_comprador,
+        json={
+            "operaciones": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "tipo": "registrar_cosecha",
+                    "finca_id": FINCA,
+                    "fecha_cosecha": "2026-08-04",
+                    "peso_kg": 1.0,
+                }
+            ]
+        },
+    )
+    assert r_comprador.status_code == 403
+
+
 def test_sync_cosecha_enriquecida(client, header_productor):
     """Una cosecha offline conserva variedad, método y evidencia (§7.5)."""
     lote_id = str(uuid.uuid4())

@@ -24,7 +24,7 @@ from app.schemas.sync import (
 router = APIRouter(
     prefix="/sync",
     tags=["sync"],
-    dependencies=[Depends(require_rol(Rol.PRODUCTOR, Rol.COOPERATIVA))],
+    dependencies=[Depends(require_rol(Rol.PRODUCTOR, Rol.COOPERATIVA, Rol.ADMIN))],
 )
 
 

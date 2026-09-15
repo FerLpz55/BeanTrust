@@ -736,7 +736,7 @@ flowchart LR
 | `GET` | `/v1/pagos/saldo` | Saldo del productor (97% ventas confirmadas + propinas) | Sí | `200` · `403` |
 | `POST` | `/v1/propinas` | Registrar propina del comprador (idempotente, bivalente) | `Idempotency-Key` | `201` · `409` · `422` |
 | `GET` | `/v1/propinas/lote/{lote_id}` | Listar propinas de un lote (lectura por tenant: dueños del lote + admin) | Sí | `200` · `403` · `404` |
-| `POST` | `/v1/sync` | Batch de operaciones offline | Sí (reusa ids) | `202` · `207` |
+| `POST` | `/v1/sync` | Batch de operaciones offline (productor/cooperativa/admin) | Sí (reusa ids) | `202` · `207` |
 | `GET` | `/health` | Health check (fuera de `/v1`) | Sí | `200` |
 
 **Notas de alcance:**
@@ -1096,7 +1096,7 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 | **cooperativa** | Todos los lotes de sus fincas | Gestión de lotes, productores, pagos | Sí |
 | **comprador** | Lotes verificables (QR público) **+ comercio justo/propinas** | Propinas sobre lotes vendidos | Sí |
 | **consumidor** | Solo QR `/verificar` (público) | — | No |
-| **admin** | Todo | Configuración, cooperativas | Sí |
+| **admin** | Todo | Configuración, cooperativas, lotes/eventos (incl. `/v1/sync`) | Sí |
 
 - **Autenticación**: Supabase Auth (email/contraseña, o *magic link* para productores sin email). El `auth.uid()` de Supabase **es** el `USUARIOS.id` (mismo UUID vinculado al registrarse).
 - **Autorización**: RLS en PostgreSQL — las políticas resuelven el rol desde `USUARIOS` y restringen por pertenencia (`PRODUCTOR` de la finca, `COOPERATIVA` de la finca) **sin confiar en IDs enviados por el cliente**; adicionalmente la dependencia `get_current_user` en FastAPI fuerza el mismo chequeo a nivel de API.
