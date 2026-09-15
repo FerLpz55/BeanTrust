@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     supabase_service_key: str = ""
     supabase_anon_key: str = ""
 
+    # Evidencia fotográfica (bucket privado). El backend es el único que sube,
+    # firma lectura y elimina objetos; el móvil nunca habla con Storage.
+    evidence_bucket: str = "evidencias-lotes"
+    evidence_max_bytes: int = 5 * 1024 * 1024
+    evidence_ttl_hours: int = 24
+
+    # Rate limit compartido: el hash de la clave (ip|endpoint) se firma con este
+    # secreto para no guardar la IP en claro en Postgres.
+    rate_limit_hmac_secret: str = ""
+    rate_limit_window_seconds: int = 60
+
     log_level: str = "INFO"
     docs_enabled: bool = True
 
@@ -85,6 +96,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "En producción se requieren BEAN_SUPABASE_URL y BEAN_SUPABASE_SERVICE_KEY."
                 )
+            if not self.supabase_anon_key:
+                raise ValueError("En producción se requiere BEAN_SUPABASE_ANON_KEY.")
+            if not self.rate_limit_hmac_secret:
+                raise ValueError("En producción se requiere BEAN_RATE_LIMIT_HMAC_SECRET.")
         return self
 
 

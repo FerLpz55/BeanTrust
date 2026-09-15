@@ -22,9 +22,11 @@ from app.repositories.in_memory import (
     InMemoryPagoRepo,
     InMemoryPropinaRepo,
     InMemoryQRRepo,
+    InMemorySesionRefreshRepo,
     InMemoryUsuarioRepo,
     Memoria,
 )
+from app.repositories.rate_limit import InMemoryRateLimitRepo
 
 pytestmark = pytest.mark.integration
 
@@ -105,18 +107,29 @@ def memoria(seed_usuarios: list[Usuario]) -> Memoria:
 def client(memoria: Memoria, seed_usuarios: list[Usuario]):
     from app import dependencies as deps
 
-    deps._limiter_login.cache_clear()
+    # Estado de proceso compartido entre requests: se aísla por test.
+    deps._rate_limit_global = None
+    deps._sesiones_refresh_global = None
     repo_usuario = InMemoryUsuarioRepo(memoria)
+    sesiones = InMemorySesionRefreshRepo()
+    rate_limit = InMemoryRateLimitRepo()
 
     app = crear_app()
+    # Repos de servicio (auth interna + verificación pública).
     app.dependency_overrides[deps.get_repo_lote] = lambda: InMemoryLoteRepo(memoria)
     app.dependency_overrides[deps.get_repo_qr] = lambda: InMemoryQRRepo(memoria)
     app.dependency_overrides[deps.get_repo_pago] = lambda: InMemoryPagoRepo(memoria)
-    # Sin este override el repo de propinas caía al singleton global `_memoria()`
-    # y el estado se filtraba entre tests (saldo/propinas de casos anteriores).
     app.dependency_overrides[deps.get_repo_propina] = lambda: InMemoryPropinaRepo(memoria)
     app.dependency_overrides[deps.get_repo_finca] = lambda: InMemoryFincaRepo(memoria)
     app.dependency_overrides[deps.get_repo_usuario] = lambda: repo_usuario
+    # Repos autenticados (cliente con JWT del usuario).
+    app.dependency_overrides[deps.get_repo_lote_usuario] = lambda: InMemoryLoteRepo(memoria)
+    app.dependency_overrides[deps.get_repo_qr_usuario] = lambda: InMemoryQRRepo(memoria)
+    app.dependency_overrides[deps.get_repo_pago_usuario] = lambda: InMemoryPagoRepo(memoria)
+    app.dependency_overrides[deps.get_repo_propina_usuario] = lambda: InMemoryPropinaRepo(memoria)
+    app.dependency_overrides[deps.get_repo_finca_usuario] = lambda: InMemoryFincaRepo(memoria)
+    app.dependency_overrides[deps.get_repo_usuario_usuario] = lambda: repo_usuario
+    app.dependency_overrides[deps.get_repo_rate_limit] = lambda: rate_limit
     app.dependency_overrides[deps.get_auth_provider] = lambda: LocalAuthProvider(
         secret="secreto-de-test-de-32-bytes-al-menos-ok",
         access_ttl=3600,
@@ -125,6 +138,7 @@ def client(memoria: Memoria, seed_usuarios: list[Usuario]):
         audience="beantrust-test",
         repo_usuarios=repo_usuario,
         password_service=PasswordService(),
+        repo_sesiones=sesiones,
     )
     with TestClient(app) as c:
         yield c

@@ -20,6 +20,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import jwt as pyjwt
@@ -28,9 +29,11 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from pydantic import BaseModel, EmailStr
 
 from app.models.dominio import CredencialesInvalidas, Rol, Usuario
+from app.repositories.sesiones import SesionRefresh
 
 if TYPE_CHECKING:
     from app.repositories.interfaces import RepositorioUsuario
+    from app.repositories.sesiones import RepositorioSesionRefresh
 
 
 class Claims(BaseModel):
@@ -118,6 +121,7 @@ class LocalAuthProvider(AuthProvider):
         audience: str,
         repo_usuarios: RepositorioUsuario,
         password_service: PasswordService,
+        repo_sesiones: RepositorioSesionRefresh,
     ) -> None:
         self._secret = secret
         self._access_ttl = access_ttl
@@ -126,6 +130,7 @@ class LocalAuthProvider(AuthProvider):
         self._audience = audience
         self._repo_usuarios = repo_usuarios
         self._password_service = password_service
+        self._repo_sesiones = repo_sesiones
 
     def login(self, email: str, password: str) -> TokenPair:
         usuario = self._repo_usuarios.buscar_por_email(email.strip().lower())
@@ -155,9 +160,12 @@ class LocalAuthProvider(AuthProvider):
         return self._emitir_par(usuario)
 
     def refresh(self, refresh_token: str) -> TokenPair:
-        # Nota (A07): el proveedor local (desarrollo) no rota ni revoca refresh
-        # tokens (sin jti-store). En producción, Supabase Auth sí rota/revoca;
-        # este proveedor local jamás se usa fuera de dev/CI.
+        """Rota el refresh token y detecta reuso (A07).
+
+        Cada refresh lleva un `jti` de un solo uso y una `family`. Un `jti` ya
+        consumido que vuelve a presentarse es señal de robo: se revoca toda la
+        familia y se rechaza.
+        """
         try:
             payload = pyjwt.decode(
                 refresh_token,
@@ -171,10 +179,29 @@ class LocalAuthProvider(AuthProvider):
             raise CredencialesInvalidas("Token de refresco inválido o expirado.") from exc
         if payload.get("typ") != "refresh":
             raise CredencialesInvalidas("Token de refresco inválido.")
-        usuario = self._repo_usuarios.buscar_por_id(uuid.UUID(payload["sub"]))
+        try:
+            jti = uuid.UUID(payload["jti"])
+            familia = uuid.UUID(payload["family"])
+            usuario_id = uuid.UUID(payload["sub"])
+        except (KeyError, ValueError) as exc:
+            raise CredencialesInvalidas("Token de refresco inválido.") from exc
+
+        sesion = self._repo_sesiones.buscar(jti)
+        if (
+            sesion is None
+            or sesion.revocada_en is not None
+            or sesion.expira_en <= datetime.now(UTC)
+        ):
+            raise CredencialesInvalidas("Token de refresco inválido o expirado.")
+        if not self._repo_sesiones.consumir(jti):
+            # El jti ya se usó: posible robo. Se cae toda la familia.
+            self._repo_sesiones.revocar_familia(sesion.familia_id)
+            raise CredencialesInvalidas("Token de refresco inválido o expirado.")
+
+        usuario = self._repo_usuarios.buscar_por_id(usuario_id)
         if usuario is None:
             raise CredencialesInvalidas("Usuario no existe.")
-        return self._emitir_par(usuario)
+        return self._emitir_par(usuario, familia_id=familia)
 
     def verify(self, token: str) -> Claims:
         try:
@@ -241,30 +268,55 @@ class LocalAuthProvider(AuthProvider):
             raise CredencialesInvalidas("El token de recuperación ya fue utilizado.")
         usuario.password_hash = self._password_service.hash(password_nueva)
         self._repo_usuarios.guardar(usuario)
+        # Cambiar la contraseña invalida todas las sesiones de refresh vivas.
+        self._repo_sesiones.revocar_usuario(usuario.id)
 
-    def _emitir_par(self, usuario: Usuario) -> TokenPair:
+    def _emitir_par(self, usuario: Usuario, familia_id: uuid.UUID | None = None) -> TokenPair:
+        familia = familia_id or uuid.uuid4()
+        jti = uuid.uuid4()
+        expira_en = datetime.fromtimestamp(time.time() + self._refresh_ttl, tz=UTC)
+        self._repo_sesiones.crear(
+            SesionRefresh(
+                jti=jti,
+                familia_id=familia,
+                usuario_id=usuario.id,
+                expira_en=expira_en,
+            )
+        )
         return TokenPair(
-            access_token=self._crear_token(usuario, "access", self._access_ttl),
-            refresh_token=self._crear_token(usuario, "refresh", self._refresh_ttl),
+            access_token=self._crear_token(
+                usuario, "access", self._access_ttl, jti=uuid.uuid4()
+            ),
+            refresh_token=self._crear_token(
+                usuario, "refresh", self._refresh_ttl, jti=jti, familia=familia
+            ),
             expires_in=self._access_ttl,
         )
 
-    def _crear_token(self, usuario: Usuario, typ: str, ttl: int) -> str:
+    def _crear_token(
+        self,
+        usuario: Usuario,
+        typ: str,
+        ttl: int,
+        *,
+        jti: uuid.UUID | None = None,
+        familia: uuid.UUID | None = None,
+    ) -> str:
         ahora = int(time.time())
-        return pyjwt.encode(
-            {
-                "sub": str(usuario.id),
-                "email": usuario.email,
-                "typ": typ,
-                "iat": ahora,
-                "exp": ahora + ttl,
-                "iss": self._issuer,
-                "aud": self._audience,
-                "jti": str(uuid.uuid4()),
-            },
-            self._secret,
-            algorithm="HS256",
-        )
+        payload: dict[str, object] = {
+            "sub": str(usuario.id),
+            "email": usuario.email,
+            "typ": typ,
+            "iat": ahora,
+            "exp": ahora + ttl,
+            "iss": self._issuer,
+            "aud": self._audience,
+        }
+        if jti is not None:
+            payload["jti"] = str(jti)
+        if familia is not None:
+            payload["family"] = str(familia)
+        return pyjwt.encode(payload, self._secret, algorithm="HS256")
 
 
 def _par_desde_respuesta(respuesta, mensaje: str = "Credenciales inválidas.") -> TokenPair:

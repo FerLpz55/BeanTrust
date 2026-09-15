@@ -7,8 +7,10 @@ frescas vía `dependency_overrides`.
 
 from __future__ import annotations
 
+import threading
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from app.models.dominio import (
     CertificadoQR,
@@ -23,6 +25,7 @@ from app.models.dominio import (
     Propina,
     Usuario,
 )
+from app.repositories.sesiones import SesionRefresh
 from app.utils.cursor import Cursor
 
 
@@ -275,3 +278,46 @@ class FakeGatewayPagos:
 
     def confirmar_pago(self, tx_hash: str) -> bool:
         return bool(tx_hash)
+
+
+class InMemorySesionRefreshRepo:
+    """Sesiones de refresh en memoria, con lock para consumo atómico."""
+
+    def __init__(self) -> None:
+        self._por_jti: dict[uuid.UUID, SesionRefresh] = {}
+        self._lock = threading.Lock()
+
+    def crear(self, sesion: SesionRefresh) -> None:
+        with self._lock:
+            self._por_jti[sesion.jti] = sesion
+
+    def buscar(self, jti: uuid.UUID) -> SesionRefresh | None:
+        with self._lock:
+            return self._por_jti.get(jti)
+
+    def consumir(self, jti: uuid.UUID) -> bool:
+        with self._lock:
+            sesion = self._por_jti.get(jti)
+            if (
+                sesion is None
+                or sesion.consumida_en is not None
+                or sesion.revocada_en is not None
+                or sesion.expira_en <= datetime.now(UTC)
+            ):
+                return False
+            sesion.consumida_en = datetime.now(UTC)
+            return True
+
+    def revocar_familia(self, familia_id: uuid.UUID) -> None:
+        with self._lock:
+            ahora = datetime.now(UTC)
+            for sesion in self._por_jti.values():
+                if sesion.familia_id == familia_id and sesion.revocada_en is None:
+                    sesion.revocada_en = ahora
+
+    def revocar_usuario(self, usuario_id: uuid.UUID) -> None:
+        with self._lock:
+            ahora = datetime.now(UTC)
+            for sesion in self._por_jti.values():
+                if sesion.usuario_id == usuario_id and sesion.revocada_en is None:
+                    sesion.revocada_en = ahora

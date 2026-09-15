@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.dependencies import RepoUsuarioDep, require_rol
+from app.dependencies import RepoUsuarioAutenticadoDep, require_rol
 from app.models.dominio import Rol
 from app.schemas.auth import CooperativaRead
 
@@ -16,5 +16,5 @@ router = APIRouter(
 
 
 @router.get("")
-def listar_cooperativas(repo: RepoUsuarioDep) -> list[CooperativaRead]:
+def listar_cooperativas(repo: RepoUsuarioAutenticadoDep) -> list[CooperativaRead]:
     return repo.listar_cooperativas()

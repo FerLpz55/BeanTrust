@@ -23,6 +23,8 @@ def test_produccion_con_supabase_arranca() -> None:
         auth_backend="supabase",
         supabase_url="https://x.supabase.co",
         supabase_service_key="clave",
+        supabase_anon_key="anon",
+        rate_limit_hmac_secret="secreto-hmac",
     )
     assert settings.environment == "production"
 
@@ -33,6 +35,8 @@ def test_produccion_con_supabase_arranca() -> None:
         ({"auth_backend": "local"}, "auth debe usar Supabase"),
         ({"repo_backend": "memory"}, "BD debe usar Supabase"),
         ({"supabase_service_key": ""}, "se requieren BEAN_SUPABASE_URL"),
+        ({"supabase_anon_key": ""}, "se requiere BEAN_SUPABASE_ANON_KEY"),
+        ({"rate_limit_hmac_secret": ""}, "se requiere BEAN_RATE_LIMIT_HMAC_SECRET"),
     ],
 )
 def test_produccion_insegura_se_rechaza(campos: dict[str, str], mensaje: str) -> None:
@@ -42,6 +46,8 @@ def test_produccion_insegura_se_rechaza(campos: dict[str, str], mensaje: str) ->
         "auth_backend": "supabase",
         "supabase_url": "https://x.supabase.co",
         "supabase_service_key": "clave",
+        "supabase_anon_key": "anon",
+        "rate_limit_hmac_secret": "secreto-hmac",
         **campos,
     }
     with pytest.raises(ValidationError, match=mensaje):

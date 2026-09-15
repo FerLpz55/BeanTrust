@@ -8,14 +8,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from app.dependencies import LoteServiceDep
+from app.dependencies import PublicLoteServiceDep
 from app.schemas.verificacion import VerificarRead
 
 router = APIRouter(prefix="/verificar", tags=["verificacion"])
 
 
 @router.get("/{codigo}")
-def verificar(codigo: str, request: Request, servicio: LoteServiceDep) -> VerificarRead:
+def verificar(codigo: str, request: Request, servicio: PublicLoteServiceDep) -> VerificarRead:
     dispositivo = request.client.host if request.client else None
     lote, qr, finca, productor = servicio.verificar(codigo, dispositivo=dispositivo)
     return VerificarRead(

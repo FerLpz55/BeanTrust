@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.dependencies import RepoUsuarioDep, require_rol
+from app.dependencies import RepoUsuarioAutenticadoDep, require_rol
 from app.models.dominio import Rol
 from app.schemas.auth import UsuarioRead
 
@@ -21,5 +21,5 @@ router = APIRouter(
 
 
 @router.get("")
-def listar_compradores(repo: RepoUsuarioDep) -> list[UsuarioRead]:
+def listar_compradores(repo: RepoUsuarioAutenticadoDep) -> list[UsuarioRead]:
     return repo.listar_compradores()
