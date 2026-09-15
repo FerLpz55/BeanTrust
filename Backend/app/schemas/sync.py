@@ -16,7 +16,9 @@ class SyncRegistroCosechaOp(BaseModel):
     """Operación tipada: registrar una cosecha nueva (crea el lote).
 
     Equivale a `LoteCreate`: una cosecha encolada offline debe conservar la
-    misma información (variedad, método y evidencia) que una creada online.
+    misma información (variedad, método y evidencia) que una creada online. La
+    evidencia viaja como `evidencia_id` (subida antes por `POST /v1/evidencias`);
+    la url/sha las resuelve el backend desde la fila, no el cuerpo.
     """
 
     id: uuid.UUID
@@ -26,8 +28,7 @@ class SyncRegistroCosechaOp(BaseModel):
     peso_kg: float = Field(gt=0)
     variedad: str | None = None
     metodo_beneficiado: str | None = None
-    evidencia_url: str | None = None
-    evidencia_sha256: str | None = None
+    evidencia_id: uuid.UUID | None = None
 
 
 class SyncAvanceOp(BaseModel):

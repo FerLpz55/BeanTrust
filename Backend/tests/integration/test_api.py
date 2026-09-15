@@ -11,6 +11,8 @@ import uuid
 from fastapi.testclient import TestClient
 
 FINCA = "11111111-1111-1111-1111-111111111111"
+# Firma PNG + relleno: basta para pasar la validación de *magic bytes*.
+PNG_MINIMO = b"\x89PNG\r\n\x1a\n" + b"0" * 16
 
 
 def crear_lote(client: TestClient, header: dict[str, str], *, peso: float = 500.0) -> dict:
@@ -247,6 +249,14 @@ def test_sync_admin_202_y_comprador_403(client, header_admin, header_comprador):
 def test_sync_cosecha_enriquecida(client, header_productor):
     """Una cosecha offline conserva variedad, método y evidencia (§7.5)."""
     lote_id = str(uuid.uuid4())
+    r = client.post(
+        "/v1/evidencias",
+        headers={**header_productor, "Idempotency-Key": str(uuid.uuid4())},
+        data={"finca_id": FINCA, "lote_id": lote_id},
+        files={"archivo": ("foto.png", PNG_MINIMO, "image/png")},
+    )
+    assert r.status_code == 201, r.text
+    evidencia = r.json()
     op = {
         "id": lote_id,
         "tipo": "registrar_cosecha",
@@ -255,8 +265,7 @@ def test_sync_cosecha_enriquecida(client, header_productor):
         "peso_kg": 250.0,
         "variedad": "Geisha",
         "metodo_beneficiado": "honey",
-        "evidencia_url": "https://cdn.example/foto.jpg",
-        "evidencia_sha256": "a" * 64,
+        "evidencia_id": evidencia["id"],
     }
     r = client.post("/v1/sync", headers=header_productor, json={"operaciones": [op]})
     assert r.status_code == 202, r.text
@@ -265,8 +274,8 @@ def test_sync_cosecha_enriquecida(client, header_productor):
     detalle = client.get(f"/v1/lotes/{lote_id}", headers=header_productor).json()
     assert detalle["variedad"] == "Geisha"
     assert detalle["metodo_beneficiado"] == "honey"
-    assert detalle["evidencia_url"] == "https://cdn.example/foto.jpg"
-    assert detalle["evidencia_sha256"] == "a" * 64
+    assert detalle["evidencia_url"] == evidencia["evidencia_url"]
+    assert detalle["evidencia_sha256"] == evidencia["evidencia_sha256"]
 
 
 def test_sync_eventos_dependientes_hasta_certificado(client, header_productor):

@@ -15,9 +15,11 @@ from datetime import UTC, datetime
 from app.models.dominio import (
     CertificadoQR,
     Cooperativa,
+    EstadoEvidencia,
     EstadoPago,
     EstadoPropina,
     EventoDuplicado,
+    Evidencia,
     Finca,
     Lote,
     LoteEvento,
@@ -65,6 +67,7 @@ class Memoria:
     propinas_idempotencia: dict[str, Propina] = field(default_factory=dict)
     fincas: dict[uuid.UUID, Finca] = field(default_factory=dict)
     usuarios: dict[uuid.UUID, Usuario] = field(default_factory=dict)
+    evidencias: dict[uuid.UUID, Evidencia] = field(default_factory=dict)
     verificaciones: list[tuple[uuid.UUID, str | None]] = field(default_factory=list)
 
 
@@ -264,6 +267,32 @@ class InMemoryPropinaRepo:
             ),
             2,
         )
+
+
+class InMemoryEvidenciaRepo:
+    """Metadata de evidencias en memoria; el binario vive en el almacén."""
+
+    def __init__(self, memoria: Memoria) -> None:
+        self._memoria = memoria
+
+    def crear(self, evidencia: Evidencia) -> Evidencia:
+        self._memoria.evidencias[evidencia.id] = evidencia
+        return evidencia
+
+    def buscar_por_id(self, evidencia_id: uuid.UUID) -> Evidencia | None:
+        return self._memoria.evidencias.get(evidencia_id)
+
+    def buscar_adjunta_por_lote(self, lote_id: uuid.UUID) -> Evidencia | None:
+        for evidencia in self._memoria.evidencias.values():
+            if evidencia.lote_id == lote_id and evidencia.estado is EstadoEvidencia.ADJUNTA:
+                return evidencia
+        return None
+
+    def marcar_adjunta(self, evidencia_id: uuid.UUID, cuando: datetime) -> None:
+        evidencia = self._memoria.evidencias.get(evidencia_id)
+        if evidencia is not None:
+            evidencia.estado = EstadoEvidencia.ADJUNTA
+            evidencia.adjuntada_en = cuando
 
 
 class FakeGatewayPagos:

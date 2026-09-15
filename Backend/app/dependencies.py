@@ -31,8 +31,15 @@ from app.core.seguridad import (
     SupabaseAuthProvider,
 )
 from app.models.dominio import CredencialesInvalidas, Finca, Rol, Usuario
+from app.repositories.evidencia import (
+    AlmacenEvidencia,
+    InMemoryAlmacenEvidencia,
+    RepositorioEvidencia,
+    SupabaseAlmacenEvidencia,
+)
 from app.repositories.in_memory import (
     FakeGatewayPagos,
+    InMemoryEvidenciaRepo,
     InMemoryFincaRepo,
     InMemoryLoteRepo,
     InMemoryPagoRepo,
@@ -57,6 +64,7 @@ from app.repositories.rate_limit import (
     SupabaseRateLimitRepo,
 )
 from app.repositories.supabase import (
+    SupabaseEvidenciaRepo,
     SupabaseFincaRepo,
     SupabaseLoteRepo,
     SupabasePagoRepo,
@@ -65,6 +73,7 @@ from app.repositories.supabase import (
     SupabaseUsuarioRepo,
 )
 from app.schemas.auth import CurrentUser
+from app.services.evidencia_service import EvidenciaService
 from app.services.finca_service import FincaService
 from app.services.lote_service import LoteService
 from app.services.mercado_service import MercadoService
@@ -181,6 +190,17 @@ def _rate_limit_memoria() -> InMemoryRateLimitRepo:
     return _rate_limit_global
 
 
+_almacen_evidencia_global: InMemoryAlmacenEvidencia | None = None
+
+
+def _almacen_evidencia_memoria() -> InMemoryAlmacenEvidencia:
+    """Bucket compartido a nivel de módulo: subir y firmar ven el mismo objeto."""
+    global _almacen_evidencia_global
+    if _almacen_evidencia_global is None:
+        _almacen_evidencia_global = InMemoryAlmacenEvidencia()
+    return _almacen_evidencia_global
+
+
 # ------------------------------------------------------------------ clientes Supabase
 
 @lru_cache
@@ -253,6 +273,22 @@ def get_repo_usuario(settings: SettingsDep) -> RepositorioUsuario:
     return InMemoryUsuarioRepo(_memoria())
 
 
+def get_repo_evidencia(settings: SettingsDep) -> RepositorioEvidencia:
+    """Metadata de evidencias: SIEMPRE `service_role` (la tabla no tiene grants)."""
+    if settings.repo_backend == "supabase":
+        return SupabaseEvidenciaRepo(get_supabase_service_client(settings))
+    return InMemoryEvidenciaRepo(_memoria())
+
+
+def get_almacen_evidencia(settings: SettingsDep) -> AlmacenEvidencia:
+    """Bucket privado: el backend sube/firma/elimina; el móvil nunca lo toca."""
+    if settings.repo_backend == "supabase":
+        return SupabaseAlmacenEvidencia(
+            get_supabase_service_client(settings), settings.evidence_bucket
+        )
+    return _almacen_evidencia_memoria()
+
+
 def get_repo_lote_usuario(
     request: AuthenticatedRequestDep, settings: SettingsDep
 ) -> RepositorioLote:
@@ -312,6 +348,9 @@ RepoPropinaDep = Annotated[RepositorioPropina, Depends(get_repo_propina_usuario)
 RepoFincaDep = Annotated[RepositorioFinca, Depends(get_repo_finca_usuario)]
 RepoUsuarioDep = Annotated[RepositorioUsuario, Depends(get_repo_usuario)]
 RepoUsuarioAutenticadoDep = Annotated[RepositorioUsuario, Depends(get_repo_usuario_usuario)]
+# Evidencias: no hay variante "usuario" (la tabla solo la ve `service_role`).
+RepoEvidenciaDep = Annotated[RepositorioEvidencia, Depends(get_repo_evidencia)]
+AlmacenEvidenciaDep = Annotated[AlmacenEvidencia, Depends(get_almacen_evidencia)]
 
 # Repos de servicio: auth interna y verificación pública (sin RLS).
 RepoLoteServicioDep = Annotated[RepositorioLote, Depends(get_repo_lote)]
@@ -464,12 +503,29 @@ def get_qr_service() -> QrService:
     return QrService()
 
 
+def get_evidencia_service(
+    repo_evidencia: RepoEvidenciaDep,
+    almacen: AlmacenEvidenciaDep,
+    repo_finca: RepoFincaDep,
+    settings: SettingsDep,
+) -> EvidenciaService:
+    return EvidenciaService(
+        repo_evidencia=repo_evidencia,
+        almacen=almacen,
+        repo_finca=repo_finca,
+        bucket=settings.evidence_bucket,
+        max_bytes=settings.evidence_max_bytes,
+        ttl_hours=settings.evidence_ttl_hours,
+    )
+
+
 def get_lote_service(
     repo_lote: RepoLoteDep,
     repo_qr: RepoQRDep,
     repo_finca: RepoFincaDep,
     repo_usuario: RepoUsuarioAutenticadoDep,
     qr_service: Annotated[QrService, Depends(get_qr_service)],
+    repo_evidencia: RepoEvidenciaDep,
 ) -> LoteService:
     return LoteService(
         repo_lote=repo_lote,
@@ -477,6 +533,7 @@ def get_lote_service(
         repo_finca=repo_finca,
         repo_usuario=repo_usuario,
         qr_service=qr_service,
+        repo_evidencia=repo_evidencia,
     )
 
 
@@ -549,6 +606,7 @@ def get_mercado_service(
 
 LoteServiceDep = Annotated[LoteService, Depends(get_lote_service)]
 PublicLoteServiceDep = Annotated[LoteService, Depends(get_lote_service_publico)]
+EvidenciaServiceDep = Annotated[EvidenciaService, Depends(get_evidencia_service)]
 MercadoServiceDep = Annotated[MercadoService, Depends(get_mercado_service)]
 FincaServiceDep = Annotated[FincaService, Depends(get_finca_service)]
 PagoServiceDep = Annotated[PagoService, Depends(get_pagos_service)]

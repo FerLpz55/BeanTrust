@@ -87,9 +87,11 @@ el mismo cambio.
 | GET    | `/cooperativas`               | admin                        | Directorio de cooperativas               |
 | GET    | `/compradores`                | cooperativa/admin            | Directorio de compradores (elegir `comprador_id` al vender) |
 | GET    | `/fincas`                     | productor/cooperativa/admin  | Fincas del usuario (resuelve `finca_id` para crear lotes) |
-| POST   | `/lotes`                      | productor/cooperativa/admin  | Registra cosecha (crea lote: variedad, método, peso, evidencia) |
+| POST   | `/evidencias`                 | productor/cooperativa/admin  | Sube foto privada al bucket (multipart, 201, idempotente por `Idempotency-Key`) |
+| POST   | `/lotes`                      | productor/cooperativa/admin  | Registra cosecha (crea lote: variedad, método, peso, `evidencia_id`) |
 | GET    | `/lotes`                      | productor/cooperativa/admin  | Lista paginada por cursor                |
 | GET    | `/lotes/{lote_id}`            | productor/cooperativa/admin  | Detalle con historial (timeline hash por etapa) |
+| GET    | `/lotes/{lote_id}/evidencia`  | productor/cooperativa/admin  | URL firmada temporal de la evidencia adjunta (404 si no hay) |
 | POST   | `/lotes/{lote_id}/eventos`    | productor/cooperativa/admin  | Avanza estado/sub-etapa (idempotente, 11 tipos) |
 | GET    | `/verificar/{codigo}`         | público                      | Pasaporte de Café (200/404/409)          |
 | GET    | `/mercado/{lote_id}`          | dueños del lote + admin      | Panel Comercio Justo: desglose 97/3 + propinas (ADR-9) |

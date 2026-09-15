@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     compradores,
     cooperativas,
     eventos,
+    evidencias,
     fincas,
     lotes,
     mercado,
@@ -22,6 +23,7 @@ api_router.include_router(auth.router)
 api_router.include_router(cooperativas.router)
 api_router.include_router(compradores.router)
 api_router.include_router(fincas.router)
+api_router.include_router(evidencias.router)
 api_router.include_router(lotes.router)
 api_router.include_router(eventos.router)
 api_router.include_router(verificacion.router)

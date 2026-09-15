@@ -24,8 +24,9 @@ class LoteCreate(BaseModel):
     peso_kg: float = Field(gt=0)
     variedad: str | None = None
     metodo_beneficiado: str | None = None  # lavado/semilavado/honey/natural
-    evidencia_url: str | None = None
-    evidencia_sha256: str | None = None
+    # La evidencia ya subida (`POST /v1/evidencias`) se referencia por id; la
+    # url/sha se toman de la fila, nunca del cuerpo (ADR-14).
+    evidencia_id: uuid.UUID | None = None
 
 
 class EventoCreate(BaseModel):

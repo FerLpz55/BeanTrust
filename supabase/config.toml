@@ -21,3 +21,9 @@ enable_anonymous_sign_ins = false
 enable_signup = true
 # Sin confirmación por correo: no hay dominio propio ni servidor SMTP.
 enable_confirmations = false
+
+# La purga de evidencia PENDIENTE se autentica con un secreto interno (lo envía
+# el cron de la migración 007), no con un JWT de usuario. La propia función
+# rechaza cualquier petición sin ese secreto.
+[functions.purge-staged-evidence]
+verify_jwt = false

@@ -725,9 +725,11 @@ flowchart LR
 | `GET` | `/v1/cooperativas` | Listar cooperativas (admin) | Sí | `200` · `403` |
 | `GET` | `/v1/compradores` | Directorio de compradores (cooperativa/admin, para elegir `comprador_id` al vender) | Sí | `200` · `403` |
 | `GET` | `/v1/fincas` | Fincas del usuario autenticado (resuelve `finca_id` para el alta de lote) | Sí | `200` · `403` |
-| `POST` | `/v1/lotes` | Crear lote en estado CEREZA (variedad, método, peso, evidencia) | No (da id) | `201` · `400` · `422` |
+| `POST` | `/v1/evidencias` | Subir foto privada al bucket (multipart: `finca_id`, `lote_id`, `archivo`) | `Idempotency-Key` | `201` · `403` · `422` |
+| `POST` | `/v1/lotes` | Crear lote en estado CEREZA (variedad, método, peso, `evidencia_id`) | No (da id) | `201` · `400` · `403` · `422` |
 | `POST` | `/v1/lotes/{lote_id}/eventos` | Registrar transición/sub-etapa (11 tipos) | `Idempotency-Key` | `201` · `409` · `422` |
 | `GET` | `/v1/lotes/{lote_id}` | Consultar lote + historial | Sí | `200` · `404` |
+| `GET` | `/v1/lotes/{lote_id}/evidencia` | URL firmada temporal de la evidencia adjunta | Sí | `200` · `403` · `404` |
 | `GET` | `/v1/lotes` | Listar lotes (paginado por cursor) | Sí | `200` · `400` |
 | `GET` | `/v1/verificar/{codigo}` | **Pasaporte de Café** público (sin auth) | Sí | `200` · `404` · `409` |
 | `GET` | `/v1/mercado/{lote_id}` | **Panel Comercio Justo**: proyección read-only 97/3 + propinas (ADR-9) | Sí | `200` · `403` · `404` |
@@ -742,6 +744,7 @@ flowchart LR
 **Notas de alcance:**
 - **Estado del Día** es un widget **decorativo** del dashboard: se computa en el cliente desde datos ya disponibles; **no tiene endpoint** propio (ADR-13).
 - **Mercado** es una **proyección de solo lectura**: `GET /v1/mercado/{lote_id}` se materializa desde el backend a partir de `LOTE`/`PAGO`/`PROPINA`; la app nunca lo escribe (ADR-9).
+- **Evidencia fotográfica** (ADR-14): `POST /v1/evidencias` sube el binario al bucket privado (multipart) y devuelve su `id` (= `Idempotency-Key`); el lote lo referencia por `evidencia_id` y el backend copia `evidencia_url` + `evidencia_sha256` **de la fila**, nunca del cuerpo. `GET /v1/lotes/{lote_id}/evidencia` firma una URL de 600 s. El móvil nunca habla con Storage ni Postgres.
 - La venta (`POST /v1/pagos`) y el historial (`GET /v1/pagos`) son de la **cooperativa**; el saldo (`GET /v1/pagos/saldo`) es del **productor** (o admin), coherente con la matriz §10 donde `pago` es lectura del productor sobre sus lotes; la propina la escribe el **comprador** (`POST /v1/propinas`) y la leen los **dueños del lote** (productor, cooperativa, comprador de la venta) y admin (`GET /v1/propinas/lote/{lote_id}`); `GET /v1/auth/me` resuelve el rol real desde `USUARIOS` por `auth.uid()`.
 
 **Reglas aplicadas:**
@@ -1104,6 +1107,7 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 **Estado real (MVP):**
 - La matriz RLS de la tabla es el **objetivo de diseño**. Hoy la defensa principal vive en la **capa de servicio** del backend (p.ej. `PropinaService.listar_propinas_lote` valida el tenant de cada lote: productor/cooperativa solo de su finca, comprador solo si compró la venta, admin todo). El RLS de Supabase está definido en `Backend/db/` pero **inerte** hasta la deuda B11 (backend Supabase real).
 - `GET /v1/pagos` (historial de la cooperativa, cursor) y `GET /v1/pagos/saldo` (saldo del productor) están **implementados** (B13). El rol se declara por operación: el router de pagos ya no aplica un `require_rol` global, que hacía inalcanzable el saldo. La agregación vive en los repositorios (`total_confirmado_por_productor`).
+- **Evidencia fotográfica privada** (ADR-14) implementada: `POST /v1/evidencias` valida MIME + *magic bytes* + tamaño (5 MB), sube al bucket con `service_role` y crea la fila `PENDIENTE`; el alta de lote copia `evidencia_url`/`evidencia_sha256` de la fila y la marca `ADJUNTA`. La tabla `public.evidencias` (migración 006) no tiene grants a `anon`/`authenticated`: solo el backend la administra.
 - **Móvil (Expo)**: login y refresh consumen el backend real; **register y recover son demo** (sin conexión real). El rol se resuelve con `GET /v1/auth/me`.
 
 **Despliegue real (2026-08-25, cierra B11 en su parte de auth/datos):** el backend
@@ -1162,6 +1166,7 @@ sequenceDiagram
 | `pago` | de sus lotes (lectura) | propias (escritura) | lectura (comercio justo del lote) | todo |
 | `propina` | de sus lotes (lectura) | de sus lotes (lectura) | propias (escritura) + lectura | todo |
 | `verificacion` | de sus lotes | de sus lotes | — | todo |
+| `evidencias` | — | — | — | — (solo backend con `service_role`; sin grants a `anon`/`authenticated`) |
 
 **Aislamiento de tenant:** toda política RLS se resuelve **siempre** desde `auth.uid()` → `USUARIOS.id` del JWT (nunca desde un ID enviado por el cliente). La política de `PROPINA` es **propia** de su tabla: insertar solo si el JWT corresponde a `comprador_id`, y leer solo si el usuario es `comprador_id`, `productor_id`, cooperativa del lote o admin.
 

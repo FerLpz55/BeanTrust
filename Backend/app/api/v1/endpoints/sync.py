@@ -39,8 +39,7 @@ def _procesar(op: SyncOperacion, usuario: CurrentUserDep, servicio: LoteServiceD
                 peso_kg=cosecha.peso_kg,
                 variedad=cosecha.variedad,
                 metodo_beneficiado=cosecha.metodo_beneficiado,
-                evidencia_url=cosecha.evidencia_url,
-                evidencia_sha256=cosecha.evidencia_sha256,
+                evidencia_id=cosecha.evidencia_id,
             ),
             usuario,
         )

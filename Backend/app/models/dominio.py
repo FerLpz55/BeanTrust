@@ -75,6 +75,18 @@ class EstadoPropina(StrEnum):
     CONFIRMADA = "CONFIRMADA"
 
 
+class EstadoEvidencia(StrEnum):
+    """Ciclo de vida de una evidencia fotográfica privada (ADR-14).
+
+    `PENDIENTE`: el objeto ya vive en Storage pero todavía no está asociado a un
+    lote; `ADJUNTA`: el lote la referencia; `ELIMINADA`: el cron la purgó.
+    """
+
+    PENDIENTE = "PENDIENTE"
+    ADJUNTA = "ADJUNTA"
+    ELIMINADA = "ELIMINADA"
+
+
 class ErrorDeDominio(Exception):
     """Base de errores de negocio. Se traduce a HTTP en el handler global."""
 
@@ -121,6 +133,20 @@ class RepoError(ErrorDeDominio):
     """Error de infraestructura (BD/red). Se traduce a 500 sin detalles internos."""
 
     status_code = 500
+
+
+class EvidenciaNoEncontrada(ErrorDeDominio):
+    status_code = 404
+
+
+class EvidenciaYaAdjunta(ErrorDeDominio):
+    status_code = 409
+
+
+class ArchivoInvalido(ErrorDeDominio):
+    """El binario subido no cumple tipo, tamaño o firma esperados."""
+
+    status_code = 422
 
 
 @dataclass(frozen=True)
@@ -204,6 +230,28 @@ class Propina:
     def confirmar(self) -> None:
         self.estado_propina = EstadoPropina.CONFIRMADA
         self.actualizado_en = ahora_utc()
+
+
+@dataclass
+class Evidencia:
+    """Evidencia fotográfica privada de un lote (ADR-14, migración 006).
+
+    `id` es el `Idempotency-Key` que genera el móvil: reintentar la subida no
+    duplica fila ni objeto. La metadata (ruta, hash, tamaño) vive en Postgres y
+    el binario en un bucket privado; el móvil nunca toca ninguno de los dos.
+    """
+
+    id: uuid.UUID
+    lote_id: uuid.UUID
+    finca_id: uuid.UUID
+    uploader_id: uuid.UUID
+    storage_key: str
+    sha256: str
+    content_type: str
+    size_bytes: int
+    estado: EstadoEvidencia = EstadoEvidencia.PENDIENTE
+    creado_en: datetime = field(default_factory=ahora_utc)
+    adjuntada_en: datetime | None = None
 
 
 @dataclass

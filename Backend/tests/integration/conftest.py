@@ -16,7 +16,9 @@ from fastapi.testclient import TestClient
 from app.core.seguridad import LocalAuthProvider, PasswordService
 from app.main import crear_app
 from app.models.dominio import Finca, Rol, Usuario
+from app.repositories.evidencia import InMemoryAlmacenEvidencia
 from app.repositories.in_memory import (
+    InMemoryEvidenciaRepo,
     InMemoryFincaRepo,
     InMemoryLoteRepo,
     InMemoryPagoRepo,
@@ -110,9 +112,11 @@ def client(memoria: Memoria, seed_usuarios: list[Usuario]):
     # Estado de proceso compartido entre requests: se aísla por test.
     deps._rate_limit_global = None
     deps._sesiones_refresh_global = None
+    deps._almacen_evidencia_global = None
     repo_usuario = InMemoryUsuarioRepo(memoria)
     sesiones = InMemorySesionRefreshRepo()
     rate_limit = InMemoryRateLimitRepo()
+    almacen_evidencia = InMemoryAlmacenEvidencia()
 
     app = crear_app()
     # Repos de servicio (auth interna + verificación pública).
@@ -129,6 +133,8 @@ def client(memoria: Memoria, seed_usuarios: list[Usuario]):
     app.dependency_overrides[deps.get_repo_propina_usuario] = lambda: InMemoryPropinaRepo(memoria)
     app.dependency_overrides[deps.get_repo_finca_usuario] = lambda: InMemoryFincaRepo(memoria)
     app.dependency_overrides[deps.get_repo_usuario_usuario] = lambda: repo_usuario
+    app.dependency_overrides[deps.get_repo_evidencia] = lambda: InMemoryEvidenciaRepo(memoria)
+    app.dependency_overrides[deps.get_almacen_evidencia] = lambda: almacen_evidencia
     app.dependency_overrides[deps.get_repo_rate_limit] = lambda: rate_limit
     app.dependency_overrides[deps.get_auth_provider] = lambda: LocalAuthProvider(
         secret="secreto-de-test-de-32-bytes-al-menos-ok",

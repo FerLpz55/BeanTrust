@@ -18,8 +18,10 @@ from app.models.dominio import (
     CertificadoQR,
     Cooperativa,
     Estado,
+    EstadoEvidencia,
     EstadoPago,
     EstadoPropina,
+    Evidencia,
     Finca,
     Lote,
     LoteEvento,
@@ -248,6 +250,38 @@ def fila_a_cooperativa(fila: dict[str, Any]) -> Cooperativa:
     )
 
 
+def evidencia_a_fila(evidencia: Evidencia) -> dict[str, Any]:
+    return {
+        "id": str(evidencia.id),
+        "lote_id": str(evidencia.lote_id),
+        "finca_id": str(evidencia.finca_id),
+        "uploader_id": str(evidencia.uploader_id),
+        "storage_key": evidencia.storage_key,
+        "sha256": evidencia.sha256,
+        "content_type": evidencia.content_type,
+        "size_bytes": evidencia.size_bytes,
+        "estado": evidencia.estado.value,
+        "creado_en": evidencia.creado_en.isoformat(),
+        "adjuntada_en": evidencia.adjuntada_en.isoformat() if evidencia.adjuntada_en else None,
+    }
+
+
+def fila_a_evidencia(fila: dict[str, Any]) -> Evidencia:
+    return Evidencia(
+        id=_uuid(fila["id"]),
+        lote_id=_uuid(fila["lote_id"]),
+        finca_id=_uuid(fila["finca_id"]),
+        uploader_id=_uuid(fila["uploader_id"]),
+        storage_key=fila["storage_key"],
+        sha256=fila["sha256"],
+        content_type=fila["content_type"],
+        size_bytes=int(fila["size_bytes"]),
+        estado=EstadoEvidencia(fila["estado"]),
+        creado_en=_dt(fila["creado_en"]),
+        adjuntada_en=_dt(fila["adjuntada_en"]) if fila.get("adjuntada_en") else None,
+    )
+
+
 class SupabaseLoteRepo:
     def __init__(self, cliente) -> None:
         self._cliente = cliente
@@ -402,6 +436,67 @@ class SupabaseQRRepo:
             ).execute()
         except APIError as exc:
             raise RepoError("No se pudo registrar la verificación.") from exc
+
+
+class SupabaseEvidenciaRepo:
+    """Metadata de evidencias (tabla privada, solo `service_role`)."""
+
+    def __init__(self, cliente) -> None:
+        self._cliente = cliente
+
+    def crear(self, evidencia: Evidencia) -> Evidencia:
+        # `upsert` y no `insert`: dos reintentos con la misma Idempotency-Key no
+        # deben reventar por PK duplicada si el primer request quedó a medias.
+        try:
+            self._cliente.table("evidencias").upsert(evidencia_a_fila(evidencia)).execute()
+        except APIError as exc:
+            raise RepoError("No se pudo guardar la evidencia.") from exc
+        return evidencia
+
+    def buscar_por_id(self, evidencia_id: uuid.UUID) -> Evidencia | None:
+        try:
+            resp = (
+                self._cliente.table("evidencias")
+                .select("*")
+                .eq("id", str(evidencia_id))
+                .maybe_single()
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudo consultar la evidencia.") from exc
+        fila = _dato_unico(resp)
+        return fila_a_evidencia(fila) if fila else None
+
+    def buscar_adjunta_por_lote(self, lote_id: uuid.UUID) -> Evidencia | None:
+        try:
+            resp = (
+                self._cliente.table("evidencias")
+                .select("*")
+                .eq("lote_id", str(lote_id))
+                .eq("estado", EstadoEvidencia.ADJUNTA.value)
+                .maybe_single()
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudo consultar la evidencia.") from exc
+        fila = _dato_unico(resp)
+        return fila_a_evidencia(fila) if fila else None
+
+    def marcar_adjunta(self, evidencia_id: uuid.UUID, cuando: datetime) -> None:
+        try:
+            (
+                self._cliente.table("evidencias")
+                .update(
+                    {
+                        "estado": EstadoEvidencia.ADJUNTA.value,
+                        "adjuntada_en": cuando.isoformat(),
+                    }
+                )
+                .eq("id", str(evidencia_id))
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudo marcar la evidencia como adjunta.") from exc
 
 
 def _listar_paginado(

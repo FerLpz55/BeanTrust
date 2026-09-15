@@ -11,27 +11,44 @@ import uuid
 from app.models.dominio import (
     CertificadoInvalido,
     CertificadoNoEncontrado,
+    EstadoEvidencia,
+    EvidenciaNoEncontrada,
+    EvidenciaYaAdjunta,
     Finca,
     Lote,
     LoteNoEncontrado,
     NoAutorizado,
+    RepoError,
     Rol,
     TipoEvento,
     TransicionInvalida,
+    ahora_utc,
 )
 from app.schemas.auth import CurrentUser
 from app.schemas.lote import EventoCreate, LoteCreate
+from app.services.autorizacion import autorizar_finca
 from app.services.qr_service import QrService
 from app.utils.cursor import Cursor
 
 
 class LoteService:
-    def __init__(self, repo_lote, repo_qr, repo_finca, repo_usuario, qr_service: QrService) -> None:
+    def __init__(
+        self,
+        repo_lote,
+        repo_qr,
+        repo_finca,
+        repo_usuario,
+        qr_service: QrService,
+        repo_evidencia=None,
+    ) -> None:
         self._repo_lote = repo_lote
         self._repo_qr = repo_qr
         self._repo_finca = repo_finca
         self._repo_usuario = repo_usuario
         self._qr_service = qr_service
+        # Opcional para no romper la verificación pública (nunca adjunta
+        # evidencia); el alta sí lo inyecta desde dependencies.
+        self._repo_evidencia = repo_evidencia
 
     # ------------------------------------------------------------------ autorización
 
@@ -48,47 +65,91 @@ class LoteService:
         raise NoAutorizado("No tiene acceso a este lote.")
 
     def _autorizar_finca(self, usuario: CurrentUser, finca_id: uuid.UUID) -> None:
-        if usuario.rol is Rol.ADMIN:
-            return
-        finca = self._repo_finca.buscar_por_id(finca_id)
-        if finca is None:
-            raise NoAutorizado("La finca no existe o no tiene acceso a ella.")
-        if usuario.rol is Rol.PRODUCTOR and finca.productor_id == usuario.id:
-            return
-        if usuario.rol is Rol.COOPERATIVA and finca.cooperativa_id == usuario.id:
-            return
-        raise NoAutorizado("La finca no existe o no tiene acceso a ella.")
+        autorizar_finca(self._repo_finca, usuario, finca_id)
 
     # ------------------------------------------------------------------ operaciones
 
     def registrar_cosecha(self, datos: LoteCreate, usuario: CurrentUser) -> Lote:
+        lote_id = datos.id or uuid.uuid4()
         if datos.id is not None:
             existente = self._repo_lote.buscar_por_id(datos.id)
             if existente is not None:
+                # Reintento del sync offline: el lote ya existe. Si la evidencia
+                # quedó PENDIENTE (el primer intento no llegó a marcarla), se
+                # cierra aquí para no dejar huérfano el objeto en Storage.
                 self._autorizar_lote(usuario, existente)
+                self._marcar_evidencia_pendiente(datos.evidencia_id, existente.id, usuario)
                 return existente
         self._autorizar_finca(usuario, datos.finca_id)
+        evidencia_url, evidencia_sha256 = self._resolver_evidencia(
+            datos.evidencia_id, lote_id, datos.finca_id, usuario
+        )
         lote = Lote(
-            id=datos.id or uuid.uuid4(),
+            id=lote_id,
             finca_id=datos.finca_id,
             codigo_publico=self._qr_service.generar_codigo_publico(),
             fecha_cosecha=datos.fecha_cosecha,
             variedad=datos.variedad,
             metodo_beneficiado=datos.metodo_beneficiado,
-            evidencia_url=datos.evidencia_url,
-            evidencia_sha256=datos.evidencia_sha256,
+            evidencia_url=evidencia_url,
+            evidencia_sha256=evidencia_sha256,
         )
         evento = lote.registrar_cosecha(
             usuario.id,
             datos.peso_kg,
             variedad=datos.variedad,
             metodo_beneficiado=datos.metodo_beneficiado,
-            evidencia_url=datos.evidencia_url,
-            evidencia_sha256=datos.evidencia_sha256,
+            evidencia_url=evidencia_url,
+            evidencia_sha256=evidencia_sha256,
         )
         self._repo_lote.guardar(lote)
         self._repo_lote.adjuntar_evento(evento)
+        self._marcar_evidencia_pendiente(datos.evidencia_id, lote.id, usuario)
         return lote
+
+    def _resolver_evidencia(
+        self,
+        evidencia_id: uuid.UUID | None,
+        lote_id: uuid.UUID,
+        finca_id: uuid.UUID,
+        usuario: CurrentUser,
+    ) -> tuple[str | None, str | None]:
+        """Valida la evidencia referenciada y devuelve (url, sha) de la FILA.
+
+        Nunca se aceptan url/sha del cuerpo: se leen de la evidencia ya subida
+        por el backend, de modo que el móvil no puede inyectar una URL ajena.
+        """
+        if evidencia_id is None:
+            return None, None
+        evidencia = self._evidencia_o_error(evidencia_id)
+        if evidencia.estado is not EstadoEvidencia.PENDIENTE:
+            raise EvidenciaYaAdjunta("La evidencia ya está adjunta a un lote.")
+        if (
+            evidencia.uploader_id != usuario.id
+            or evidencia.finca_id != finca_id
+            or evidencia.lote_id != lote_id
+        ):
+            raise NoAutorizado("La evidencia no corresponde a este lote.")
+        return evidencia.storage_key, evidencia.sha256
+
+    def _marcar_evidencia_pendiente(
+        self, evidencia_id: uuid.UUID | None, lote_id: uuid.UUID, usuario: CurrentUser
+    ) -> None:
+        if evidencia_id is None:
+            return
+        evidencia = self._evidencia_o_error(evidencia_id)
+        if evidencia.uploader_id != usuario.id or evidencia.lote_id != lote_id:
+            raise NoAutorizado("La evidencia no corresponde a este lote.")
+        if evidencia.estado is EstadoEvidencia.PENDIENTE:
+            self._repo_evidencia.marcar_adjunta(evidencia.id, ahora_utc())
+
+    def _evidencia_o_error(self, evidencia_id: uuid.UUID):
+        if self._repo_evidencia is None:
+            raise RepoError("El repositorio de evidencias no está configurado.")
+        evidencia = self._repo_evidencia.buscar_por_id(evidencia_id)
+        if evidencia is None:
+            raise EvidenciaNoEncontrada("La evidencia no existe.")
+        return evidencia
 
     def avanzar_estado(
         self,

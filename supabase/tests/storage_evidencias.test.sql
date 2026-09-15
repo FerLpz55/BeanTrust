@@ -13,7 +13,7 @@
 
 begin;
 
-select plan(15);
+select plan(17);
 
 -- ------------------------------------------------------------ storage.objects
 select is(
@@ -76,6 +76,16 @@ select is(
     where schemaname = 'public' and tablename = 'evidencias'),
   0,
   'evidencias: sin políticas para usuarios');
+
+-- ------------------------------------------------------------ bucket privado
+select is(
+  (select public from storage.buckets where id = 'evidencias-lotes'),
+  false,
+  'bucket evidencias-lotes: privado');
+select is(
+  (select file_size_limit from storage.buckets where id = 'evidencias-lotes'),
+  5242880::bigint,
+  'bucket evidencias-lotes: límite de 5 MB');
 
 -- ------------------------------------------------------------ helper de rol
 select ok(
