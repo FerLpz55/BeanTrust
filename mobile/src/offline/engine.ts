@@ -10,11 +10,28 @@
  *   usuario decide reintentar o descartar).
  * - `error` de negocio o fallo de red → se conserva `pendiente` y se corta el
  *   FIFO para no arrastrar operaciones dependientes.
+ * - Si la sesión cambia (logout/login) durante el flush, se termina en
+ *   silencio: no se borra ni se envía nada más, y una operación pendiente de A
+ *   nunca llega a iniciar con la sesión de B.
  */
 
 import type { OperacionSync, ResultadoSync } from '@/src/api/sync';
 import type { OfflineStorage } from '@/src/offline/storage';
 import type { ResumenSync } from '@/src/offline/types';
+
+/** Contexto de sesión activo: `epoch` cambia en cada login/logout. */
+export interface ContextoSesion {
+  userId: string;
+  epoch: number;
+}
+
+/** Resultado de un flush, emitido para todos los disparadores (no solo el manual). */
+export interface ResultadoFlush {
+  userId: string;
+  ok: number;
+  errores: number;
+  conflictos: number;
+}
 
 export interface MotorSync {
   enCurso(): boolean;
@@ -26,6 +43,9 @@ export interface MotorSync {
 interface OpcionesMotor {
   storage: OfflineStorage;
   ejecutar: (operacion: OperacionSync) => Promise<ResultadoSync>;
+  /** Contexto de sesión actual; se compara con el capturado al iniciar el flush. */
+  contexto?: () => ContextoSesion;
+  onFlush?: (resultado: ResultadoFlush) => void;
   onCambio?: () => void;
 }
 
@@ -33,7 +53,13 @@ function mensaje(err: unknown): string {
   return err instanceof Error ? err.message : 'Error desconocido.';
 }
 
-export function crearMotor({ storage, ejecutar, onCambio }: OpcionesMotor): MotorSync {
+export function crearMotor({
+  storage,
+  ejecutar,
+  contexto,
+  onFlush,
+  onCambio,
+}: OpcionesMotor): MotorSync {
   const enVuelo = new Map<string, Promise<ResumenSync>>();
 
   async function drenar(userId: string): Promise<ResumenSync> {
@@ -45,13 +71,24 @@ export function crearMotor({ storage, ejecutar, onCambio }: OpcionesMotor): Moto
       pendientes: 0,
     };
 
+    const inicial = contexto?.();
+    const sesionVigente = (): boolean => {
+      if (!contexto || !inicial) return true;
+      const actual = contexto();
+      return actual.userId === inicial.userId && actual.epoch === inicial.epoch;
+    };
+
     for (const item of await storage.listarCola(userId)) {
       if (item.estado === 'conflicto') continue;
+      // La sesión pudo cambiar mientras se listaba la cola.
+      if (!sesionVigente()) break;
 
       let resultado: ResultadoSync;
       try {
         resultado = await ejecutar(item.payload);
       } catch (err) {
+        // Sesión cambiada al volver del request: no tocar la cola ajena.
+        if (!sesionVigente()) break;
         await storage.actualizarOperacion(item.sequence, {
           attempts: item.attempts + 1,
           lastError: mensaje(err),
@@ -59,6 +96,10 @@ export function crearMotor({ storage, ejecutar, onCambio }: OpcionesMotor): Moto
         resumen.errores += 1;
         break;
       }
+
+      // La operación ya se envió con la sesión vigente; si cambió al volver,
+      // se termina en silencio sin borrar ni enviar más.
+      if (!sesionVigente()) break;
 
       resumen.enviadas += 1;
       if (resultado.estado === 'ok') {
@@ -77,9 +118,17 @@ export function crearMotor({ storage, ejecutar, onCambio }: OpcionesMotor): Moto
       break;
     }
 
-    resumen.pendientes = (await storage.listarCola(userId)).filter(
-      (item) => item.estado === 'pendiente',
-    ).length;
+    if (sesionVigente()) {
+      resumen.pendientes = (await storage.listarCola(userId)).filter(
+        (item) => item.estado === 'pendiente',
+      ).length;
+    }
+    onFlush?.({
+      userId,
+      ok: resumen.ok,
+      errores: resumen.errores,
+      conflictos: resumen.conflictos,
+    });
     onCambio?.();
     return resumen;
   }

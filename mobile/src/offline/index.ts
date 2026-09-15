@@ -4,6 +4,10 @@
  * Única puerta de entrada para las pantallas/stores. Es el único módulo que
  * conoce SQLite, NetInfo y AppState; el resto de la app nunca toca SQL.
  *
+ * La sesión activa se modela con `{ userId, epoch }`. `epoch` se incrementa en
+ * cada login/logout, de modo que un flush iniciado con la sesión A se detiene
+ * en cuanto entra B y no envía ni borra operaciones ajenas.
+ *
  * Activadores de sincronización: login/restauración, NetInfo conectado, app a
  * foreground y el botón manual (vía `sincronizarAhora`).
  */
@@ -13,7 +17,7 @@ import { AppState, Platform } from 'react-native';
 
 import { ApiError } from '@/src/api/client';
 import { sincronizar, type OperacionSync, type ResultadoSync } from '@/src/api/sync';
-import { crearMotor, type MotorSync } from '@/src/offline/engine';
+import { crearMotor, type ContextoSesion, type MotorSync, type ResultadoFlush } from '@/src/offline/engine';
 import { crearAlmacenMemoria } from '@/src/offline/memory';
 import { crearAlmacenSqlite } from '@/src/offline/sqlite';
 import type { OfflineStorage, RecursoOptimista } from '@/src/offline/storage';
@@ -21,13 +25,20 @@ import type { RecursoCache, RegistroCola, ResumenSync } from '@/src/offline/type
 
 let almacen: OfflineStorage | null = null;
 let motor: MotorSync | null = null;
-let usuario: string | null = null;
 let online = true;
 let suscripciones: (() => void)[] = [];
 const oyentes = new Set<() => void>();
+const oyentesFlush = new Set<(resultado: ResultadoFlush) => void>();
+
+/** Contexto de sesión activo. `epoch` se incrementa en cada login/logout. */
+let contexto: ContextoSesion = { userId: '', epoch: 0 };
 
 function notificar(): void {
   for (const oyente of oyentes) oyente();
+}
+
+function notificarFlush(resultado: ResultadoFlush): void {
+  for (const oyente of oyentesFlush) oyente(resultado);
 }
 
 function vacio(): ResumenSync {
@@ -48,7 +59,13 @@ async function obtenerAlmacen(): Promise<OfflineStorage> {
   if (almacen) return almacen;
   almacen = Platform.OS === 'web' ? crearAlmacenMemoria() : await crearAlmacenSqlite();
   await almacen.init();
-  motor = crearMotor({ storage: almacen, ejecutar: ejecutarOperacion, onCambio: notificar });
+  motor = crearMotor({
+    storage: almacen,
+    ejecutar: ejecutarOperacion,
+    contexto: () => contexto,
+    onFlush: notificarFlush,
+    onCambio: notificar,
+  });
   return almacen;
 }
 
@@ -57,22 +74,23 @@ function suscribirRed(): void {
   const quitarNetInfo = NetInfo.addEventListener((estado) => {
     online = estado.isConnected === true && estado.isInternetReachable !== false;
     notificar();
-    if (online && usuario) void flush();
+    if (online) void flush();
   });
   const subAppState = AppState.addEventListener('change', (estado) => {
-    if (estado === 'active' && usuario) void flush();
+    if (estado === 'active') void flush();
   });
   suscripciones = [quitarNetInfo, () => subAppState.remove()];
 }
 
 async function flush(): Promise<ResumenSync> {
   await obtenerAlmacen();
-  if (!usuario || !motor) return vacio();
-  return motor.flush(usuario);
+  if (!contexto.userId || !motor) return vacio();
+  return motor.flush(contexto.userId);
 }
 
 export async function inicializar(userId: string): Promise<void> {
-  usuario = userId;
+  // Nueva época: cualquier flush en vuelo de la sesión anterior queda obsoleto.
+  contexto = { userId, epoch: contexto.epoch + 1 };
   await obtenerAlmacen();
   suscribirRed();
   notificar();
@@ -80,9 +98,10 @@ export async function inicializar(userId: string): Promise<void> {
 }
 
 export async function cerrarSesion(userId: string): Promise<void> {
+  // Se invalida la sesión ANTES de borrar, para detener cualquier flush vivo.
+  contexto = { userId: '', epoch: contexto.epoch + 1 };
   await obtenerAlmacen();
   await almacen?.eliminarUsuario(userId);
-  if (usuario === userId) usuario = null;
   notificar();
 }
 
@@ -146,4 +165,10 @@ export function enCurso(): boolean {
 export function onCambio(oyente: () => void): () => void {
   oyentes.add(oyente);
   return () => oyentes.delete(oyente);
+}
+
+/** Resultado de cualquier flush (manual, NetInfo, foreground o init). */
+export function onFlush(oyente: (resultado: ResultadoFlush) => void): () => void {
+  oyentesFlush.add(oyente);
+  return () => oyentesFlush.delete(oyente);
 }

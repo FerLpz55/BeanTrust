@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { OperacionSync, ResultadoSync } from '@/src/api/sync';
-import { crearMotor } from '@/src/offline/engine';
+import { crearMotor, type ContextoSesion, type ResultadoFlush } from '@/src/offline/engine';
 import { crearAlmacenMemoria } from '@/src/offline/memory';
 import type { OfflineStorage } from '@/src/offline/storage';
 
@@ -23,9 +23,13 @@ function evento(id: string, loteId: string, tipo: 'DESPULPADO' | 'TOSTADO' = 'DE
   return { tipo: 'avanzar_estado', id, lote_id: loteId, evento: { tipo } };
 }
 
-async function encolar(storage: OfflineStorage, ops: OperacionSync[]): Promise<void> {
+async function encolar(
+  storage: OfflineStorage,
+  ops: OperacionSync[],
+  userId: string = USER,
+): Promise<void> {
   for (const operacion of ops) {
-    await storage.guardarOptimista({ userId: USER, recursos: [], operacion });
+    await storage.guardarOptimista({ userId, recursos: [], operacion });
   }
 }
 
@@ -152,6 +156,49 @@ describe('motor de sincronización', () => {
 
     await motor.reintentar(USER, enConflicto.sequence);
     await expect(storage.listarCola(USER)).resolves.toHaveLength(0);
+  });
+
+  it('emite ResultadoFlush con el usuario y los conteos', async () => {
+    const storage = crearAlmacenMemoria();
+    const resultados: ResultadoFlush[] = [];
+    const motor = crearMotor({
+      storage,
+      onFlush: (resultado) => resultados.push(resultado),
+      ejecutar: async (op) => ok(op),
+    });
+    await encolar(storage, [cosecha('a'), cosecha('b')]);
+
+    await motor.flush(USER);
+
+    expect(resultados).toEqual([{ userId: USER, ok: 2, errores: 0, conflictos: 0 }]);
+  });
+
+  it('cancela el flush si la sesión cambia: A no se envía con B', async () => {
+    const storage = crearAlmacenMemoria();
+    let contexto: ContextoSesion = { userId: 'A', epoch: 1 };
+    const enviadas: string[] = [];
+    const resultados: ResultadoFlush[] = [];
+    const motor = crearMotor({
+      storage,
+      contexto: () => contexto,
+      onFlush: (resultado) => resultados.push(resultado),
+      ejecutar: async (op) => {
+        enviadas.push(op.id);
+        // Al volver del primer request entra B (logout/login): epoch cambia.
+        contexto = { userId: 'B', epoch: 2 };
+        return ok(op);
+      },
+    });
+    await encolar(storage, [cosecha('a'), evento('b', 'a')], 'A');
+
+    await motor.flush('A');
+
+    // La operación pendiente de A nunca inicia con la sesión de B.
+    expect(enviadas).toEqual(['a']);
+    // La operación ya enviada no se borra en el contexto de B.
+    const cola = await storage.listarCola('A');
+    expect(cola.map((item) => item.operationId)).toEqual(['a', 'b']);
+    expect(resultados).toEqual([{ userId: 'A', ok: 0, errores: 0, conflictos: 0 }]);
   });
 
   it('descartar elimina una operación conflictiva de la cola', async () => {
