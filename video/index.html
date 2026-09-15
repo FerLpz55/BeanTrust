@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="es" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>BeanTrust — Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #3a1d0c;
+      }
+      body {
+        font-family: "Work Sans", sans-serif;
+      }
+
+      #root {
+        position: relative;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #3a1d0c;
+      }
+
+      /* ---------- Título de problema / cierre ---------- */
+      .titlecard {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 0 110px;
+        gap: 28px;
+      }
+      .titlecard .eyebrow {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 24px;
+        letter-spacing: 0.28em;
+        color: #d9a441;
+        text-transform: uppercase;
+      }
+      .titlecard h1 {
+        font-family: "Fraunces", serif;
+        font-weight: 600;
+        font-size: 76px;
+        line-height: 1.12;
+        color: #f7ebdd;
+      }
+      .titlecard .sub {
+        font-size: 32px;
+        line-height: 1.5;
+        color: #cbb6a3;
+        max-width: 760px;
+      }
+      .closecard h1 {
+        font-size: 88px;
+      }
+      .closecard .sub {
+        color: #d9a441;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 26px;
+        letter-spacing: 0.02em;
+      }
+
+      /* ---------- Tour del dispositivo ---------- */
+      #tour-wrap {
+        position: absolute;
+        inset: 0;
+      }
+      .brandmark {
+        position: absolute;
+        top: 96px;
+        left: 0;
+        right: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+      }
+      .brandmark .leaf {
+        width: 14px;
+        height: 14px;
+        border-radius: 2px 14px 2px 14px;
+        background: #8a2e3d;
+      }
+      .brandmark span {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 22px;
+        letter-spacing: 0.24em;
+        color: #d9a441;
+        text-transform: uppercase;
+      }
+
+      /* Captura tal cual — sin marco de teléfono ni resplandor detrás, solo
+         una esquina suave y sombra para separarla del fondo. */
+      #shot {
+        position: absolute;
+        top: 150px;
+        left: 50%;
+        width: 683px;
+        height: 1481px;
+        margin-left: -342px;
+        border-radius: 28px;
+        overflow: hidden;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+      }
+      #shot img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: top center;
+      }
+
+      #caption-wrap {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 1661px;
+        height: 210px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 0 88px;
+      }
+      .caption {
+        position: absolute;
+        text-align: center;
+        left: 88px;
+        right: 88px;
+      }
+      .caption h2 {
+        font-family: "Fraunces", serif;
+        font-weight: 600;
+        font-size: 46px;
+        line-height: 1.2;
+        color: #f7ebdd;
+      }
+      .caption p {
+        margin-top: 14px;
+        font-family: "Work Sans", sans-serif;
+        font-weight: 400;
+        font-size: 29px;
+        line-height: 1.35;
+        color: #cbb6a3;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="beantrust-demo"
+      data-start="0"
+      data-width="1080"
+      data-height="1920"
+      data-duration="45.5"
+    >
+      <!-- ===== 1. Problema ===== -->
+      <section id="problem" class="clip titlecard" data-start="0" data-duration="3.6">
+        <div class="eyebrow">Café veracruzano</div>
+        <h1>El coyotaje se queda<br />hasta el 70% del café.</h1>
+        <div class="sub">BeanTrust le da al grano una identidad digital — desde la finca hasta la taza.</div>
+      </section>
+
+      <!-- ===== 2. Tour ===== -->
+      <div id="tour-wrap" class="clip" data-start="3.2" data-duration="38.0">
+        <div class="brandmark">
+          <div class="leaf"></div>
+          <span>Bean Trust</span>
+        </div>
+
+        <div id="shot">
+          <img id="img-01" src="assets/screens/01-dashboard.png" alt="Dashboard Mi Finca" data-layout-allow-overflow />
+          <img id="img-02" src="assets/screens/02-wizard.png" alt="Wizard nueva cosecha" data-layout-allow-overflow />
+          <img id="img-03" src="assets/screens/03-lote-creado.png" alt="Lote creado" data-layout-allow-overflow />
+          <img id="img-04" src="assets/screens/04-detalle-cereza.png" alt="Detalle del lote" data-layout-allow-overflow />
+          <img id="img-05" src="assets/screens/05-progreso.png" alt="Trazabilidad progresando" data-layout-allow-overflow />
+          <img id="img-06" src="assets/screens/06-certificado-qr.png" alt="Certificado con QR" data-layout-allow-overflow />
+          <img id="img-07" src="assets/screens/07-venta-txhash.png" alt="Venta registrada" data-layout-allow-overflow />
+          <img id="img-08" src="assets/screens/08-comprador-escanea.png" alt="Comprador escanea" data-layout-allow-overflow />
+          <img id="img-09" src="assets/screens/09-pasaporte-publico.png" alt="Pasaporte público" data-layout-allow-overflow />
+          <img id="img-10" src="assets/screens/10-propina.png" alt="Propina confirmada" data-layout-allow-overflow />
+        </div>
+
+        <div id="caption-wrap">
+          <div id="cap-01" class="caption">
+            <h2>Mi finca, en tu mano</h2>
+            <p>El productor ve sus lotes activos, peso total y certificados emitidos en un solo panel.</p>
+          </div>
+          <div id="cap-02" class="caption">
+            <h2>Registrar la cosecha, en 3 pasos</h2>
+            <p>Variedad, método de beneficiado y peso — sin formularios complicados.</p>
+          </div>
+          <div id="cap-03" class="caption">
+            <h2>Cada lote nace con un código único</h2>
+            <p>Ese código sigue al café en cada etapa, desde la cereza hasta la taza.</p>
+          </div>
+          <div id="cap-04" class="caption">
+            <h2>La trazabilidad empieza aquí</h2>
+            <p>Estado y evidencia del lote quedan visibles desde el primer momento.</p>
+          </div>
+          <div id="cap-05" class="caption">
+            <h2>La app sugiere el siguiente paso</h2>
+            <p>El productor no memoriza el proceso — solo confirma cada etapa.</p>
+          </div>
+          <div id="cap-06" class="caption">
+            <h2>Al tostar se emite un certificado</h2>
+            <p>Cada etapa queda encadenada por un hash: si algo se altera, se nota.</p>
+          </div>
+          <div id="cap-07" class="caption">
+            <h2>La cooperativa registra la venta</h2>
+            <p>97% para el productor, 3% para la cooperativa — pago simulado, sin blockchain real.</p>
+          </div>
+          <div id="cap-08" class="caption">
+            <h2>El comprador solo escanea</h2>
+            <p>Sin cuenta ni instrucciones — el QR lo lleva directo al origen del lote.</p>
+          </div>
+          <div id="cap-09" class="caption">
+            <h2>Origen certificado, al instante</h2>
+            <p>Variedad, finca, altitud y el reparto justo — verificable por cualquiera.</p>
+          </div>
+          <div id="cap-10" class="caption">
+            <h2>Propina 100% directa al productor</h2>
+            <p>Sin comisión ni intermediario — el reconocimiento llega completo.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 3. Cierre ===== -->
+      <section id="close" class="clip titlecard closecard" data-start="40.7" data-duration="4.8">
+        <div class="eyebrow">Café veracruzano</div>
+        <h1>Bean Trust</h1>
+        <div class="sub">TRAZABILIDAD REAL · PAGO JUSTO · SIN INTERMEDIARIOS</div>
+      </section>
+    </div>
+
+    <script>
+      document.fonts.ready.then(() => {
+        const tl = gsap.timeline({ paused: true });
+
+        // ---- 1. Problema ----
+        tl.fromTo("#problem .eyebrow", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 0.15)
+          .fromTo("#problem h1", { opacity: 0, y: 32 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0.3)
+          .fromTo("#problem .sub", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 0.55)
+          .to("#problem", { opacity: 0, duration: 0.45, ease: "power1.in" }, 3.15);
+
+        // ---- 2. Tour: establece la captura ----
+        tl.fromTo("#shot", { opacity: 0, y: 60 }, { opacity: 1, y: 0, duration: 0.65, ease: "power3.out" }, 3.3)
+          .fromTo(".brandmark", { opacity: 0, y: -16 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 3.5);
+
+        // ---- Pantallas + captions: crossfade secuencial ----
+        const SCREEN_START = 3.95;
+        const SCREEN_DUR = 3.7;
+        const HOLD = SCREEN_DUR - 0.7; // tiempo visible antes de ceder paso a la siguiente
+
+        for (let i = 1; i <= 10; i++) {
+          const n = String(i).padStart(2, "0");
+          const t0 = SCREEN_START + (i - 1) * SCREEN_DUR;
+          const img = `#img-${n}`;
+          const cap = `#cap-${n}`;
+
+          if (i === 1) {
+            tl.set(img, { opacity: 1, scale: 1 }, t0);
+            tl.set(cap, { opacity: 0, y: 20 }, t0);
+            tl.to(cap, { opacity: 1, y: 0, duration: 0.45, ease: "power2.out" }, t0 + 0.1);
+          } else {
+            tl.fromTo(img, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.inOut" }, t0);
+            tl.fromTo(cap, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.45, ease: "power2.out" }, t0 + 0.1);
+          }
+          // Ken Burns sutil mientras se sostiene
+          tl.fromTo(img, { scale: 1 }, { scale: 1.045, duration: SCREEN_DUR, ease: "none" }, t0);
+          // Salida del caption (excepto el último, que lo cubre el cierre)
+          if (i < 10) {
+            tl.to(cap, { opacity: 0, y: -14, duration: 0.35, ease: "power1.in" }, t0 + HOLD);
+          }
+        }
+
+        // ---- Salida del tour completo ----
+        tl.to("#tour-wrap", { opacity: 0, duration: 0.5, ease: "power1.in" }, 40.65);
+
+        // ---- 3. Cierre ----
+        tl.fromTo("#close .eyebrow", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.45, ease: "power2.out" }, 41.0)
+          .fromTo("#close h1", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 41.15)
+          .fromTo("#close .sub", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.45, ease: "power2.out" }, 41.45);
+
+        window.__timelines["beantrust-demo"] = tl;
+      });
+    </script>
+  </body>
+</html>
