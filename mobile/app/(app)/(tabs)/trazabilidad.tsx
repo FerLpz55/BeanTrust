@@ -4,12 +4,12 @@ import {
   ActivityIndicator,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { FlashList } from '@shopify/flash-list';
 
 import { EmptyState } from '@/src/components/empty-state';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
@@ -18,7 +18,7 @@ import { OfflineBanner } from '@/src/components/offline-banner';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { useLotes } from '@/src/hooks/use-lotes';
 import { useAuthStore } from '@/src/store/auth';
-import { type LoteEstado } from '@/src/store/lotes';
+import { type Lote, type LoteEstado } from '@/src/store/lotes';
 import { useSyncStore } from '@/src/store/sync';
 import { spacing, typeScale } from '@/src/theme/tokens';
 import { Redirect, router, type Href } from 'expo-router';
@@ -38,6 +38,12 @@ export default function TrazabilidadScreen() {
   const handleLotePress = useCallback((id: string) => {
     router.push(`/lotes/${id}` as Href);
   }, []);
+
+  const renderLote = useCallback(
+    ({ item }: { item: Lote }) => <LoteCard lote={item} onPressId={handleLotePress} />,
+    [handleLotePress]
+  );
+  const keyExtractor = useCallback((lote: Lote) => lote.id, []);
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
@@ -64,6 +70,94 @@ export default function TrazabilidadScreen() {
     );
   }
 
+  // Cabecera/pie/vacío como props de la FlashList para conservar el scroll
+  // único de la pantalla y la paginación por cursor bajo demanda.
+  const listHeader = (
+    <View style={styles.headerBlock}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <IconSymbol size={32} name="account-tree" color={primary} />
+          <View style={styles.headerText}>
+            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>TRAZABILIDAD</Text>
+            <Text style={[typeScale.headlineMedium, { color: onSurface }]}>Tus lotes</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Filtros rápidos */}
+      <View style={styles.filters}>
+        <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>FILTRAR POR ESTADO</Text>
+        <View style={styles.filterChips}>
+          {ESTADOS.map((estado) => {
+            const activo = estado === filtro;
+            return (
+              <Pressable
+                key={estado}
+                onPress={() => setFiltro(estado)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: activo }}
+                style={({ pressed }) => [
+                  styles.filterChip,
+                  {
+                    backgroundColor: activo ? primary : surfaceContainerLow,
+                    borderColor: activo ? primary : outlineVariant,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+              >
+                <Text
+                  style={[typeScale.labelMedium, { color: activo ? onPrimary : onSurfaceVariant }]}
+                >
+                  {estado}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {error ? (
+        <Text
+          style={[typeScale.bodyMedium, { color: onSurfaceVariant }, styles.errorTexto]}
+          accessibilityLiveRegion="polite"
+        >
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+
+  const listEmpty = (
+    <EmptyState
+      title={filtro === 'TODOS' ? 'Sin lotes registrados' : 'Sin lotes en este estado'}
+      description={
+        filtro === 'TODOS'
+          ? 'Registra tu primera cosecha para comenzar la trazabilidad'
+          : 'Prueba con otro filtro o registra una nueva cosecha'
+      }
+      iconName="agriculture"
+      actionLabel="Nueva cosecha"
+      onAction={() => router.push('/lotes/nuevo' as Href)}
+    />
+  );
+
+  // Paginación por cursor (§6): se pide la siguiente página bajo demanda.
+  const listFooter =
+    lotesFiltrados.length > 0 && hayMas && filtro === 'TODOS' ? (
+      isLoadingMore ? (
+        <ActivityIndicator color={primary} style={styles.masIndicador} />
+      ) : (
+        <Pressable
+          onPress={cargarMas}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.masBtn, { opacity: pressed ? 0.7 : 1 }]}
+        >
+          <Text style={[typeScale.labelLarge, { color: primary }]}>Cargar más lotes</Text>
+        </Pressable>
+      )
+    ) : null;
+
   return (
     <SafeAreaView style={styles.root}>
       <OfflineBanner
@@ -72,101 +166,25 @@ export default function TrazabilidadScreen() {
         sincronizando={sincronizando}
       />
 
-      <ScrollView
+      <FlashList
+        data={lotesFiltrados}
+        renderItem={renderLote}
+        keyExtractor={keyExtractor}
+        ItemSeparatorComponent={LoteSeparator}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        ListFooterComponent={listFooter}
         refreshControl={<RefreshControl refreshing={refrescando} onRefresh={refrescar} />}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <IconSymbol size={32} name="account-tree" color={primary} />
-            <View style={styles.headerText}>
-              <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>TRAZABILIDAD</Text>
-              <Text style={[typeScale.headlineMedium, { color: onSurface }]}>Tus lotes</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Filtros rápidos */}
-        <View style={styles.filters}>
-          <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>FILTRAR POR ESTADO</Text>
-          <View style={styles.filterChips}>
-            {ESTADOS.map((estado) => {
-              const activo = estado === filtro;
-              return (
-                <Pressable
-                  key={estado}
-                  onPress={() => setFiltro(estado)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: activo }}
-                  style={({ pressed }) => [
-                    styles.filterChip,
-                    {
-                      backgroundColor: activo ? primary : surfaceContainerLow,
-                      borderColor: activo ? primary : outlineVariant,
-                      opacity: pressed ? 0.85 : 1,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[typeScale.labelMedium, { color: activo ? onPrimary : onSurfaceVariant }]}
-                  >
-                    {estado}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {error ? (
-          <Text
-            style={[typeScale.bodyMedium, { color: onSurfaceVariant }, styles.errorTexto]}
-            accessibilityLiveRegion="polite"
-          >
-            {error}
-          </Text>
-        ) : null}
-
-        {/* Lista de lotes */}
-        {lotesFiltrados.length === 0 ? (
-          <EmptyState
-            title={filtro === 'TODOS' ? 'Sin lotes registrados' : 'Sin lotes en este estado'}
-            description={
-              filtro === 'TODOS'
-                ? 'Registra tu primera cosecha para comenzar la trazabilidad'
-                : 'Prueba con otro filtro o registra una nueva cosecha'
-            }
-            iconName="agriculture"
-            actionLabel="Nueva cosecha"
-            onAction={() => router.push('/lotes/nuevo' as Href)}
-          />
-        ) : (
-          <View style={styles.lotesList}>
-            {lotesFiltrados.map((lote) => (
-              <LoteCard key={lote.id} lote={lote} onPressId={handleLotePress} />
-            ))}
-
-            {/* Paginación por cursor (§6): se pide la siguiente página bajo demanda. */}
-            {hayMas && filtro === 'TODOS' ? (
-              isLoadingMore ? (
-                <ActivityIndicator color={primary} style={styles.masIndicador} />
-              ) : (
-                <Pressable
-                  onPress={cargarMas}
-                  accessibilityRole="button"
-                  style={({ pressed }) => [styles.masBtn, { opacity: pressed ? 0.7 : 1 }]}
-                >
-                  <Text style={[typeScale.labelLarge, { color: primary }]}>Cargar más lotes</Text>
-                </Pressable>
-              )
-            ) : null}
-          </View>
-        )}
-      </ScrollView>
+      />
     </SafeAreaView>
   );
+}
+
+/** Separación entre tarjetas (antes `gap` del contenedor). */
+function LoteSeparator() {
+  return <View style={styles.separator} />;
 }
 
 const styles = StyleSheet.create({
@@ -195,7 +213,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxl,
+  },
+  headerBlock: {
     gap: spacing.xl,
+    marginBottom: spacing.xl,
+  },
+  separator: {
+    height: spacing.md,
   },
   header: {
     paddingTop: spacing.lg,
@@ -222,8 +246,5 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     borderRadius: spacing.full,
     borderWidth: 1,
-  },
-  lotesList: {
-    gap: spacing.md,
   },
 });

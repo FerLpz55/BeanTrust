@@ -7,10 +7,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View, Pressable, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { StyleSheet, Text, View, Pressable, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { FlashList } from '@shopify/flash-list';
 
+import type { PropinaListRead } from '@/src/api/types';
 import { DonutChart } from '@/src/components/donut-chart';
 import { PrimaryButton } from '@/src/components/primary-button';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
@@ -79,6 +81,48 @@ export default function LoteComercioJustoScreen() {
     }
   }, [tipAmount, lote, enviarPropina, claveIdempotencia]);
 
+  const renderPropina = useCallback(
+    ({ item }: { item: PropinaListRead }) => {
+      const confirmada = item.estado_propina === 'CONFIRMADA';
+      return (
+        <View style={[styles.historyItem, { backgroundColor: surfaceContainerLow }]}>
+          <View style={styles.historyItemMain}>
+            <Text style={[typeScale.titleMedium, { color: onSurface }]}>
+              ${item.monto.toFixed(2)} {item.moneda}
+            </Text>
+            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
+              {new Date(item.creado_en).toLocaleDateString()}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.pill,
+              { backgroundColor: confirmada ? primaryContainer : surfaceContainerHigh },
+            ]}
+          >
+            <Text
+              style={[
+                typeScale.labelMedium,
+                { color: confirmada ? onPrimaryContainer : onSurface },
+              ]}
+            >
+              {item.estado_propina}
+            </Text>
+          </View>
+        </View>
+      );
+    },
+    [
+      surfaceContainerLow,
+      onSurface,
+      onSurfaceVariant,
+      primaryContainer,
+      onPrimaryContainer,
+      surfaceContainerHigh,
+    ]
+  );
+  const keyExtractor = useCallback((propina: PropinaListRead) => propina.id, []);
+
   if (!lote) {
     return (
       <SafeAreaView style={[styles.root, { backgroundColor: background }]}>
@@ -93,175 +137,173 @@ export default function LoteComercioJustoScreen() {
   }
 
 
+  const listHeader = (
+    <View style={styles.headerBlock}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
+          <IconSymbol name="arrow-back" size={24} color={onSurface} />
+        </Pressable>
+      </View>
+
+      {/* Hero Section */}
+      <View style={[styles.heroCard, { backgroundColor: surfaceContainerLow }]}>
+        <View style={[styles.avatar, { backgroundColor: surfaceContainerHigh }]}>
+          <IconSymbol name="person" size={32} color={onSurfaceVariant} />
+        </View>
+        <Text style={[typeScale.titleLarge, { color: onSurface, textAlign: 'center' }]}>
+          {lote.productor_nombre}
+        </Text>
+        <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center', marginBottom: spacing.sm }]}>
+          {lote.finca_nombre}{lote.finca_municipio ? `, ${lote.finca_municipio}` : ''}
+        </Text>
+      </View>
+
+      {/* Donut Section */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={[typeScale.labelLarge, { color: onSurface }]}>COMERCIO JUSTO</Text>
+          <View style={[styles.pill, { backgroundColor: primaryContainer }]}>
+            <Text style={[typeScale.labelMedium, { color: onPrimaryContainer }]}>97% PRODUCTOR</Text>
+          </View>
+        </View>
+
+        <View style={styles.donutContainer}>
+          <DonutChart percentage={97} size={180} strokeWidth={18} />
+        </View>
+
+        <View style={styles.legend}>
+          <View style={styles.legendRow}>
+            <View style={[styles.legendDot, { backgroundColor: primary }]} />
+            <Text style={[typeScale.bodyMedium, { color: onSurface, flex: 1 }]}>Productor (97%)</Text>
+            <Text style={[typeScale.labelLarge, { color: onSurface }]}>${lote.monto_productor.toFixed(2)}</Text>
+          </View>
+          <View style={styles.legendRow}>
+            <View style={[styles.legendDot, { backgroundColor: outlineVariant }]} />
+            <Text style={[typeScale.bodyMedium, { color: onSurface, flex: 1 }]}>Plataforma (3%)</Text>
+            <Text style={[typeScale.labelLarge, { color: onSurface }]}>${lote.monto_plataforma.toFixed(2)}</Text>
+          </View>
+        </View>
+        <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center', marginTop: spacing.md }]}>
+          Garantizamos que el precio pagado llegue directamente a las manos del productor, promoviendo la sostenibilidad del cultivo.
+        </Text>
+      </View>
+
+      {/* Tip Section */}
+      <View style={[styles.tipCard, { backgroundColor: tertiaryContainer }]}>
+        <Text style={[typeScale.labelLarge, { color: onTertiaryContainer, textAlign: 'center' }]}>
+          PROPINA DIRECTA
+        </Text>
+        <Text style={[typeScale.bodySmall, { color: onTertiaryContainer, textAlign: 'center', marginBottom: spacing.md }]}>
+          100% al productor
+        </Text>
+
+        {!puedeDarPropina ? (
+          <Text
+            style={[
+              typeScale.bodySmall,
+              { color: onTertiaryContainer, textAlign: 'center' },
+            ]}
+          >
+            Solo el comprador de la venta puede dejar propina.
+          </Text>
+        ) : !tipModalVisible ? (
+          <>
+            <Pressable
+              style={({ pressed }) => [
+                styles.tipButton,
+                { backgroundColor: tertiary },
+                { opacity: pressed ? 0.85 : 1 }
+              ]}
+              onPress={() => setTipModalVisible(true)}
+            >
+              <Text style={[typeScale.labelLarge, { color: onPrimary }]}>Enviar Propina al Productor</Text>
+            </Pressable>
+          </>
+        ) : (
+          <View style={styles.tipModal}>
+            <TextInput
+              style={[
+                styles.tipInput,
+                typeScale.headlineMedium,
+                { color: onSurface, backgroundColor: surfaceContainerLow, borderColor: outlineVariant }
+              ]}
+              placeholder="0.00"
+              placeholderTextColor={onSurfaceVariant}
+              keyboardType="numeric"
+              value={tipAmount}
+              onChangeText={setTipAmount}
+              autoFocus
+            />
+            {errorStore ? (
+              <Text
+                style={[typeScale.bodySmall, { color: onSurface }, styles.errorTexto]}
+                accessibilityLiveRegion="polite"
+              >
+                {errorStore}
+              </Text>
+            ) : null}
+            <PrimaryButton
+              label="Confirmar"
+              loadingLabel="Enviando..."
+              loading={enviando}
+              onPress={handleConfirmTip}
+              style={{ marginTop: spacing.md }}
+            />
+            <Pressable
+              style={styles.cancelLink}
+              onPress={() => {
+                setTipModalVisible(false);
+                setTipAmount('');
+              }}
+            >
+              <Text style={[typeScale.labelLarge, { color: onTertiaryContainer, textAlign: 'center' }]}>
+                Cancelar
+              </Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+
+      {/* Propinas History */}
+      <View style={styles.section}>
+        <Text style={[typeScale.labelLarge, { color: onSurface, marginBottom: spacing.md }]}>
+          HISTORIAL DE PROPINAS
+        </Text>
+      </View>
+    </View>
+  );
+
+  const listEmpty = (
+    <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
+      Sin propinas registradas
+    </Text>
+  );
+
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: background }]}>
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Pressable onPress={() => router.back()} style={styles.backButton}>
-              <IconSymbol name="arrow-back" size={24} color={onSurface} />
-            </Pressable>
-          </View>
-
-          {/* Hero Section */}
-          <View style={[styles.heroCard, { backgroundColor: surfaceContainerLow }]}>
-            <View style={[styles.avatar, { backgroundColor: surfaceContainerHigh }]}>
-              <IconSymbol name="person" size={32} color={onSurfaceVariant} />
-            </View>
-            <Text style={[typeScale.titleLarge, { color: onSurface, textAlign: 'center' }]}>
-              {lote.productor_nombre}
-            </Text>
-            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center', marginBottom: spacing.sm }]}>
-              {lote.finca_nombre}{lote.finca_municipio ? `, ${lote.finca_municipio}` : ''}
-            </Text>
-          </View>
-
-          {/* Donut Section */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={[typeScale.labelLarge, { color: onSurface }]}>COMERCIO JUSTO</Text>
-              <View style={[styles.pill, { backgroundColor: primaryContainer }]}>
-                <Text style={[typeScale.labelMedium, { color: onPrimaryContainer }]}>97% PRODUCTOR</Text>
-              </View>
-            </View>
-
-            <View style={styles.donutContainer}>
-              <DonutChart percentage={97} size={180} strokeWidth={18} />
-            </View>
-
-            <View style={styles.legend}>
-              <View style={styles.legendRow}>
-                <View style={[styles.legendDot, { backgroundColor: primary }]} />
-                <Text style={[typeScale.bodyMedium, { color: onSurface, flex: 1 }]}>Productor (97%)</Text>
-                <Text style={[typeScale.labelLarge, { color: onSurface }]}>${lote.monto_productor.toFixed(2)}</Text>
-              </View>
-              <View style={styles.legendRow}>
-                <View style={[styles.legendDot, { backgroundColor: outlineVariant }]} />
-                <Text style={[typeScale.bodyMedium, { color: onSurface, flex: 1 }]}>Plataforma (3%)</Text>
-                <Text style={[typeScale.labelLarge, { color: onSurface }]}>${lote.monto_plataforma.toFixed(2)}</Text>
-              </View>
-            </View>
-            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center', marginTop: spacing.md }]}>
-              Garantizamos que el precio pagado llegue directamente a las manos del productor, promoviendo la sostenibilidad del cultivo.
-            </Text>
-          </View>
-
-          {/* Tip Section */}
-          <View style={[styles.tipCard, { backgroundColor: tertiaryContainer }]}>
-            <Text style={[typeScale.labelLarge, { color: onTertiaryContainer, textAlign: 'center' }]}>
-              PROPINA DIRECTA
-            </Text>
-            <Text style={[typeScale.bodySmall, { color: onTertiaryContainer, textAlign: 'center', marginBottom: spacing.md }]}>
-              100% al productor
-            </Text>
-
-            {!puedeDarPropina ? (
-              <Text
-                style={[
-                  typeScale.bodySmall,
-                  { color: onTertiaryContainer, textAlign: 'center' },
-                ]}
-              >
-                Solo el comprador de la venta puede dejar propina.
-              </Text>
-            ) : !tipModalVisible ? (
-              <>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.tipButton,
-                    { backgroundColor: tertiary },
-                    { opacity: pressed ? 0.85 : 1 }
-                  ]}
-                  onPress={() => setTipModalVisible(true)}
-                >
-                  <Text style={[typeScale.labelLarge, { color: onPrimary }]}>Enviar Propina al Productor</Text>
-                </Pressable>
-              </>
-            ) : (
-              <View style={styles.tipModal}>
-                <TextInput
-                  style={[
-                    styles.tipInput,
-                    typeScale.headlineMedium,
-                    { color: onSurface, backgroundColor: surfaceContainerLow, borderColor: outlineVariant }
-                  ]}
-                  placeholder="0.00"
-                  placeholderTextColor={onSurfaceVariant}
-                  keyboardType="numeric"
-                  value={tipAmount}
-                  onChangeText={setTipAmount}
-                  autoFocus
-                />
-                {errorStore ? (
-                  <Text
-                    style={[typeScale.bodySmall, { color: onSurface }, styles.errorTexto]}
-                    accessibilityLiveRegion="polite"
-                  >
-                    {errorStore}
-                  </Text>
-                ) : null}
-                <PrimaryButton
-                  label="Confirmar"
-                  loadingLabel="Enviando..."
-                  loading={enviando}
-                  onPress={handleConfirmTip}
-                  style={{ marginTop: spacing.md }}
-                />
-                <Pressable
-                  style={styles.cancelLink}
-                  onPress={() => {
-                    setTipModalVisible(false);
-                    setTipAmount('');
-                  }}
-                >
-                  <Text style={[typeScale.labelLarge, { color: onTertiaryContainer, textAlign: 'center' }]}>
-                    Cancelar
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
-
-          {/* Propinas History */}
-          <View style={styles.section}>
-            <Text style={[typeScale.labelLarge, { color: onSurface, marginBottom: spacing.md }]}>
-              HISTORIAL DE PROPINAS
-            </Text>
-            {lote.propinas.length > 0 ? (
-              <View style={styles.historyList}>
-                {lote.propinas.map((propina) => (
-                  <View key={propina.id} style={[styles.historyItem, { backgroundColor: surfaceContainerLow }]}>
-                    <View style={styles.historyItemMain}>
-                      <Text style={[typeScale.titleMedium, { color: onSurface }]}>
-                        ${propina.monto.toFixed(2)} {propina.moneda}
-                      </Text>
-                      <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
-                        {new Date(propina.creado_en).toLocaleDateString()}
-                      </Text>
-                    </View>
-                    <View style={[styles.pill, { backgroundColor: propina.estado_propina === 'CONFIRMADA' ? primaryContainer : surfaceContainerHigh }]}>
-                      <Text style={[typeScale.labelMedium, { color: propina.estado_propina === 'CONFIRMADA' ? onPrimaryContainer : onSurface }]}>
-                        {propina.estado_propina}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
-                Sin propinas registradas
-              </Text>
-            )}
-          </View>
-
-        </ScrollView>
+        <FlashList
+          data={lote.propinas}
+          renderItem={renderPropina}
+          keyExtractor={keyExtractor}
+          ItemSeparatorComponent={PropinaSeparator}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={listEmpty}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+/** Separación entre propinas (antes `gap` del contenedor). */
+function PropinaSeparator() {
+  return <View style={styles.separator} />;
 }
 
 const styles = StyleSheet.create({
@@ -274,7 +316,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxl,
+  },
+  headerBlock: {
     gap: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  separator: {
+    height: spacing.sm,
   },
   header: {
     paddingTop: spacing.lg,
@@ -360,9 +408,6 @@ const styles = StyleSheet.create({
   cancelLink: {
     minHeight: 48,
     justifyContent: 'center',
-  },
-  historyList: {
-    gap: spacing.sm,
   },
   historyItem: {
     flexDirection: 'row',

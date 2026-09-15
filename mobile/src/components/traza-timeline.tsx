@@ -1,5 +1,10 @@
 /**
  * Componente TrazaTimeline que muestra los eventos del lote en una línea de tiempo vertical.
+ *
+ * `TrazaTimelineItem` es la fila aislada y se usa tanto en el `.map()` de
+ * `TrazaTimeline` (pasaporte público) como en la FlashList del detalle de lote.
+ * Como la virtualización no permite una única línea absoluta que cruce todos
+ * los nodos, cada fila dibuja su propio conector hacia la siguiente.
  */
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
@@ -15,13 +20,11 @@ interface TrazaTimelineProps {
 
 export function TrazaTimeline({ events, showPending = true }: TrazaTimelineProps) {
   const visibleEvents = showPending ? events : events.filter(e => e.completed);
-  const lineColor = useThemeColor('outlineVariant');
 
   return (
     <View style={styles.container}>
-      <View style={[styles.absoluteLine, { backgroundColor: lineColor }]} />
       {visibleEvents.map((event, index) => (
-        <TimelineNode
+        <TrazaTimelineItem
           key={event.id}
           event={event}
           isLast={index === visibleEvents.length - 1}
@@ -31,8 +34,16 @@ export function TrazaTimeline({ events, showPending = true }: TrazaTimelineProps
   );
 }
 
-const TimelineNode = React.memo(({ event, isLast }: { event: LoteEvento; isLast: boolean }) => {
+/** Fila del timeline (nodo + contenido). Reutilizable como `renderItem`. */
+export const TrazaTimelineItem = React.memo(function TrazaTimelineItem({
+  event,
+  isLast,
+}: {
+  event: LoteEvento;
+  isLast: boolean;
+}) {
   const { completed, tipo, descripcion, fecha, hash_etapa } = event;
+  const lineColor = useThemeColor('outlineVariant');
   const nodeBg = useThemeColor(completed ? 'primary' : 'surfaceContainerLow');
   const iconColor = useThemeColor(completed ? 'onPrimary' : 'onSurfaceVariant');
   const titleColor = useThemeColor(completed ? 'onSurface' : 'onSurfaceVariant');
@@ -51,6 +62,7 @@ const TimelineNode = React.memo(({ event, isLast }: { event: LoteEvento; isLast:
 
   return (
     <View style={[styles.nodeContainer, isLast && styles.nodeContainerLast]}>
+      {!isLast && <View style={[styles.connector, { backgroundColor: lineColor }]} />}
       <View style={styles.iconContainer}>
         <View style={[styles.nodeCircle, { backgroundColor: nodeBg, opacity: completed ? 1 : 0.4 }]}>
           <IconSymbol name={EVENTO_ICONO[tipo]} size={12} color={iconColor} />
@@ -79,17 +91,19 @@ const TimelineNode = React.memo(({ event, isLast }: { event: LoteEvento; isLast:
     </View>
   );
 });
-TimelineNode.displayName = 'TimelineNode';
+TrazaTimelineItem.displayName = 'TrazaTimelineItem';
 
 const styles = StyleSheet.create({
   container: {
     position: 'relative',
     paddingLeft: 0,
   },
-  absoluteLine: {
+  connector: {
     position: 'absolute',
     top: 12,
-    bottom: 24, // accounts for the space at the bottom of the last item roughly
+    // Se extiende sobre el `marginBottom` de la fila para que la línea llegue
+    // hasta el siguiente nodo aunque cada fila se renderice por separado.
+    bottom: -spacing.lg,
     left: 11,
     width: 2,
     zIndex: 0,

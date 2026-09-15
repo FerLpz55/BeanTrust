@@ -1,23 +1,29 @@
 /**
  * Pantalla Detalle de Lote — muestra trazabilidad y detalles del lote.
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, StyleSheet, Text, View, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { FlashList } from '@shopify/flash-list';
 
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { ApiError } from '@/src/api/client';
 import type { EventoCreate } from '@/src/api/types';
-import { RECHAZO_DISPONIBLE_DESDE, TRANSICIONES_VALIDAS, useLotesStore } from '@/src/store/lotes';
+import {
+  RECHAZO_DISPONIBLE_DESDE,
+  TRANSICIONES_VALIDAS,
+  useLotesStore,
+  type LoteEvento,
+} from '@/src/store/lotes';
 import { useAuthStore } from '@/src/store/auth';
 import { usePerfilStore } from '@/src/store/perfil';
 import { useSyncStore } from '@/src/store/sync';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 import { StatusChip } from '@/src/components/status-chip';
-import { TrazaTimeline } from '@/src/components/traza-timeline';
+import { TrazaTimelineItem } from '@/src/components/traza-timeline';
 import { PrimaryButton } from '@/src/components/primary-button';
 import { RegistrarEventoModal } from '@/src/components/registrar-evento-modal';
 import { RegistrarVentaModal } from '@/src/components/registrar-venta-modal';
@@ -80,6 +86,17 @@ export default function LoteDetailScreen() {
   const tertiaryContainerBg = useThemeColor('tertiaryContainer');
   const onTertiaryContainer = useThemeColor('onTertiaryContainer');
   const errorColor = useThemeColor('error');
+
+  // La FlashList solo se monta con el detalle cargado, pero el hook debe
+  // declararse antes del return temprano.
+  const historial = lote?.historial ?? [];
+  const renderTimelineItem = useCallback(
+    ({ item, index }: { item: LoteEvento; index: number }) => (
+      <TrazaTimelineItem event={item} isLast={index === historial.length - 1} />
+    ),
+    [historial.length]
+  );
+  const keyExtractor = useCallback((event: LoteEvento) => event.id, []);
 
   if (!lote) {
     return (
@@ -155,150 +172,165 @@ export default function LoteDetailScreen() {
     );
   };
 
-  return (
-    <SafeAreaView style={styles.root}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* HEADER */}
-        <View style={styles.header}>
-          <Pressable
-            onPress={handleBack}
-            style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.85 : 1 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Volver"
-          >
-            <IconSymbol name="arrow-back" size={24} color={onSurface} />
-          </Pressable>
-        </View>
-        
-        <View style={styles.titleSection}>
-          <Text style={[typeScale.headlineMedium, { color: onSurface }]} numberOfLines={2}>
-            {lote.variedad}
+  // Todo lo que no es la lista de eventos viaja como cabecera/pie de la
+  // FlashList para conservar el orden y el scroll único de la pantalla.
+  const listHeader = (
+    <View>
+      {/* HEADER */}
+      <View style={styles.header}>
+        <Pressable
+          onPress={handleBack}
+          style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.85 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
+        >
+          <IconSymbol name="arrow-back" size={24} color={onSurface} />
+        </Pressable>
+      </View>
+
+      <View style={styles.titleSection}>
+        <Text style={[typeScale.headlineMedium, { color: onSurface }]} numberOfLines={2}>
+          {lote.variedad}
+        </Text>
+        <View style={styles.row}>
+          <Text style={[typeScale.dataMono, { color: onSurfaceVariant }]}>
+            {lote.codigo_publico}
           </Text>
-          <View style={styles.row}>
-            <Text style={[typeScale.dataMono, { color: onSurfaceVariant }]}>
-              {lote.codigo_publico}
+          <StatusChip estado={lote.estado} />
+        </View>
+        <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
+          {lote.metodo} • {lote.peso_actual_kg.toFixed(1)} kg
+        </Text>
+        {pendiente ? (
+          <View style={[styles.pendingChip, { backgroundColor: tertiaryContainerBg }]}>
+            <IconSymbol name="cloud-upload" size={14} color={onTertiaryContainer} />
+            <Text style={[typeScale.labelMedium, { color: onTertiaryContainer }]}>
+              {numEventosPendientes > 0
+                ? `${numEventosPendientes} evento(s) por sincronizar`
+                : 'Pendiente de sincronizar'}
             </Text>
-            <StatusChip estado={lote.estado} />
-          </View>
-          <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
-            {lote.metodo} • {lote.peso_actual_kg.toFixed(1)} kg
-          </Text>
-          {pendiente ? (
-            <View style={[styles.pendingChip, { backgroundColor: tertiaryContainerBg }]}>
-              <IconSymbol name="cloud-upload" size={14} color={onTertiaryContainer} />
-              <Text style={[typeScale.labelMedium, { color: onTertiaryContainer }]}>
-                {numEventosPendientes > 0
-                  ? `${numEventosPendientes} evento(s) por sincronizar`
-                  : 'Pendiente de sincronizar'}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-
-        {/* INFO CARDS */}
-        <View style={styles.infoGrid}>
-          {!!(lote.altitud_min && lote.altitud_max) && (
-            <InfoCard icon="terrain" label="Altitud" value={`${lote.altitud_min}-${lote.altitud_max} msnm`} />
-          )}
-          {!!lote.humedad_final_pct && (
-            <InfoCard icon="water-drop" label="Humedad" value={`${lote.humedad_final_pct}%`} />
-          )}
-          {!!lote.puntaje_sca && (
-            <InfoCard icon="star" label="Puntaje SCA" value={String(lote.puntaje_sca)} />
-          )}
-          {!!fincaNombre && <InfoCard icon="forest" label="Finca" value={fincaNombre} />}
-        </View>
-
-        {/* TIMELINE */}
-        <View style={styles.timelineSection}>
-          <Text style={[typeScale.labelLarge, { color: onSurface }]}>TRAZABILIDAD</Text>
-          <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, marginBottom: spacing.xl }]}>
-            Cada etapa genera un hash criptográfico inmutable
-          </Text>
-          
-          <TrazaTimeline events={lote.historial} />
-        </View>
-
-        {/* GESTIÓN DEL LOTE (F11) */}
-        {puedeGestionar ? (
-          <View style={styles.gestionSection}>
-            {transicionesDisponibles.length > 0 ? (
-              <PrimaryButton label="Registrar evento" onPress={() => setModalVisible(true)} />
-            ) : null}
-            {puedeRegistrarVenta ? (
-              <PrimaryButton label="Registrar venta" onPress={() => setVentaModalVisible(true)} />
-            ) : null}
-            {puedeRechazar ? (
-              <Pressable
-                onPress={handleRechazar}
-                disabled={rechazando}
-                accessibilityRole="button"
-                style={({ pressed }) => [
-                  styles.rechazarBtn,
-                  { opacity: pressed || rechazando ? 0.7 : 1 },
-                ]}
-              >
-                <Text style={[typeScale.labelLarge, { color: errorColor }]}>
-                  {rechazando ? 'Rechazando…' : 'Rechazar lote'}
-                </Text>
-              </Pressable>
-            ) : null}
-            {rechazoConfirmado ? (
-              <Text
-                style={[typeScale.bodySmall, { color: onSurfaceVariant }]}
-                accessibilityLiveRegion="polite"
-              >
-                {rechazoPendiente
-                  ? 'Rechazo guardado en el dispositivo; pendiente de sincronizar.'
-                  : 'Lote rechazado.'}
-              </Text>
-            ) : null}
-            {errorRechazo ? (
-              <Text
-                style={[typeScale.bodySmall, { color: errorColor }]}
-                accessibilityLiveRegion="polite"
-              >
-                {errorRechazo}
-              </Text>
-            ) : null}
           </View>
         ) : null}
+      </View>
 
-        {/* ACTION BUTTON */}
-        {puedeVerificar ? (
-          <View style={styles.actionSection}>
-            <QrCodeLote codigo={lote.codigo_certificado!} />
-            <Text
-              style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center' }]}
-            >
-              Código del Pasaporte de Café:{' '}
-              <Text style={typeScale.dataMono}>{lote.codigo_certificado}</Text>
-            </Text>
-            <PrimaryButton
-              label="Ver Pasaporte de Café"
-              onPress={() => router.push(`/verificar/${lote.codigo_certificado}` as Href)}
-            />
-          </View>
-        ) : (
-          <View style={styles.actionSection}>
-            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
-              El Pasaporte de Café se emite al llegar a TOSTADO.
-            </Text>
-          </View>
+      {/* INFO CARDS */}
+      <View style={styles.infoGrid}>
+        {!!(lote.altitud_min && lote.altitud_max) && (
+          <InfoCard icon="terrain" label="Altitud" value={`${lote.altitud_min}-${lote.altitud_max} msnm`} />
         )}
+        {!!lote.humedad_final_pct && (
+          <InfoCard icon="water-drop" label="Humedad" value={`${lote.humedad_final_pct}%`} />
+        )}
+        {!!lote.puntaje_sca && (
+          <InfoCard icon="star" label="Puntaje SCA" value={String(lote.puntaje_sca)} />
+        )}
+        {!!fincaNombre && <InfoCard icon="forest" label="Finca" value={fincaNombre} />}
+      </View>
 
-        {/* HASH RAÍZ */}
-        <View style={[styles.hashCard, { backgroundColor: tertiaryContainerBg }]}>
-          <View style={styles.hashCardHeader}>
-            <IconSymbol name="lock" size={16} color={onTertiaryContainer} />
-            <Text style={[typeScale.eyebrow, { color: onTertiaryContainer }]}>HASH RAÍZ</Text>
-          </View>
-          <Text style={[styles.hashText, { color: onTertiaryContainer }]} selectable>
-            {lote.hash_sha256}
+      {/* TIMELINE */}
+      <View>
+        <Text style={[typeScale.labelLarge, { color: onSurface }]}>TRAZABILIDAD</Text>
+        <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, marginBottom: spacing.xl }]}>
+          Cada etapa genera un hash criptográfico inmutable
+        </Text>
+      </View>
+    </View>
+  );
+
+  const listFooter = (
+    <View style={styles.listFooter}>
+      {/* GESTIÓN DEL LOTE (F11) */}
+      {puedeGestionar ? (
+        <View style={styles.gestionSection}>
+          {transicionesDisponibles.length > 0 ? (
+            <PrimaryButton label="Registrar evento" onPress={() => setModalVisible(true)} />
+          ) : null}
+          {puedeRegistrarVenta ? (
+            <PrimaryButton label="Registrar venta" onPress={() => setVentaModalVisible(true)} />
+          ) : null}
+          {puedeRechazar ? (
+            <Pressable
+              onPress={handleRechazar}
+              disabled={rechazando}
+              accessibilityRole="button"
+              style={({ pressed }) => [
+                styles.rechazarBtn,
+                { opacity: pressed || rechazando ? 0.7 : 1 },
+              ]}
+            >
+              <Text style={[typeScale.labelLarge, { color: errorColor }]}>
+                {rechazando ? 'Rechazando…' : 'Rechazar lote'}
+              </Text>
+            </Pressable>
+          ) : null}
+          {rechazoConfirmado ? (
+            <Text
+              style={[typeScale.bodySmall, { color: onSurfaceVariant }]}
+              accessibilityLiveRegion="polite"
+            >
+              {rechazoPendiente
+                ? 'Rechazo guardado en el dispositivo; pendiente de sincronizar.'
+                : 'Lote rechazado.'}
+            </Text>
+          ) : null}
+          {errorRechazo ? (
+            <Text
+              style={[typeScale.bodySmall, { color: errorColor }]}
+              accessibilityLiveRegion="polite"
+            >
+              {errorRechazo}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* ACTION BUTTON */}
+      {puedeVerificar ? (
+        <View style={styles.actionSection}>
+          <QrCodeLote codigo={lote.codigo_certificado!} />
+          <Text
+            style={[typeScale.bodySmall, { color: onSurfaceVariant, textAlign: 'center' }]}
+          >
+            Código del Pasaporte de Café:{' '}
+            <Text style={typeScale.dataMono}>{lote.codigo_certificado}</Text>
+          </Text>
+          <PrimaryButton
+            label="Ver Pasaporte de Café"
+            onPress={() => router.push(`/verificar/${lote.codigo_certificado}` as Href)}
+          />
+        </View>
+      ) : (
+        <View style={styles.actionSection}>
+          <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }]}>
+            El Pasaporte de Café se emite al llegar a TOSTADO.
           </Text>
         </View>
+      )}
 
-      </ScrollView>
+      {/* HASH RAÍZ */}
+      <View style={[styles.hashCard, { backgroundColor: tertiaryContainerBg }]}>
+        <View style={styles.hashCardHeader}>
+          <IconSymbol name="lock" size={16} color={onTertiaryContainer} />
+          <Text style={[typeScale.eyebrow, { color: onTertiaryContainer }]}>HASH RAÍZ</Text>
+        </View>
+        <Text style={[styles.hashText, { color: onTertiaryContainer }]} selectable>
+          {lote.hash_sha256}
+        </Text>
+      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.root}>
+      <FlashList
+        data={historial}
+        renderItem={renderTimelineItem}
+        keyExtractor={keyExtractor}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
+      />
 
       <RegistrarEventoModal
         visible={modalVisible}
@@ -396,8 +428,8 @@ const styles = StyleSheet.create({
   infoCardText: {
     flex: 1,
   },
-  timelineSection: {
-    marginBottom: spacing.xxl,
+  listFooter: {
+    marginTop: spacing.xxl,
   },
   gestionSection: {
     gap: spacing.md,
