@@ -30,6 +30,23 @@ jobs:
       - name: Tests (pytest)
         run: pytest
 
+  supabase:
+    name: Supabase (migraciones + pgTAP + advisors)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Arrancar Supabase local
+        run: supabase start
+      - name: Aplicar migraciones desde cero
+        run: supabase db reset
+      - name: Pruebas pgTAP (RLS, Storage, rate limit)
+        run: supabase test db
+      - name: Advisors (solo los ERROR tumban el CI)
+        run: supabase db advisors --local --fail-on error
+
   mobile:
     name: Mobile (Node 24 · pnpm 11)
     runs-on: ubuntu-latest

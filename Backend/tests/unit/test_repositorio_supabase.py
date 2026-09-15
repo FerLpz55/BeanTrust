@@ -9,12 +9,19 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from app.models.dominio import Estado
-from app.repositories.supabase import SupabaseLoteRepo, SupabasePagoRepo, SupabaseQRRepo
+from app.models.dominio import Estado, EstadoEvidencia
+from app.repositories.supabase import (
+    SupabaseEvidenciaRepo,
+    SupabaseLoteRepo,
+    SupabasePagoRepo,
+    SupabaseQRRepo,
+    fila_a_evidencia,
+)
 
 AHORA = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.UTC)
 LOTE_ID = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000001")
 FINCA_ID = uuid.UUID("bbbbbbbb-0000-0000-0000-000000000002")
+EVIDENCIA_ID = uuid.UUID("aaaaaaaa-0000-0000-0000-0000000000e1")
 
 
 def fila_lote() -> dict:
@@ -37,6 +44,22 @@ def fila_qr() -> dict:
         "codigo": "BT-0001",
         "hash_sha256": "h" * 64,
         "emitido_en": AHORA.isoformat(),
+    }
+
+
+def fila_evidencia(estado: EstadoEvidencia = EstadoEvidencia.PENDIENTE) -> dict:
+    return {
+        "id": str(EVIDENCIA_ID),
+        "lote_id": str(LOTE_ID),
+        "finca_id": str(FINCA_ID),
+        "uploader_id": str(uuid.uuid4()),
+        "storage_key": "uploader/lote/foto.jpg",
+        "sha256": "a" * 64,
+        "content_type": "image/jpeg",
+        "size_bytes": 10,
+        "estado": estado.value,
+        "creado_en": AHORA.isoformat(),
+        "adjuntada_en": AHORA.isoformat() if estado is EstadoEvidencia.ADJUNTA else None,
     }
 
 
@@ -77,6 +100,14 @@ class ConsultaFalsa:
 
     def insert(self, fila):
         self._registro.setdefault("insertados", []).append((self._tabla, fila))
+        return self
+
+    def upsert(self, fila):
+        self._registro.setdefault("upserts", []).append((self._tabla, fila))
+        return self
+
+    def update(self, valores):
+        self._registro.setdefault("updates", []).append((self._tabla, valores))
         return self
 
     def execute(self):
@@ -133,3 +164,39 @@ def test_saldo_usa_el_nombre_real_de_la_tabla_en_el_embed() -> None:
     assert "lotes!inner" in cliente.registro["select"]["pago"]
     columnas = [columna for _, columna, _ in cliente.registro["filtros"]]
     assert "lotes.finca.productor_id" in columnas
+
+
+def test_evidencia_crear_usa_upsert_idempotente() -> None:
+    """`upsert` y no `insert`: un reintento con la misma clave no puede reventar."""
+    cliente = ClienteFalso({})
+    SupabaseEvidenciaRepo(cliente).crear(fila_a_evidencia(fila_evidencia()))
+    tabla, fila = cliente.registro["upserts"][0]
+    assert tabla == "evidencias"
+    assert fila["id"] == str(EVIDENCIA_ID)
+    assert fila["estado"] == "PENDIENTE"
+
+
+def test_evidencia_buscar_por_id_hidrata_la_fila() -> None:
+    cliente = ClienteFalso({"evidencias": [fila_evidencia()]})
+    evidencia = SupabaseEvidenciaRepo(cliente).buscar_por_id(EVIDENCIA_ID)
+    assert evidencia is not None
+    assert evidencia.storage_key == "uploader/lote/foto.jpg"
+    assert evidencia.content_type == "image/jpeg"
+
+
+def test_evidencia_buscar_adjunta_por_lote_filtra_por_estado() -> None:
+    cliente = ClienteFalso({"evidencias": [fila_evidencia(EstadoEvidencia.ADJUNTA)]})
+    evidencia = SupabaseEvidenciaRepo(cliente).buscar_adjunta_por_lote(LOTE_ID)
+    assert evidencia is not None
+    assert evidencia.estado is EstadoEvidencia.ADJUNTA
+    filtros = cliente.registro["filtros"]
+    assert ("evidencias", "lote_id", str(LOTE_ID)) in filtros
+    assert ("evidencias", "estado", "ADJUNTA") in filtros
+
+
+def test_evidencia_marcar_adjunta_actualiza_estado_y_fecha() -> None:
+    cliente = ClienteFalso({})
+    SupabaseEvidenciaRepo(cliente).marcar_adjunta(EVIDENCIA_ID, AHORA)
+    tabla, valores = cliente.registro["updates"][0]
+    assert tabla == "evidencias"
+    assert valores == {"estado": "ADJUNTA", "adjuntada_en": AHORA.isoformat()}

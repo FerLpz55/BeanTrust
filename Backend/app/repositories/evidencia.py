@@ -64,6 +64,9 @@ class InMemoryAlmacenEvidencia:
         objeto = self._objetos.get(storage_key)
         return objeto[0] if objeto else None
 
+    def claves(self) -> list[str]:
+        return list(self._objetos)
+
 
 class SupabaseAlmacenEvidencia:
     """Bucket privado de Supabase Storage, operado con `service_role`."""

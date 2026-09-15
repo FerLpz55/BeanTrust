@@ -12,7 +12,9 @@ Dinero simulado por `FakeGatewayPagos`: web3 sigue en pausa (B7).
 
 from __future__ import annotations
 
+import hashlib
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -112,3 +114,58 @@ def test_cadena_completa_del_grano_al_comercio_justo(
     assert panel["monto_plataforma"] == 30.0
     assert panel["monto_productor"] + panel["monto_plataforma"] == panel["monto_total"]
     assert panel["total_propinas"] == 50.0
+
+
+def test_evidencia_privada_en_el_flujo_del_lote(
+    client: TestClient,
+    header_productor: dict[str, str],
+) -> None:
+    """Complementa `test_evidencias.py`: integridad del SHA-256 y expiración.
+
+    El resto del camino (subida → alta con `evidencia_id` → URL firmada → 404)
+    ya está cubierto allí; aquí se fija que el hash corresponde al binario real y
+    que la URL firmada caduca en el futuro.
+    """
+    finca_id = client.get("/v1/fincas", headers=header_productor).json()[0]["id"]
+    contenido = b"\x89PNG\r\n\x1a\n" + b"evidencia-de-campo"
+    lote_id = str(uuid.uuid4())
+
+    subida = client.post(
+        "/v1/evidencias",
+        headers={**header_productor, "Idempotency-Key": str(uuid.uuid4())},
+        data={"finca_id": finca_id, "lote_id": lote_id},
+        files={"archivo": ("campo.png", contenido, "image/png")},
+    )
+    assert subida.status_code == 201, subida.text
+    evidencia = subida.json()
+    assert evidencia["evidencia_sha256"] == hashlib.sha256(contenido).hexdigest()
+
+    alta = client.post(
+        "/v1/lotes",
+        headers=header_productor,
+        json={
+            "id": lote_id,
+            "finca_id": finca_id,
+            "fecha_cosecha": "2026-08-01",
+            "peso_kg": 100.0,
+            "evidencia_id": evidencia["id"],
+        },
+    )
+    assert alta.status_code == 201, alta.text
+    assert alta.json()["evidencia_sha256"] == evidencia["evidencia_sha256"]
+
+    firmada = client.get(f"/v1/lotes/{lote_id}/evidencia", headers=header_productor)
+    assert firmada.status_code == 200, firmada.text
+    assert firmada.json()["url"].startswith("https://storage.local/")
+    assert firmada.json()["evidencia_sha256"] == evidencia["evidencia_sha256"]
+    assert datetime.fromisoformat(firmada.json()["expira_en"]) > datetime.now(UTC)
+
+    # Un lote sin evidencia no filtra ninguna URL.
+    sin_foto = client.post(
+        "/v1/lotes",
+        headers=header_productor,
+        json={"finca_id": finca_id, "fecha_cosecha": "2026-08-01", "peso_kg": 10.0},
+    )
+    assert sin_foto.status_code == 201, sin_foto.text
+    r = client.get(f"/v1/lotes/{sin_foto.json()['id']}/evidencia", headers=header_productor)
+    assert r.status_code == 404

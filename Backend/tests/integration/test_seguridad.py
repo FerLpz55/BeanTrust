@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import uuid
 
+from app import dependencies as deps
+from app.core.config import Settings
+
 FINCA1 = "11111111-1111-1111-1111-111111111111"
 FINCA2 = "22222222-2222-2222-2222-222222222222"
 
@@ -94,6 +97,72 @@ def test_rate_limit_login(client):
         assert r.status_code == 401, r.text
     r = client.post("/v1/auth/login", json={"email": "x@y.com", "password": "WrongPass123"})
     assert r.status_code == 429, r.text
+
+
+def test_rate_limit_respeta_el_limite_configurado(client):
+    """A07: con `login_rate_limit=1` el primer intento pasa y el segundo es 429."""
+    client.app.dependency_overrides[deps.get_settings] = lambda: Settings(
+        _env_file=None,
+        jwt_secret="x" * 40,
+        login_rate_limit=1,
+        rate_limit_window_seconds=60,
+    )
+    primera = client.post(
+        "/v1/auth/login",
+        json={"email": "productor@beantrust.dev", "password": "Prod123!"},
+    )
+    assert primera.status_code == 200, primera.text
+    segunda = client.post(
+        "/v1/auth/login",
+        json={"email": "productor@beantrust.dev", "password": "Prod123!"},
+    )
+    assert segunda.status_code == 429, segunda.text
+
+
+def test_refresh_rota_y_el_reuso_revoca_la_familia(client):
+    """A07: reutilizar un refresh consumido invalida también al refresh nuevo."""
+    r = client.post(
+        "/v1/auth/login",
+        json={"email": "productor@beantrust.dev", "password": "Prod123!"},
+    )
+    assert r.status_code == 200, r.text
+    original = r.json()["refresh_token"]
+
+    r = client.post("/v1/auth/refresh", json={"refresh_token": original})
+    assert r.status_code == 200, r.text
+    nuevo = r.json()["refresh_token"]
+    assert nuevo != original
+
+    reuso = client.post("/v1/auth/refresh", json={"refresh_token": original})
+    assert reuso.status_code == 401, reuso.text
+
+    # La familia quedó revocada: el refresh emitido tampoco sirve.
+    revocado = client.post("/v1/auth/refresh", json={"refresh_token": nuevo})
+    assert revocado.status_code == 401, revocado.text
+
+
+def test_password_reset_invalida_los_refresh_vivos(client):
+    """A07: cambiar la contraseña cierra todas las sesiones de refresh del usuario."""
+    r = client.post(
+        "/v1/auth/login",
+        json={"email": "productor@beantrust.dev", "password": "Prod123!"},
+    )
+    assert r.status_code == 200, r.text
+    refresh = r.json()["refresh_token"]
+
+    r = client.post("/v1/auth/recover", json={"email": "productor@beantrust.dev"})
+    assert r.status_code == 200, r.text
+    token = r.json()["token_dev"]
+    assert token
+
+    r = client.post(
+        "/v1/auth/recover/confirm",
+        json={"token": token, "password": "NuevaClave123!"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = client.post("/v1/auth/refresh", json={"refresh_token": refresh})
+    assert r.status_code == 401, r.text
 
 
 def test_verificar_publico_no_filtra_actor_id(client, header_productor):

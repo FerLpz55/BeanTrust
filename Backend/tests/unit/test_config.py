@@ -69,11 +69,17 @@ def test_cors_admite_coma_y_json(valor: str, esperado: list[str]) -> None:
 
 
 class RequestFalso:
-    """Lo mínimo que `ip_del_cliente` mira de una Request."""
+    """Lo mínimo que `ip_del_cliente` y `clave_rate_limit` miran de una Request."""
 
-    def __init__(self, headers: dict[str, str], client_host: str | None) -> None:
+    def __init__(
+        self,
+        headers: dict[str, str],
+        client_host: str | None,
+        path: str = "/v1/auth/login",
+    ) -> None:
         self.headers = headers
         self.client = type("C", (), {"host": client_host})() if client_host else None
+        self.url = type("U", (), {"path": path})()
 
 
 def test_ip_prefiere_la_cabecera_de_la_plataforma() -> None:
