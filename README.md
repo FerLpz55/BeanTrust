@@ -47,7 +47,13 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
   (F11), trazabilidad, Pasaporte de Café con QR verificable y panel de comercio justo.
 - **Modo campo offline-first:** caché local en SQLite, cola de sincronización
   FIFO con reintento/descarte y sincronización al recuperar red (`src/offline/`).
-- **Pendiente:** evidencia fotográfica y FlashList.
+- **Evidencia fotográfica (ADR-14):** cámara/galería → JPEG normalizado + SHA-256,
+  subida al bucket **privado** `evidencias-lotes` vía `POST /v1/evidencias` y
+  encolada offline junto a la cosecha; lectura por URL firmada temporal.
+- **Rendimiento:** listas largas virtualizadas con FlashList.
+- **Seguridad (B11 avanza):** RLS efectiva por usuario (JWT por request), rate
+  limit compartido en Postgres y refresh rotativo en el proveedor local.
 - **Simulado:** pagos y propinas usan un gateway fake; no hay blockchain (web3 en
   pausa, B7). No se mueve dinero real.
+- **Pendiente:** smoke de producción/EAS y wallet `public_address` (con web3).
 - Verificación operativa del flujo: `Backend/scripts/smoke_production.py`.

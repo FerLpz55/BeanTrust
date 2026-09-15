@@ -49,6 +49,43 @@ pnpm typecheck        # tsc --noEmit (los tipos deben compilar limpio)
 | Offline / cola de sync | `src/offline/` | **Real** — SQLite + NetInfo, cola FIFO, reintento y descarte (§7.5) |
 | Evidencia fotografica | `src/evidencia/` | **Real** — cámara/galería → JPEG+SHA-256 persistido → `POST /v1/evidencias` encolado (ADR-14) |
 
+### Evidencia fotográfica (ADR-14)
+
+- Captura con `expo-image-picker` (cámara o galería), normaliza a **JPEG 2048 px
+  q0.82** con `expo-image-manipulator` y persiste el archivo **fuera de cache**
+  con `expo-file-system`, calculando su **SHA-256**.
+- La subida es `multipart/form-data` vía `apiFormData` (nunca fija
+  `Content-Type`; React Native construye el boundary): `src/api/evidencias.ts`
+  expone `subirEvidencia` y `obtenerUrlEvidencia` (URL firmada ~10 min).
+- En la cola offline la foto vive en la tabla `attachments`: el motor sube
+  primero `subir_evidencia` y después la operación de cosecha, conserva el
+  archivo hasta que el lote lo referencia y lo borra al confirmar. Descartar la
+  operación arrastra la pareja lote+foto.
+
+### Rendimiento
+
+Las listas largas (trazabilidad, timeline del detalle de lote, mercado y
+propinas del lote) usan **FlashList** en lugar de `ScrollView` + `map`.
+
+### Prueba Android sin conexión
+
+1. Configura `EXPO_PUBLIC_API_URL` con la IP LAN de tu máquina y arranca
+   `pnpm start` + el backend local.
+2. Inicia sesión con una cuenta de demo y registra un lote con foto.
+3. Activa **modo avión** en el dispositivo Android y registra otra cosecha con
+   evidencia: la app la muestra como `pendiente: true` (proyección optimista).
+4. En **Ajustes → pendientes** verifica que aparezcan las operaciones en cola
+   (`subir_evidencia` + cosecha).
+5. Desactiva el modo avión y deja que la app sincronice (o fuerza el flush):
+   las pendientes se resuelven y, si algo falla, queda como conflicto para
+   descartar o reintentar.
+
+### Permisos
+
+`app.json` declara los permisos vía plugins: `expo-camera` (escáner del
+Pasaporte de Café) y `expo-image-picker` (cámara + fotos para la evidencia de
+cosecha; micrófono desactivado).
+
 ### Pruebas
 
 ```bash

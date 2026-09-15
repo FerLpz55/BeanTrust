@@ -63,11 +63,47 @@ Notas que no son obvias:
   `[project].dependencies` de `pyproject.toml`. Hay que mantener los dos en sync.
 - `.vercelignore` deja fuera `.venv/`, `tests/` y `db/`.
 - Las variables `BEAN_*` viven en el proyecto de Vercel (`vercel env ls`), no en
-  un `.env`. En `production` la config **exige** Supabase para auth y datos.
+  un `.env`. En `production` la config **exige** Supabase para auth y datos, y
+  además `BEAN_SUPABASE_ANON_KEY` y `BEAN_RATE_LIMIT_HMAC_SECRET` (ver abajo).
 - `BEAN_CORS_ORIGINS` admite lista separada por comas (`a,b`) o JSON.
 - Las mismas cuatro credenciales de la tabla de arriba son las únicas válidas en
   producción: el alta pública está cerrada en Supabase, así que
   `POST /v1/auth/register` responde 401.
+- **Secretos de Vault** (no son variables de entorno): la migración 007 programa
+  el cron `purge-staged-evidence-daily`, que lee de Vault `purge_evidence_url`
+  (URL de la Edge Function `purge-staged-evidence`) y `purge_evidence_secret`
+  (secreto interno). Si faltan, el job se crea pero falla en ejecución. Alta y
+  operación en `db/README.md`.
+
+## Variables de entorno
+
+Todas llevan prefijo `BEAN_` (ver `.env.example`). Las nuevas del hardening:
+
+| Variable | Default | Para qué |
+| -------- | ------- | -------- |
+| `BEAN_SUPABASE_ANON_KEY` | — | Cliente Supabase **por request** que adjunta el JWT del usuario (RLS efectiva). **Obligatoria en `production`.** |
+| `BEAN_EVIDENCE_BUCKET` | `evidencias-lotes` | Bucket privado de evidencias. |
+| `BEAN_EVIDENCE_MAX_BYTES` | `5242880` | Tamaño máximo por foto (5 MB). |
+| `BEAN_EVIDENCE_TTL_HOURS` | `24` | TTL de objetos `PENDIENTE` sin adjuntar. |
+| `BEAN_RATE_LIMIT_HMAC_SECRET` | — | Secreto HMAC-SHA256 de la clave `ip|ruta` del rate limit (no guarda la IP en claro). **Obligatorio en `production`.** |
+| `BEAN_RATE_LIMIT_WINDOW_SECONDS` | `60` | Ventana del rate limit. |
+
+## Seguridad: RLS, rate limit y refresh
+
+- **RLS efectiva por usuario.** Los endpoints autenticados usan un cliente
+  Supabase con `anon key` + `Authorization: Bearer <jwt>` (`get_supabase_user_client`),
+  así Postgres evalúa las políticas (`app_private.bean_rol()`). `service_role`
+  queda para auth interna, verificación pública y Storage de evidencias.
+- **Rate limit compartido.** `limitar_login` aplica en `/login`, `/register`,
+  `/refresh`, `/recover` y `/recover/confirm`; en Supabase el contador vive en
+  Postgres (`app_private.rate_limit_bucket` vía RPC `bean_consume_rate_limit`),
+  de modo que es consistente entre réplicas. En dev/CI es en memoria.
+- **Refresh rotativo (proveedor local).** Cada refresh lleva `jti` + `family`;
+  reusar un `jti` consumido revoca la familia y `restablecer_password` revoca las
+  sesiones del usuario. En producción Supabase Auth es el que rota.
+- **Storage.** Las fotos viven en el bucket **privado** `evidencias-lotes`; el
+  backend sube/firma/borra con `service_role` y la tabla `public.evidencias` no
+  tiene grants para `anon`/`authenticated`. El móvil nunca habla con Storage.
 
 ## Endpoints (`/v1`)
 

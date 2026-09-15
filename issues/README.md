@@ -44,13 +44,16 @@ flowchart LR
 
 ## Fuera de este batch (fase posterior)
 
-- **Offline-first real** (SQLite + cola + NetInfo + `POST /v1/sync`) — decisión
-  de producto: la app se conecta online primero.
-- **Evidencia fotográfica** (cámara + Supabase Storage, ADR-14) — con B11.
-- [#17 B11](https://github.com/FerLpz55/BeanTrust/issues/17) Supabase real,
-  [#18 B12](https://github.com/FerLpz55/BeanTrust/issues/18) deploy Railway,
+- **Offline-first real** (SQLite + cola + NetInfo + `POST /v1/sync`) — ✅ **cerrado**
+  (rama `hardening/supabase-evidence-release`).
+- **Evidencia fotográfica** (cámara + Supabase Storage, ADR-14) — ✅ **cerrada**
+  (ADR-14 implementado; ya no depende de B11 para el bucket privado).
+- [#17 B11](https://github.com/FerLpz55/BeanTrust/issues/17) Supabase real —
+  **avanza**: RLS efectiva por usuario (JWT por request), rate limit compartido y
+  refresh rotativo local; resta la wallet `public_address` y la observabilidad.
+- [#18 B12](https://github.com/FerLpz55/BeanTrust/issues/18) deploy Railway,
   [#13 B7](https://github.com/FerLpz55/BeanTrust/issues/13) web3 — ya existen
-  abiertas en GitHub.
+  abiertas en GitHub. **B7 sigue en pausa.**
 
 ## Al trabajar una issue
 

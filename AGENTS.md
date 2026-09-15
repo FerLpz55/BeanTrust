@@ -54,7 +54,8 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   `comprador@beantrust.dev/Comp123!`.
 - Stack: FastAPI `crear_app()` (testeable), JWT HS256 + argon2 (LocalAuthProvider) o
   Supabase (B11), idempotencia vía header `Idempotency-Key` (solo POST), RLS Supabase
-  definido pero inerte (defensa real en la capa de servicio), gateway de pagos fake.
+  **efectiva por usuario** (cliente por request con el JWT; `service_role` solo para
+  auth interna, verificación pública y Storage), gateway de pagos fake.
 
 ## Estado real (MVP) — no asumir más
 
@@ -64,24 +65,35 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   vive en los repos. La confirmación del pago/propina corre en `BackgroundTasks` (poller
   simulado, web3 en pausa B7). **B15 cerrado**: `GET /v1/fincas` resuelve el `finca_id`. **B14 cerrado**: recover/confirm con
   token de un solo uso. **B16 cerrado**: `GET /v1/mercado/{lote_id}` (Panel Comercio Justo, ADR-9).
+  **Hardening B11**: clientes Supabase **por request** (RLS efectiva con el JWT del usuario;
+  `service_role` solo para auth interna/verificación pública/Storage), **rate limit compartido**
+  (`bean_consume_rate_limit`, HMAC de `ip|ruta` en login/register/refresh/recover) y **refresh
+  rotativo** local (`jti`+`family`; reuso revoca la familia). **Evidencia privada (ADR-14)**
+  real: `POST /v1/evidencias` + `GET /v1/lotes/{lote_id}/evidencia` (bucket privado, migraciones
+  006/007, Edge Function de purga).
 - Mobile: **todos los flujos consumen el backend real** (no quedan stores mock).
-  `src/api/` cubre auth, fincas, lotes, verificar, pagos, propinas y mercado;
+  `src/api/` cubre auth, fincas, lotes, verificar, pagos, propinas, mercado y evidencias;
   `client.ts` renueva el token ante un 401 y manda `Idempotency-Key`. El adaptador
   contrato→UI vive en `src/domain/lote.ts`. Escaner QR real con `expo-camera`.
   Tests con vitest en `src/api/client.test.ts` (`pnpm test`). **F11 cerrado**: la
   UI de registro de eventos vive en `src/components/registrar-evento-modal.tsx`
   y se usa desde `app/(app)/lotes/[id].tsx`. **Modo campo offline-first (§7.5)
   cerrado**: `src/offline/` es la única capa con SQLite (`expo-sqlite`) y NetInfo
-  (`cached_resource` + `sync_queue`), con motor FIFO single-flight, encolado
-  optimista y UI de pendientes/conflictos; `POST /v1/sync` es la única ruta.
-  **Pendiente**: FlashList y evidencia fotográfica (ADR-14, con B11).
+  (`cached_resource` + `sync_queue` + `attachments`), con motor FIFO single-flight,
+  encolado optimista y UI de pendientes/conflictos; `POST /v1/sync` es la única ruta.
+  **Evidencia (ADR-14)** capturada con `expo-image-picker`/`expo-image-manipulator`
+  (JPEG + SHA-256) y encolada antes del lote; **FlashList** en trazabilidad, detalle,
+  mercado y propinas.
 - Producción (piloto Android): Supabase real conectado (proyecto
-  `yvczofwzfljuubxnmakj`, auth + repos con `service_role`) y **registro público
-  cerrado** (`enable_signup=false`); las cuentas piloto se crean por Auth Admin,
-  no desde la app. Smoke test operativo en `Backend/scripts/smoke_production.py`.
-- Deudas clave: B7 web3 en pausa, B11 RLS activo (hoy inerte: el backend usa
-  `service_role`) + wallet `public_address`, refresh sin rotación de tokens,
-  rate limit en memoria.
+  `yvczofwzfljuubxnmakj`; endpoints autenticados con JWT por request y RLS
+  efectiva; `service_role` solo para auth interna, verificación pública y
+  Storage) y **registro público cerrado** (`enable_signup=false`); las cuentas
+  piloto se crean por Auth Admin, no desde la app. Smoke test operativo en
+  `Backend/scripts/smoke_production.py`.
+- Deudas clave: B7 web3 en pausa (contrato/wallet sin desplegar), B11 avanza
+  (RLS efectiva por usuario, rate limit compartido y refresh rotativo local) y
+  resta la wallet `public_address`; pendiente el smoke de producción/EAS.
+  El rate limit en memoria queda solo para dev/CI.
 
 ## Skills útiles
 

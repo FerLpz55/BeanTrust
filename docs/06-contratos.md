@@ -1,8 +1,9 @@
 # 06 · Contratos y pagos on-chain (CoffeePayments)
 
 > Contexto: B7 del milestone Backend MVP. La **implementación web3 está en
-> pausa** por decisión de producto (falta proyecto Supabase real y wallet de la
-> cooperativa). Este documento es la especificación de referencia que el
+> pausa** por decisión de producto (falta desplegar el contrato y la wallet del
+> backend/cooperativa; el proyecto Supabase real ya está conectado). Este
+> documento es la especificación de referencia que el
 > backend ya respeta a través del `GatewayPagos` y que se implementará en el
 > milestone de blockchain. Además del pago justo, cubre la **propina al
 > productor** (bivalente: off-chain en el MVP / on-chain futuro, decisión
@@ -143,10 +144,12 @@ el valor on-chain.
 | `CoffeePayments.sol` | ⏸️ pausado | `contracts/` (futuro) |
 | Poller de confirmación | ⏸️ pausado | servicio futuro (listener `PaymentPaid`) |
 | Wallet de la cooperativa | ⏸️ pausado | registro del productor (futuro) |
-| `POST /v1/propinas` | 🔜 pendiente | `Backend/app/api/v1/endpoints/propinas.py` (futuro) |
-| `tabla PROPINA (bivalente)` | 🔜 pendiente | `Backend/db/migrations/004_propina.sql` (futuro) |
+| `POST /v1/propinas` | ✅ listo | `Backend/app/api/v1/endpoints/pagos.py` (router_propinas) |
+| `tabla PROPINA (bivalente)` | ✅ listo | `Backend/db/migrations/004_cadena_completa_propina.sql` |
 | `darPropina()` en CoffeePayments.sol | ⏸️ pausado | `contracts/` (futuro) |
+| Evidencia fotográfica (ADR-14, Storage privado) | ✅ listo (fuera de web3) | `Backend/db/migrations/006` + `007`, `supabase/functions/purge-staged-evidence/` |
 
 > Decisión registrada en el tablero (B7): el contrato y el web3 se implementan
 > en el milestone de blockchain, no en el MVP. El MVP queda probado de punta a
-> punta con `FakeGatewayPagos`.
+> punta con `FakeGatewayPagos`. La **evidencia fotográfica** (ADR-14) ya es
+> funcional sobre Supabase Storage y es independiente del web3.

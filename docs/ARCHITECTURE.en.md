@@ -61,8 +61,8 @@ Business model (B2B2C): the producer **does not pay**. Cooperatives (subscriptio
 ### Separation of responsibilities (modular decision)
 
 - **FastAPI** is the only gate that validates business rules and the only one that knows the coffee state machine. **The app never writes directly to the database.**
-- **Supabase** is the relational source of truth (PostgreSQL) + Auth + Row Level Security (RLS) + QR Storage (Backend-as-a-Service).
-- **Smart Contracts (Polygon)**: only contain the *flow of money*, never the full business logic.
+- **Supabase** is the relational source of truth (PostgreSQL) + Auth + Row Level Security (RLS) + Storage (a **private** evidence bucket; the app never talks to Storage, only to FastAPI).
+- **Smart Contracts (Polygon)**: only contain the *flow of money*, never the full business logic. **Web3 is paused** (B7): the MVP uses `FakeGatewayPagos`.
 
 | Component | Role | Consumed by |
 |---|---|---|
@@ -79,46 +79,51 @@ Business model (B2B2C): the producer **does not pay**. Cooperatives (subscriptio
 ```
 BeanTrust/
 ├── docs/
-│   ├── ARCHITECTURE.md          # ← This document (Spanish original)
-│   ├── ARCHITECTURE.en.md       # ← English translation
-│   ├── 01-coffee-domain.md       # State machine (Issue 1)
-│   ├── 02-data-model.md          # ERD + migrations (Issue 2)
-│   ├── 03-api-contract.md        # Endpoints + schemas (Issue 3)
-│   ├── 04-ui-flow.md             # Wireframes + navigation (Issue 4)
-│   ├── 05-offline-sync.md        # Offline sync (Issue 5)
-│   └── adr/                      # Architecture Decision Records (ADR)
-├── Backend/                     # FastAPI
+│   ├── ARCHITECTURE.md        # Spanish original (source of truth for the design)
+│   ├── ARCHITECTURE.en.md     # ← This document (English translation)
+│   ├── 06-contratos.md         # Solidity contracts (design; web3 paused — B7)
+│   └── (ADRs live inline in §11 of ARCHITECTURE.md)
+├── Backend/                     # FastAPI (capitalized folder)
 │   ├── app/
-│   │   ├── main.py              # Entry point: instantiates FastAPI(), mounts routers
-│   │   ├── core/                 # config, security (Supabase JWT), logger
+│   │   ├── main.py              # crear_app() + domain error handler
+│   │   ├── core/                 # config, security (JWT + argon2), logger
 │   │   ├── api/v1/
-│   │   │   └── endpoints/        # lots, events, verification, payments, auth, sync (1 router per domain)
-│   │   ├── models/                # Data schema (SQLAlchemy / Supabase)
-│   │   ├── schemas/               # Pydantic → input/output validation
-│   │   ├── services/              # state_machine, qr_service, blockchain_link
-│   │   ├── repositories/          # LotRepository (interface) + SupabaseLotRepo (impl.) — see §4
-│   │   ├── utils/                 # pure stateless helpers (hashing, formatting, etc.)
-│   │   └── dependencies.py        # Shared dependency injection (DB, Auth) — see §4
-│   ├── tests/
-│   │   ├── unit/
-│   │   └── integration/
+│   │   │   ├── router.py         # Mounts ALL /v1 routers (includes tips)
+│   │   │   └── endpoints/        # auth, cooperativas, lotes, eventos, verificacion, pagos, sync, evidencias
+│   │   ├── models/dominio.py     # Business rules (state machine) — no I/O
+│   │   ├── schemas/              # Pydantic → input/output validation
+│   │   ├── services/             # lotes, qr, pagos, propinas, evidencias (use cases)
+│   │   ├── repositories/         # Interfaces + in_memory + supabase + payment gateway
+│   │   ├── utils/                # pure helpers (base64url cursor, hashing)
+│   │   └── dependencies.py       # Shared DI (Annotated + Depends)
+│   ├── db/                       # SQL migrations + seed (Supabase/PostgreSQL)
+│   ├── tests/                    # unit/ + integration/ (includes test_contrato_api.py)
 │   └── pyproject.toml
-├── mobile/                     # React Native (Expo Router)
-│   ├── app/                    # Screens (registration, lot, QR, sync...)
+├── supabase/                   # Local Supabase config
+│   ├── migrations -> ../Backend/db/migrations   # symlink to the migrations
+│   ├── functions/purge-staged-evidence/         # daily purge Edge Function
+│   └── tests/                  # pgTAP (RLS, Storage, rate limit)
+├── mobile/                     # React Native (Expo Router) — see §7
+│   ├── app/                    # Screens (login, register, dashboard, verify, market...)
 │   ├── src/
 │   │   ├── components/         # Reusable UI components
-│   │   ├── api/                # HTTP client (per module)
-│   │   ├── db/                 # Local SQLite (expo-sqlite / WatermelonDB)
-│   │   └── supabase/           # Supabase client (Auth, reads)
-│   └── sync/                   # Offline operation queue
-├── contracts/                  # Solidity (Foundry)
-│   ├── src/CoffeePayments.sol  # ← Main contract
-│   ├── src/interfaces/
-│   ├── test/                   # Contract tests
-│   └── script/                 # Deployment to Polygon (testnet/mainnet)
-├── db/                         # SQL migrations + seed
+│   │   ├── api/                # HTTP client (auth, lots, sync, evidence)
+│   │   ├── offline/            # SQLite + NetInfo (cache, FIFO queue, attachments)
+│   │   ├── evidencia/          # Photo capture/normalization (JPEG + SHA-256)
+│   │   ├── store/              # Auth state (zustand) + JWT util
+│   │   ├── storage/            # SecureStore (tokens)
+│   │   └── theme/              # "Copa de cata" design tokens
+│   └── package.json            # scripts: start, lint, typecheck
+├── .opencode/                  # Agent config (login-flow = project memory)
+├── AGENTS.md                   # ← Persistent memory and docs↔code alignment rules
 └── README.md
 ```
+
+> **`contracts/` (Solidity) and a root `db/` do NOT exist yet.** Web3 is paused
+> (debt B7): the contract design lives in `docs/06-contratos.md` and the fake
+> gateway simulates it in development. The real DB lives in `Backend/db/`.
+> The source of truth for the real structure is this monorepo (not the old
+> sections of this document or the root README).
 
 ---
 
@@ -152,7 +157,7 @@ stateDiagram-v2
        - Producer, farm
        - Variety
        - Weight (kg)
-       - Evidence (url + sha256)
+       - Evidence (id → private Storage)
        - Generates UNIQUE lot code
     end note
     note right of VENDIDO
@@ -175,7 +180,7 @@ stateDiagram-v2
 
 | Transition | EventType | Required action | Fields checked |
 |---|---|---|---|
-| `→ CEREZA` | `COSECHA` | Creates the lot (aggregate) | `variedad`, `peso_kg`, `evidencia_url`, `evidencia_sha256`, `actor_id` |
+| `→ CEREZA` | `COSECHA` | Creates the lot (aggregate) | `variedad`, `peso_kg`, `evidencia_id`, `actor_id` |
 | `CEREZA → CEREZA` | `LIMPIEZA` | Cherry cleaning | `peso_kg`, `actor_id` |
 | `CEREZA → PERGAMINO` | `DESPULPADO` | Pulping | `merma_pct`, `peso_kg`, `metodo_beneficiado` (lavado/semilavado/honey/natural), `metodo_fermentacion`, `actor_id` |
 | `PERGAMINO → PERGAMINO` | `FERMENTACION` | Controlled fermentation | `metodo_fermentacion`, `horas`, `pH`/`Brix` (optional), `actor_id` |
@@ -405,6 +410,7 @@ erDiagram
     QR_CERTIFICATE ||--o{ VERIFICATION : "scans (1-N)"
     LOT |o--o| PAYMENT : "settles (0-1)"
     LOT ||--o{ TIP : "receives (1-N)"
+    LOT |o--o| EVIDENCE : "evidence (0-1)"
 
     USERS {
         uuid id PK
@@ -520,6 +526,19 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
+    EVIDENCE {
+        uuid id PK "= upload Idempotency-Key"
+        uuid lote_id "no FK: uploaded before the lot exists"
+        uuid finca_id FK "FARM"
+        uuid uploader_id FK "USERS"
+        text storage_key "path in the private bucket"
+        char64 sha256
+        text content_type "image/jpeg|png|webp"
+        int size_bytes "<= 5242880"
+        enum estado "PENDIENTE|ADJUNTA|ELIMINADA"
+        timestamptz creado_en
+        timestamptz adjuntada_en
+    }
 ```
 
 ### Conceptual Entity-Relationship Diagram (Chen notation)
@@ -585,6 +604,7 @@ flowchart LR
         A1[Producer at the farm] -->|weight, date, altitude| A
         A2[Dry mill] -->|loss, green weight| A
         A3[Roaster] -->|roasting, lot| A
+        A4[Phone camera] -->|JPEG photo + sha256| A
     end
 
     subgraph Storage [🗄️ Data layer]
@@ -594,6 +614,8 @@ flowchart LR
         A --> QR[QR_CERTIFICATE]
         A --> PAY[PAYMENTS]
         A --> TIP[TIPS]
+        A --> EVID[EVIDENCE]
+        A --> STOR[(Private Storage)]
     end
 
     subgraph Consumers [🔎 Consumers]
@@ -601,10 +623,13 @@ flowchart LR
         B2[Consumer - scans QR] --> QR
         B3[Buyer - tip] --> TIP
         B4[Polygon - confirms payment] --> PAY
+        B5[Phone - signed URL] --> STOR
     end
 
     style A fill:#bbdefb
 ```
+
+> **Evidence (ADR-14).** The phone **never** writes to Postgres or Storage: it uploads the binary to `POST /v1/evidencias` (multipart) and FastAPI stores it in the **private** bucket `evidencias-lotes` with `service_role`, creating the `EVIDENCE` row in `PENDIENTE` state. When the lot is created with `evidencia_id`, the backend copies `evidencia_url`/`evidencia_sha256` **from the row** (not from the request body) and marks it `ADJUNTA`. Reads use a short-lived signed URL (`GET /v1/lotes/{lote_id}/evidencia`).
 
 ### Domain diagram (Class) — who owns each piece of data
 
@@ -660,7 +685,7 @@ flowchart LR
 - **ENUM** for `state` and `type` (not loose VARCHAR) → prevents invalid states in the DB.
 - **`TIMESTAMPTZ`** on every date (UTC): never a timezone-less `TIMESTAMP`.
 - **CHECK constraints**: `loss_pct >= 0`, `weight_kg > 0`, `commission_pct BETWEEN 0 AND 100` → integrity is also validated at the DB level, not just in the API.
-- **UUID** as PK with `gen_random_uuid()` → supports offline-generated ids without collisions.
+- **UUID** as PK (generated on the client) → supports offline-generated ids without collisions; the server never assumes the id arrives "empty".
 - **`lot_events` is immutable**: no UPDATE/DELETE, INSERT only.
 - Composite index to query history in order:
   `CREATE INDEX idx_lot_events_lot_time ON lot_events (lot_id, registered_at DESC);`
@@ -677,7 +702,7 @@ flowchart LR
 ```
 ┌───────────────────────────────────────────────────────────┐
 │ 1. Presentation layer (routers)                             │
-│    - Exposes REST endpoints (/lots, /events, ...)          │
+│    - Exposes REST endpoints (/lotes, /eventos, ...)         │
 │    - Receives the request and returns the response as DTO  │
 │    - Doesn't know how an event is processed                │
 ├───────────────────────────────────────────────────────────┤
@@ -712,30 +737,40 @@ flowchart LR
 **Scope notes:**
 - **Weather/Status of the Day** is a **decorative** dashboard widget: computed on the client from already available data; **it has no dedicated endpoint** (ADR-13).
 - **Market** is a **read-only projection** (`GET`): materialized by the backend; the app never writes to it (ADR-9).
-- The buyer reads payments/tips (`GET /v1/payments`, `POST /v1/tips`) and the producer sees their balance (`GET /v1/payments/saldo`); `GET /v1/me` resolves the real role from `USERS` via `auth.uid()`.
+- **Photographic evidence** (ADR-14): `POST /v1/evidencias` uploads the binary to the private bucket (multipart) and returns its `id` (= `Idempotency-Key`); the lot references it via `evidencia_id` and the backend copies `evidencia_url` + `evidencia_sha256` **from the row**, never from the body. `GET /v1/lotes/{lote_id}/evidencia` signs a 600 s URL. The phone never talks to Storage or Postgres.
+- The sale (`POST /v1/pagos`) and history (`GET /v1/pagos`) belong to the **cooperative**; the balance (`GET /v1/pagos/saldo`) belongs to the **producer** (or admin), consistent with the §10 matrix where `pago` is the producer's read over their lots; the tip is written by the **buyer** (`POST /v1/propinas`) and read by the **lot owners** (producer, cooperative, buyer of the sale) and admin (`GET /v1/propinas/lote/{lote_id}`); `GET /v1/auth/me` resolves the real role from `USUARIOS` via `auth.uid()`.
 
 **API design (REST best practices applied with the FastAPI skill):**
 
 | Method | Route | What it does | Idempotency | Codes |
 |---|---|---|---|---|
-| `POST` | `/v1/lots` | Create a lot in CEREZA state (variety, method, weight, evidence) | No (returns id) | `201` · `400` · `422` |
-| `POST` | `/v1/lots/{id}/events` | Register a transition/sub-stage (11 types) | `Idempotency-Key` | `201` · `409` · `422` |
-| `GET` | `/v1/lots/{id}` | Query lot + history | Yes | `200` · `404` |
-| `GET` | `/v1/lots` | List lots (cursor-paginated) | Yes | `200` · `400` |
-| `GET` | `/v1/verify/{qr_code}` | **Coffee Passport** public verification (no auth) | Yes | `200` · `404` · `409` |
-| `GET` | `/v1/payments` | Query payments (read) | Yes | `200` |
-| `GET` | `/v1/payments/saldo` | Producer balance/status | Yes | `200` |
-| `POST` | `/v1/tips` | Register buyer tip (idempotent, bivalent) | `Idempotency-Key` | `201` · `409` · `422` |
-| `GET` | `/v1/me` | Authenticated user profile | Yes | `200` |
-| `POST` | `/v1/sync` | Batch of offline operations | Yes (reuses ids) | `202` · `207` |
 | `POST` | `/v1/auth/login` | Login (Supabase JWT) | No | `200` · `401` |
+| `POST` | `/v1/auth/register` | Register a user | No | `200` · `409` · `422` |
 | `POST` | `/v1/auth/refresh` | Refresh token | No | `200` · `401` |
+| `POST` | `/v1/auth/recover` | Request password recovery (uniform response, no account enumeration) | No | `200` |
+| `POST` | `/v1/auth/recover/confirm` | Set the new password with a one-time token | No | `200` · `401` · `422` |
+| `GET` | `/v1/auth/me` | Authenticated user profile (resolves the real role via `auth.uid()`) | Yes | `200` |
 | `GET` | `/v1/cooperativas` | List cooperatives (admin) | Yes | `200` · `403` |
-| `POST` | `/v1/auth/refresh` | Refresh token | No | `200` · `401` |
-| `GET` | `/v1/cooperatives` | List cooperatives (admin) | Yes | `200` · `403` |
+| `GET` | `/v1/compradores` | Buyer directory (cooperative/admin, to choose `comprador_id` on sale) | Yes | `200` · `403` |
+| `GET` | `/v1/fincas` | Authenticated user's farms (resolves `finca_id` for lot creation) | Yes | `200` · `403` |
+| `POST` | `/v1/evidencias` | Upload private photo to the bucket (multipart: `finca_id`, `lote_id`, `archivo`) | `Idempotency-Key` | `201` · `403` · `422` |
+| `POST` | `/v1/lotes` | Create a lot in CEREZA state (variety, method, weight, `evidencia_id`) | No (returns id) | `201` · `400` · `403` · `422` |
+| `POST` | `/v1/lotes/{lote_id}/eventos` | Register a transition/sub-stage (11 types) | `Idempotency-Key` | `201` · `409` · `422` |
+| `GET` | `/v1/lotes/{lote_id}` | Query lot + history | Yes | `200` · `404` |
+| `GET` | `/v1/lotes/{lote_id}/evidencia` | Temporary signed URL of the attached evidence | Yes | `200` · `403` · `404` |
+| `GET` | `/v1/lotes` | List lots (cursor-paginated) | Yes | `200` · `400` |
+| `GET` | `/v1/verificar/{codigo}` | **Coffee Passport** public verification (no auth) | Yes | `200` · `404` · `409` |
+| `GET` | `/v1/mercado/{lote_id}` | **Fair Trade Panel**: read-only 97/3 projection + tips (ADR-9) | Yes | `200` · `403` · `404` |
+| `POST` | `/v1/pagos` | Sale + on-chain payment trigger 3%/97% | `Idempotency-Key` | `202` · `409` · `422` |
+| `GET` | `/v1/pagos` | Cooperative payment history (cursor) | Yes | `200` · `403` |
+| `GET` | `/v1/pagos/saldo` | Producer balance (97% of confirmed sales + tips) | Yes | `200` · `403` |
+| `POST` | `/v1/propinas` | Register buyer tip (idempotent, bivalent) | `Idempotency-Key` | `201` · `409` · `422` |
+| `GET` | `/v1/propinas/lote/{lote_id}` | List a lot's tips (tenant read: lot owners + admin) | Yes | `200` · `403` · `404` |
+| `POST` | `/v1/sync` | Batch of offline operations (producer/cooperative/admin) | Yes (reuses ids) | `202` · `207` |
+| `GET` | `/health` | Health check (outside `/v1`) | Yes | `200` |
 
 **Applied rules:**
-- Resources in plural (`/lots`, `/events`); nesting only for real hierarchies (`/lots/{id}/events`).
+- Resources in plural (`/lotes`, `/eventos`); nesting only for real hierarchies (`/lotes/{lote_id}/eventos`).
 - Transitions and payments are **actions** → `POST`, not a `PUT` on state; `Idempotency-Key` is used so an offline retry doesn't duplicate the event.
 - No `DELETE` in traceability: physically it's "cancelled" via the `RECHAZADO` state (history is kept).
 - URL versioning (`/v1/`): field phones don't update the same day; the old API version must keep working.
@@ -752,7 +787,7 @@ sequenceDiagram
     participant DB as Supabase (Postgres)
     participant SC as CoffeePayments (Polygon)
 
-    P->>API: POST /v1/lots/{id}/events (CEREZA→PERGAMINO)
+    P->>API: POST /v1/lotes/{lote_id}/eventos (CEREZA→PERGAMINO)
     API->>DB: Validate JWT + current lot state
     DB-->>API: state OK (CEREZA)
     alt Transition allowed
@@ -784,6 +819,7 @@ sequenceDiagram
 | Responsibility | What it does | Where it lives |
 |---|---|---|
 | Register harvest/events | Field capture, on-device validation | Screens + forms |
+| Capture evidence | Camera/gallery, normalize to JPEG and compute SHA-256 | `src/evidencia/` + wizard |
 | Offline logic | Writes to local SQLite first, queues, and syncs | `db` + `sync` sublayers |
 | View a lot's history | Shows the state machine visually | Detail screen |
 | Scan / show QR | Generation and verification with the consumer | QR screen |
@@ -811,6 +847,11 @@ sequenceDiagram
 │ Local repository (SQLite)                     │
 │   - reads ALWAYS from local (cache)           │
 │   - pending operations queue (sync_queue)     │
+│   - `attachments`: photos on disk + metadata  │
+├───────────────────────────────────────────────┤
+│ Evidence capture (`src/evidencia/`)           │
+│   - camera/gallery → JPEG 2048px q0.82        │
+│   - persists outside cache + SHA-256          │
 ├───────────────────────────────────────────────┤
 │ Network client (HTTP to FastAPI)              │
 │   - sends operations online or in batch       │
@@ -873,12 +914,21 @@ On reconnect (NetInfo / retry with backoff) -->
    the app marks each one as 'ok' or 'conflict' (LWW)
 ```
 
+> **"Queue first" flow (same online/offline).** The app does not try to upload
+> immediately: it queues the operation in SQLite (optimistic projection with
+> `pendiente: true`) and the engine runs it in FIFO order. For a harvest with a
+> photo, the queue holds `subir_evidencia` first (to `POST /v1/evidencias`) and
+> then `registrar_cosecha` (to `/v1/sync`), so the lot never references a photo
+> that does not exist yet. The engine is *single-flight*: there are never two
+> concurrent flushes.
+
 #### Key design decisions (offline)
 
 | Decision | Rule |
 |---|---|
 | Ids | UUIDs generated **on the phone** (avoids primary key conflicts) |
 | Local queue | `sync_queue` table (typed operation + payload + status) |
+| Evidence | `attachments` table (photo persisted outside cache): the engine uploads the photo (`subir_evidencia`) **before** creating the lot, keeps the file until the lot references it and deletes it on confirmation; discarding drags the lot+photo pair |
 | Reads | Always from local SQLite → the UI never "freezes" |
 | Retries | Exponential backoff + notification on reconnect |
 | Conflicts | LWW (*last-write-wins*) by `updated_at` |
@@ -913,7 +963,7 @@ sequenceDiagram
 
 - The QR encodes the lot's `code` + `sha256_hash` root (it doesn't expose the full history in the QR itself; the API supplies that on validation).
 - The passport displays **rich traceability data**: producer, farm (municipality + altitude), **variety**, **processing method**, harvest date, **final humidity**, **SCA score**, current state and process history as a **per-stage hash timeline** (CEREZA → PERGAMINO → ORO → TOSTADO, including sub-stages).
-- On scan → `GET /v1/verify/{code}` (no authentication).
+- On scan → `GET /v1/verificar/{codigo}` (no authentication).
 - Responses:
   - **Valid**: the Coffee Passport with lot data + event timeline with its `stage_hash`.
   - **Not found** → HTTP 404.
@@ -930,7 +980,7 @@ sequenceDiagram
     participant DB as Supabase
 
     C->>C: Scans QR (code + hash in the code)
-    C->>API: GET /v1/verify/{code} (no auth)
+    C->>API: GET /v1/verificar/{codigo} (no auth)
     API->>DB: SELECT qr_certificate WHERE code=?
     alt Not found
         API-->>C: 404 Code not found
@@ -957,7 +1007,7 @@ sequenceDiagram
 
     Con->>App: Opens verify/ (no login)
     App->>App: Camera scans QR (code + hash)
-    App->>API: GET /v1/verify/{code}
+    App->>API: GET /v1/verificar/{codigo}
     API->>DB: SELECT qr_certificate WHERE code=?
     alt Not found
         API-->>App: 404
@@ -979,6 +1029,8 @@ sequenceDiagram
 
 ## 9. Blockchain and payments (Solidity / Polygon)
 
+> **v1 MVP status**: the on-chain flow is **designed** here and in `docs/06-contratos.md`, but the web3 integration is **paused** (debt B7: the backend wallet and a deployed contract are missing). The real Supabase project is already connected (auth + data + Storage) and the MVP runs `FakeGatewayPagos` (deterministic tx `0x<payment.id>` and simulated confirmation) which already implements the 3%/97% pattern and the `PENDING → CONFIRMED` poller. The producer's wallet (`public_address` in `USUARIOS`) will be persisted when web3 resumes.
+
 ### Responsibility of the `CoffeePayments.sol` Smart Contract
 
 Sole responsibility: payment and transaction immutability (*single responsibility*).
@@ -990,7 +1042,7 @@ Sole responsibility: payment and transaction immutability (*single responsibilit
 
 ### Fair Trade Panel (read-only projection)
 
-The **Fair Trade Panel** is a read-only view of the lot's payment breakdown: **97% to the producer, 3% to the cooperative's operation**. It is rendered from the backend (`GET /v1/payments`, `GET /v1/payments/saldo`) and optionally supplemented with **tips** (`POST /v1/tips`, `GET /v1/tips`). The panel never writes directly to the contract; all mutations go through the backend (ADR-9).
+The **Fair Trade Panel** is a read-only view of the lot's payment breakdown: **97% to the producer, 3% to the cooperative's operation**. It is rendered from the backend (`GET /v1/pagos`, `GET /v1/pagos/saldo`) and optionally supplemented with **tips** (`POST /v1/propinas`, `GET /v1/propinas/lote/{lote_id}`). The panel never writes directly to the contract; all mutations go through the backend (ADR-9).
 
 ### Per-stage hash anchoring (ADR-11)
 
@@ -1038,20 +1090,45 @@ sequenceDiagram
 
 ## 10. Roles and permissions (Supabase RLS + JWT)
 
-Roles are modeled in the **`USERS.role`** table (`producer | cooperative | buyer | admin`). The end consumer **has no account** in the system: they verify via the public `/verify` endpoint (no token).
+Roles are modeled in the **`USERS.role`** table (`producer | cooperative | buyer | admin`). The end consumer **has no account** in the system: they verify via the public `/v1/verificar/{codigo}` endpoint (no token).
 
 | Role | Read | Write | Has an account? |
 |---|---|---|---|
-| **producer** | Their farms and lots | Events on their lots | Yes |
+| **producer** | Their farms, their lots and their balance (`/pagos/saldo`) | Events on their lots | Yes |
 | **cooperative** | All lots from their farms | Manage lots, producers, payments | Yes |
-| **buyer** | Verifiable lots (public QR), Fair Trade Panel, tips | Tips (`POST /v1/tips`) | Yes |
-| **consumer** | Only public QR `/verify` | — | No |
-| **admin** | Everything | Configuration, cooperatives | Yes |
+| **buyer** | Verifiable lots (public QR) **+ fair trade/tips** | Tips on sold lots | Yes |
+| **consumer** | Only public QR `/v1/verificar/{codigo}` | — | No |
+| **admin** | Everything | Configuration, cooperatives, lots/events (incl. `/v1/sync`) | Yes |
 
 - **Authentication**: Supabase Auth (email/password, or *magic link* for producers without email). Supabase's `auth.uid()` **is** `USERS.id` (same UUID linked at registration).
 - **Authorization**: PostgreSQL RLS — policies resolve the role from `USERS` and restrict by ownership (`PRODUCER` of the farm, `COOPERATIVE` of the farm, `BUYER` of the tip) **without trusting client-supplied IDs**; additionally the `get_current_user` dependency in FastAPI enforces the same check at the API level.
-- **TIP table** has its own RLS policy: the producer sees what reaches their farm, the buyer sees what they gave, admin sees everything.
-- **Tenant isolation** ALWAYS filters by `auth.uid()` (the JWT's `user.id`), never by a query parameter. Today the Supabase repos use the service key (RLS is inert — TODO B11 in `dependencies.py`), but the documented policy must be correct.
+
+**Real state (MVP):**
+- **Per-user effective RLS (B11 advances).** Authenticated endpoints build their repositories with a Supabase client carrying the user's JWT (`get_supabase_user_client`: anon key + `Authorization: Bearer <jwt>`, no `auth.set_session`), so Postgres evaluates the policies for real. `AuthenticatedRequest` is the **only** dependency that validates the JWT. `service_role` is reserved for system tasks: internal auth (login/refresh/profile) and public verification (`LoteServiceDep` vs `PublicLoteServiceDep`). The service layer keeps its tenancy check as defense in depth (e.g. `PropinaService.listar_propinas_lote`).
+- The policies live in `Backend/db/migrations/006_hardening_storage_rls_rate_limit.sql`: they recreate **all** rules on top of `app_private.bean_rol()` (security definer, fixed `search_path`) and revoke direct `anon`/`authenticated` grants, keeping only the necessary ones.
+- **Private photographic evidence** (ADR-14) implemented: `POST /v1/evidencias` validates MIME + *magic bytes* + size (5 MB), computes SHA-256, uploads to the **private** bucket `evidencias-lotes` with `service_role` and creates the `PENDIENTE` row; lot creation (`evidencia_id`) copies `evidencia_url`/`evidencia_sha256` from the row and marks it `ADJUNTA`. `GET /v1/lotes/{lote_id}/evidencia` returns a signed URL (~10 min). The `public.evidencias` table (migration 006) has no grants to `anon`/`authenticated`: only the backend administers it.
+- **Shared rate limit**: `InMemoryRateLimitRepo` (dev/CI) or `SupabaseRateLimitRepo` (RPC `bean_consume_rate_limit` over `app_private.rate_limit_bucket`); `limitar_login` signs an HMAC-SHA256 of `ip|route` and applies it on `/login`, `/register`, `/refresh`, `/recover` and `/recover/confirm`.
+- **Rotating refresh (local provider)**: every refresh carries `jti` + `family`; reusing a consumed `jti` revokes the family, and `restablecer_password` revokes the user's sessions. In production Supabase Auth remains the one that rotates.
+
+### RLS permission matrix (per table)
+
+| Table | producer | cooperative | buyer | admin |
+|---|---|---|---|---|
+| `usuarios` | own (read) | own (read) | own (read) | all |
+| `cooperativa` | — | — | — | read |
+| `finca` | own (read) | own + their producers' (read) | — | all |
+| `lotes` | their farms' | their farms' | — (only `/verificar`) | all |
+| `lote_eventos` | their lots' (append-only) | their lots' (append-only) | — | all |
+| `qr_certificado` | their lots' | their lots' | — | all |
+| `pago` | their lots' (read) | own (write) | read (lot's fair trade) | all |
+| `propina` | their lots' (read) | their lots' (read) | own (write) + read | all |
+| `verificacion` | their lots' | their lots' | — | all |
+| `evidencias` | — | — | — | — (backend only with `service_role`; no grants to `anon`/`authenticated`) |
+| `storage.objects` | — | — | — | — (RLS enabled **without policies** for `anon`/`authenticated`; only `service_role` uploads/signs/deletes in the private `evidencias-lotes` bucket) |
+
+**Tenant isolation:** every RLS policy is resolved **always** from `auth.uid()` → `USERS.id` of the JWT (never from a client-supplied ID), through `app_private.bean_rol()` (security definer). The `PROPINA` policy is **its own**: insert only if the JWT matches `comprador_id`, and read only if the user is `comprador_id`, `productor_id`, the lot's cooperative, or admin.
+
+The matrix is implemented in `Backend/db/migrations/002_rls.sql` and **recreated** by `006_hardening_storage_rls_rate_limit.sql` (which also moves the helper to `app_private`, adjusts grants and protects `storage.objects`); it is the same rule the service layer replicates in FastAPI (double control, §12).
 
 ---
 
@@ -1073,7 +1150,7 @@ Below, ADRs 9–14 in the standard format **Context → Decision → Options Con
 ### ADR-9 — Market as a read-only projection
 
 - **Context:** the app and passport need to show offers/fair trade of the coffee; writing that view from the mobile would break the source of truth and tenant isolation.
-- **Decision:** the market is a **read-only projection** materialized by the backend (from `LOT`, `PAYMENT`, `TIP`); there is no `POST /market`.
+- **Decision:** the market is a **read-only projection** materialized by the backend (from `LOT`, `PAYMENT`, `TIP`); there is no `POST /mercado`.
 - **Options considered:** (a) direct write from mobile to market — rejected: breaks RLS; (b) materialized SQL view with refresh — rejected: complexity in MVP; (c) **projection calculated in the service** — chosen.
 - **Consequences:** offer and Fair Trade Panel views are always consistent; no role writes the market; minimal latency since it's a simple calculation.
 
@@ -1105,12 +1182,12 @@ Below, ADRs 9–14 in the standard format **Context → Decision → Options Con
 - **Options considered:** (a) dedicated endpoint — rejected: cost without value; (b) client-side calculation — chosen.
 - **Consequences:** zero error surface; the backend never stores decorative UI (§12).
 
-### ADR-14 — Photographic evidence (Storage, url + sha256, outside the canonical hash)
+### ADR-14 — Photographic evidence (private Storage, id + sha256, outside the canonical hash)
 
-- **Context:** traceability requires visual backup (field photos of the lot).
-- **Decision:** evidence uploads to **Supabase Storage**; `LOT` stores `evidence_url` + `evidence_sha256`. The evidence **stays outside the canonical per-stage hash**: the hash covers the event's structured data, not binaries.
-- **Options considered:** (a) inside the canonical hash — rejected: makes the hash fragile to re-uploads and heavy; (b) url + sha256 outside the hash — chosen; (c) no evidence — rejected: doesn't meet the technical memory.
-- **Consequences:** the photo is verifiable by its `sha256` (binary integrity) without bloating the chain; the passport can link to it when displaying the lot.
+- **Context:** traceability requires visual backup (field photos of the lot) and the binary must not be accessible to users nor mixed into the data hash.
+- **Decision:** evidence uploads to a **private** Supabase Storage bucket (`evidencias-lotes`, 5 MB, JPEG/PNG/WebP) via `POST /v1/evidencias` (multipart). The phone never touches Storage: the backend validates MIME + *magic bytes* + size, computes SHA-256, uploads with `service_role` and creates the `public.evidencias` row (`PENDIENTE`). The lot references the photo by `evidencia_id` (not by URL); on attach, the backend copies `evidencia_url`/`evidencia_sha256` **from the row** and marks it `ADJUNTA`. Reads use a temporary signed URL (`GET /v1/lotes/{lote_id}/evidencia`). The evidence **stays outside the canonical per-stage hash**: the hash covers the event's structured data, not binaries.
+- **Options considered:** (a) inside the canonical hash — rejected: makes the hash fragile to re-uploads and heavy; (b) public URL — rejected: exposes the photo; (c) private bucket + id/sha256 outside the hash — chosen; (d) no evidence — rejected: doesn't meet the technical memory.
+- **Consequences:** the photo is verifiable by its `sha256` (binary integrity) without bloating the chain; access is mediated by the backend and the table has no grants to `anon`/`authenticated`; orphaned `PENDIENTE` objects are purged daily (migration 007 + Edge Function).
 
 ---
 
@@ -1133,13 +1210,13 @@ Below, ADRs 9–14 in the standard format **Context → Decision → Options Con
 - Application services = behavior layer; routers = presentation only (see §4 OOP and §6).
 
 ### Database (PostgreSQL / Supabase)
-- ENUM for states, `TIMESTAMPTZ`, CHECK constraints, `gen_random_uuid()` UUIDs.
+- ENUM for states, `TIMESTAMPTZ`, CHECK constraints, UUIDs generated on the client (offline-first).
 - `lot_events` as **append-only** (no UPDATE/DELETE).
 - Indexes for the most common queries (QR code lookup, per-lot history).
 - RLS per cooperative; the app never sees another cooperative's rows (Supabase best-practices skill).
 - **Read-model / projection**: market and Fair Trade Panel are materialized in the service (read-only) — never written from the mobile (ADR-9).
 - **Per-stage hash**: `lot_events.stage_hash` in linear chain; the root lives in `qr_certificate.sha256_hash` and is recalculated on verification (ADR-11).
-- **Photographic evidence**: `evidence_url` + `evidence_sha256` on `LOT` (Storage); outside the canonical hash (ADR-14).
+- **Photographic evidence**: private bucket `evidencias-lotes` + `EVIDENCE` table (metadata); `LOT` stores `evidencia_url` + `evidencia_sha256` copied from the row; outside the canonical hash (ADR-14).
 
 ### Backend (FastAPI / Python)
 - **Do not persist decorative UI**: the Status of the Day is computed on the client; the backend never stores presentation fields (ADR-13).

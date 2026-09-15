@@ -61,8 +61,8 @@ Modelo de negocio (B2B2C): el productor **no paga**. Pagan las cooperativas (sus
 ### Separación de responsabilidades (decisión modular)
 
 - **FastAPI** es la única puerta que valida las reglas de negocio y la única que conoce la máquina de estados del café. **La app jamás escribe directo en la base de datos**.
-- **Supabase** es la fuente de verdad relacional (PostgreSQL) + Auth + Row Level Security (RLS) + Storage de QR (Backend-as-a-Service).
-- **Smart Contracts (Polygon)**: solo contienen el *flujo de dinero*, nunca la lógica de negocio completa.
+- **Supabase** es la fuente de verdad relacional (PostgreSQL) + Auth + Row Level Security (RLS) + Storage (bucket **privado** de evidencias; la app nunca habla con Storage, solo con FastAPI).
+- **Smart Contracts (Polygon)**: solo contienen el *flujo de dinero*, nunca la lógica de negocio completa. **Web3 está en pausa** (B7): el MVP usa `FakeGatewayPagos`.
 
 | Componente | Rol | Quién lo consume |
 |---|---|---|
@@ -98,12 +98,18 @@ BeanTrust/
 │   ├── db/                       # Migraciones SQL + seed (Supabase/PostgreSQL)
 │   ├── tests/                    # unit/ + integration/ (incluye test_contrato_api.py)
 │   └── pyproject.toml
+├── supabase/                   # Configuración local de Supabase
+│   ├── migrations -> ../Backend/db/migrations   # symlink a las migraciones
+│   ├── functions/purge-staged-evidence/         # Edge Function de purga diaria
+│   └── tests/                  # pgTAP (RLS, Storage, rate limit)
 ├── mobile/                     # React Native (Expo Router) — ver §7
 │   ├── app/                    # Pantallas (login, registro, dashboard, verificar, mercado...)
 │   ├── src/
 │   │   ├── components/         # Componentes UI reutilizables
-│   │   ├── api/                # Cliente HTTP (auth, lotes, sync)
-│   │   ├── store/              # Estado de auth (zubstand) + JWT util
+│   │   ├── api/                # Cliente HTTP (auth, lotes, sync, evidencias)
+│   │   ├── offline/            # SQLite + NetInfo (caché, cola FIFO, attachments)
+│   │   ├── evidencia/          # Captura/normalización de foto (JPEG + SHA-256)
+│   │   ├── store/              # Estado de auth (zustand) + JWT util
 │   │   ├── storage/            # SecureStore (tokens)
 │   │   └── theme/              # Tokens del sistema de diseño "Copa de cata"
 │   └── package.json            # scripts: start, lint, typecheck
@@ -150,7 +156,7 @@ stateDiagram-v2
        - Productor, finca
        - Variedad
        - Peso (kg)
-       - Evidencia (url + sha256)
+       - Evidencia (id → Storage privado)
        - Genera CÓDIGO ÚNICO del lote
     end note
     note right of VENDIDO
@@ -173,7 +179,7 @@ stateDiagram-v2
 
 | Transición | TipoEvento | Acción obligatoria | Campos verificados |
 |---|---|---|---|
-| `→ CEREZA` | `COSECHA` | Crea el lote (agregado) | `variedad`, `peso_kg`, `evidencia_url`, `evidencia_sha256`, `actor_id` |
+| `→ CEREZA` | `COSECHA` | Crea el lote (agregado) | `variedad`, `peso_kg`, `evidencia_id`, `actor_id` |
 | `CEREZA → CEREZA` | `LIMPIEZA` | Limpieza en fruta | `peso_kg`, `actor_id` |
 | `CEREZA → PERGAMINO` | `DESPULPADO` | Despulpado del fruto | `merma_pct`, `peso_kg`, `metodo_beneficiado` (lavado/semilavado/honey/natural), `metodo_fermentacion`, `actor_id` |
 | `PERGAMINO → PERGAMINO` | `FERMENTACION` | Fermentación controlada | `metodo_fermentacion`, `horas`, `pH`/`Brix` (opcional), `actor_id` |
@@ -403,6 +409,7 @@ erDiagram
     QR_CERTIFICADO ||--o{ VERIFICACION : "escaneos (1-N)"
     LOTE |o--o| PAGO : "liquida (0-1)"
     LOTE ||--o{ PROPINA : "recibe (1-N)"
+    LOTE |o--o| EVIDENCIAS : "evidencia (0-1)"
 
     USUARIOS {
         uuid id PK
@@ -518,15 +525,29 @@ erDiagram
         timestamptz creado_en
         timestamptz actualizado_en
     }
+    EVIDENCIAS {
+        uuid id PK "= Idempotency-Key de la subida"
+        uuid lote_id "sin FK: se sube antes de crear el lote"
+        uuid finca_id FK "FINCA"
+        uuid uploader_id FK "USUARIOS"
+        text storage_key "ruta en el bucket privado"
+        char64 sha256
+        text content_type "image/jpeg|png|webp"
+        int size_bytes "<= 5242880"
+        enum estado "PENDIENTE|ADJUNTA|ELIMINADA"
+        timestamptz creado_en
+        timestamptz adjuntada_en
+    }
 ```
 
 > **Desviaciones implementadas en el v1 MVP (vs. ERD completo):**
 > - No existen tablas `PRODUCTOR`, `COOPERATIVA`, `COMPRADOR` ni `PRODUCTOR_COOPERATIVA` como tablas propias. El rol y la entidad vinculada viven en `USUARIOS` (columna `rol` + FK `finca_id`/`cooperativa_id`/`comprador_id`); `FINCA.productor_id` referencia directamente `USUARIOS`. Se simplifica el modelo para el MVP y se documenta la migración futura (B7/B11).
-> - `USUARIOS.public_address` (wallet) **no se persiste aún**: depende del milestone de contratos (B11) y de la integración web3 (pausada).
+> - `USUARIOS.public_address` (wallet) **no se persiste aún**: depende de la integración web3 (B7, pausada) y del despliegue del contrato.
 > - `VERIFICACION` usa `lote_id` + `verificado_en` en vez de `qr_id` + `fecha`: un QR certifica un lote 1-1, por lo que el escaneo se ancla al lote directamente.
 > - `LOTE.codigo_publico` no existe como columna: el código público de verificación vive en `QR_CERTIFICADO.codigo`.
 > - Las PK UUID se generan en el cliente (offline-first), no con `gen_random_uuid()`.
 > - El índice real es `idx_lote_eventos_lote` (véase `001_esquema_inicial.sql`).
+> - `EVIDENCIAS` (migración 006) es la metadata de la foto en el bucket privado: sin grants a `anon`/`authenticated`, la administra solo FastAPI con `service_role`. `LOTE.evidencia_url`/`evidencia_sha256` se copian de esta fila al adjuntar (ADR-14).
 
 ### Diagrama Entidad-Relación conceptual (notación Chen)
 
@@ -588,6 +609,7 @@ flowchart LR
         A1[Productor en finca] -->|peso, fecha, altitud| A
         A2[Beneficio seco] -->|merma, kg oro| A
         A3[Tostador] -->|tostado, lote| A
+        A4[Cámara del móvil] -->|foto JPEG + sha256| A
     end
 
     subgraph Almacen [🗄️ Capa de datos]
@@ -597,6 +619,8 @@ flowchart LR
         A --> QR[QR_CERTIFICADO]
         A --> PAG[PAGOS]
         A --> PROP[PROPINA]
+        A --> EVID[EVIDENCIAS]
+        A --> STOR[(Storage privado)]
     end
 
     subgraph Consumidor [🔎 Consumidores]
@@ -604,10 +628,13 @@ flowchart LR
         B2[Consumidor - escanea QR] --> QR
         B3[Comprador - propina] --> PROP
         B4[Polygon - confirma pago] --> PAG
+        B5[Móvil - URL firmada] --> STOR
     end
 
     style A fill:#bbdefb
 ```
+
+> **Evidencia (ADR-14).** El móvil **nunca** escribe en Postgres ni en Storage: sube el binario a `POST /v1/evidencias` (multipart) y FastAPI lo guarda en el bucket **privado** `evidencias-lotes` con `service_role`, creando la fila `EVIDENCIAS` en estado `PENDIENTE`. Al crear el lote con `evidencia_id`, el backend copia `evidencia_url`/`evidencia_sha256` **de la fila** (no del cuerpo) y la marca `ADJUNTA`. La lectura es una URL firmada de ~10 min (`GET /v1/lotes/{lote_id}/evidencia`).
 
 ### Diagrama de dominio (Clase) — de quién es responsable de cada dato
 
@@ -822,6 +849,7 @@ sequenceDiagram
 | Responsabilidad | Qué hace | ¿Dónde vive? |
 |---|---|---|
 | Registrar cosecha/eventos | Captura en campo, valida en el dispositivo | Pantallas + formularios |
+| Capturar evidencia | Cámara/galería, normaliza a JPEG y calcula SHA-256 | `src/evidencia/` + wizard |
 | Lógica offline | Escribe primero en SQLite local, encola y sincroniza | Subcapa `db` + `sync` |
 | Ver el historial de un lote | Muestra la máquina de estados de forma visual | Pantalla de detalle |
 | Escanear / mostrar QR | Generación y verificación con el consumidor | Pantalla de QR |
@@ -849,6 +877,11 @@ sequenceDiagram
 │ Repositorio local (SQLite)                     │
 │   - lecturas SIEMPRE desde el local (caché)    │
 │   - cola de operaciones pendientes (sync_queue)│
+│   - `attachments`: fotos en disco + metadata   │
+├───────────────────────────────────────────────┤
+│ Captura de evidencia (`src/evidencia/`)        │
+│   - cámara/galería → JPEG 2048px q0.82         │
+│   - persiste fuera de cache + SHA-256          │
 ├───────────────────────────────────────────────┤
 │ Cliente de red (HTTP a FastAPI)              │
 │   - envía operaciones online o en lote         │
@@ -911,12 +944,21 @@ Al reconectarse (NetInfo / reintento con backoff) -->
    la app marca cada una como 'ok' o 'conflicto' (LWW)
 ```
 
+> **Flujo "encolar primero" (mismo online/offline).** La app no intenta subir al
+> instante: encola la operación en SQLite (proyección optimista con
+> `pendiente: true`) y el motor la ejecuta en orden FIFO. Para una cosecha con
+> foto, la cola contiene primero `subir_evidencia` (a `POST /v1/evidencias`) y
+> luego `registrar_cosecha` (a `/v1/sync`), de modo que el lote nunca referencia
+> una foto que aún no existe. El motor es *single-flight*: no hay dos flush
+> concurrentes.
+
 #### Decisiones clave de diseño (offline)
 
 | Decisión | Regla |
 |---|---|
 | Ids | UUID generados **en el móvil** (evita conflicto de llaves primarias) |
 | Cola local | Tabla `sync_queue` (operación tipada + payload + estado) |
+| Evidencia | Tabla `attachments` (foto persistida fuera de cache): el motor sube la foto (`subir_evidencia`) **antes** de crear el lote, conserva el archivo hasta que el lote la referencia y lo borra al confirmar; descartar arrastra la pareja lote+foto |
 | Lecturas | Siempre desde SQLite local → la UI nunca "se congela" |
 | Reintentos | Backoff exponencial + notificación al reconectar |
 | Conflictos | LWW (*last-write-wins*) por `updated_at` |
@@ -1019,7 +1061,7 @@ sequenceDiagram
 
 ## 9. Blockchain y pagos (Solidity / Polygon)
 
-> **Estado v1 MVP**: el flujo on-chain está **diseñado** aquí y en `docs/06-contratos.md`, pero la integración web3 está **en pausa** (falta proyecto Supabase real y wallet del backend). En el código se ejecuta `FakeGatewayPagos` (tx determinista `0x<pago.id>` y confirmación simulada) que ya implementa el patrón 3%/97% y el poller `PENDIENTE → CONFIRMADO`. La wallet del productor (`public_address` en `USUARIOS`) se persistirá cuando se retome B11.
+> **Estado v1 MVP**: el flujo on-chain está **diseñado** aquí y en `docs/06-contratos.md`, pero la integración web3 está **en pausa** (deuda B7: falta la wallet del backend y el contrato desplegado). El proyecto Supabase real ya está conectado (auth + datos + Storage) y el MVP ejecuta `FakeGatewayPagos` (tx determinista `0x<pago.id>` y confirmación simulada) que ya implementa el patrón 3%/97% y el poller `PENDIENTE → CONFIRMADO`. La wallet del productor (`public_address` en `USUARIOS`) se persistirá cuando se retome web3.
 
 ### Responsabilidad del Smart Contract `CoffeePayments.sol`
 
@@ -1105,12 +1147,15 @@ Los roles se modelan en la tabla **`USUARIOS.rol`** (`productor | cooperativa | 
 - **Autorización**: RLS en PostgreSQL — las políticas resuelven el rol desde `USUARIOS` y restringen por pertenencia (`PRODUCTOR` de la finca, `COOPERATIVA` de la finca) **sin confiar en IDs enviados por el cliente**; adicionalmente la dependencia `get_current_user` en FastAPI fuerza el mismo chequeo a nivel de API.
 
 **Estado real (MVP):**
-- La matriz RLS de la tabla es el **objetivo de diseño**. Hoy la defensa principal vive en la **capa de servicio** del backend (p.ej. `PropinaService.listar_propinas_lote` valida el tenant de cada lote: productor/cooperativa solo de su finca, comprador solo si compró la venta, admin todo). El RLS de Supabase está definido en `Backend/db/` pero **inerte** hasta la deuda B11 (backend Supabase real).
+- **RLS efectiva por usuario (B11 avanza).** Los endpoints autenticados construyen sus repositorios con un cliente Supabase que lleva el JWT del usuario (`get_supabase_user_client`: anon key + `Authorization: Bearer <jwt>`, sin `auth.set_session`), así que Postgres evalúa las políticas de verdad. `AuthenticatedRequest` es la **única** dependencia que valida el JWT. La `service_role` se reserva para tareas de sistema: auth interna (login/refresh/perfil) y verificación pública (`LoteServiceDep` vs `PublicLoteServiceDep`). La capa de servicio conserva su chequeo de tenancy como defensa en profundidad (p.ej. `PropinaService.listar_propinas_lote`).
+- Las políticas viven en `Backend/db/migrations/006_hardening_storage_rls_rate_limit.sql`: recrean **todas** las reglas sobre `app_private.bean_rol()` (security definer, `search_path` fijo) y revocan los grants directos de `anon`/`authenticated`, concediendo solo los necesarios.
 - `GET /v1/pagos` (historial de la cooperativa, cursor) y `GET /v1/pagos/saldo` (saldo del productor) están **implementados** (B13). El rol se declara por operación: el router de pagos ya no aplica un `require_rol` global, que hacía inalcanzable el saldo. La agregación vive en los repositorios (`total_confirmado_por_productor`).
-- **Evidencia fotográfica privada** (ADR-14) implementada: `POST /v1/evidencias` valida MIME + *magic bytes* + tamaño (5 MB), sube al bucket con `service_role` y crea la fila `PENDIENTE`; el alta de lote copia `evidencia_url`/`evidencia_sha256` de la fila y la marca `ADJUNTA`. La tabla `public.evidencias` (migración 006) no tiene grants a `anon`/`authenticated`: solo el backend la administra.
-- **Móvil (Expo)**: login y refresh consumen el backend real; **register y recover son demo** (sin conexión real). El rol se resuelve con `GET /v1/auth/me`.
+- **Evidencia fotográfica privada** (ADR-14) implementada: `POST /v1/evidencias` valida MIME + *magic bytes* + tamaño (5 MB), calcula SHA-256, sube al bucket **privado** `evidencias-lotes` con `service_role` y crea la fila `PENDIENTE`; el alta de lote (`evidencia_id`) copia `evidencia_url`/`evidencia_sha256` de la fila y la marca `ADJUNTA`. `GET /v1/lotes/{lote_id}/evidencia` devuelve una URL firmada (~10 min). La tabla `public.evidencias` (migración 006) no tiene grants a `anon`/`authenticated`: solo el backend la administra.
+- **Rate limit compartido**: `InMemoryRateLimitRepo` (dev/CI) o `SupabaseRateLimitRepo` (RPC `bean_consume_rate_limit` sobre `app_private.rate_limit_bucket`); `limitar_login` firma un HMAC-SHA256 de `ip|ruta` y aplica en `/login`, `/register`, `/refresh`, `/recover` y `/recover/confirm`.
+- **Refresh rotativo (proveedor local)**: cada refresh lleva `jti` + `family`; reusar un `jti` consumido revoca la familia, y `restablecer_password` revoca las sesiones del usuario. En producción Supabase Auth sigue siendo el que rota.
+- **Móvil (Expo)**: login/refresh/register/recover consumen el backend real; el rol se resuelve con `GET /v1/auth/me`.
 
-**Despliegue real (2026-08-25, cierra B11 en su parte de auth/datos):** el backend
+**Despliegue real (2026-08-25; B11 avanza en su parte de auth/datos):** el backend
 corre en Vercel contra el proyecto Supabase `yvczofwzfljuubxnmakj` con
 `BEAN_AUTH_BACKEND=supabase` y `BEAN_REPO_BACKEND=supabase`, así que la RLS deja
 de ser el único guardián teórico y `auth.uid()` es de verdad el `USUARIOS.id`:
@@ -1125,9 +1170,12 @@ de ser el único guardián teórico y `auth.uid()` es de verdad el `USUARIOS.id`
   propia se quedaría sin finca asociada y no podría registrar lotes, así que
   `POST /v1/auth/register` responde 401 y la pantalla de registro del móvil ya
   no se ofrece desde el login.
-- El backend sigue hablando con Supabase por *service key*, de modo que la RLS
-  queda como defensa en profundidad y la autorización efectiva es la de la capa
-  de servicio (deuda B11 restante: adjuntar el JWT del usuario por operación).
+- Desde el hardening (migración 006 + clientes por request), el backend deja de
+  hablar con Supabase **solo** por *service key*: los endpoints autenticados
+  adjuntan el JWT del usuario por operación y la RLS se evalúa de verdad. La
+  `service_role` queda acotada a auth interna, verificación pública y Storage de
+  evidencias (que no tiene acceso de usuarios). La deuda B11 restante es la
+  wallet `public_address` y los advisors/observabilidad.
 
 ### Flujo de autenticación (diagrama de secuencia)
 
@@ -1167,10 +1215,11 @@ sequenceDiagram
 | `propina` | de sus lotes (lectura) | de sus lotes (lectura) | propias (escritura) + lectura | todo |
 | `verificacion` | de sus lotes | de sus lotes | — | todo |
 | `evidencias` | — | — | — | — (solo backend con `service_role`; sin grants a `anon`/`authenticated`) |
+| `storage.objects` | — | — | — | — (RLS habilitado **sin políticas** para `anon`/`authenticated`; solo `service_role` sube/firma/borra en el bucket privado `evidencias-lotes`) |
 
-**Aislamiento de tenant:** toda política RLS se resuelve **siempre** desde `auth.uid()` → `USUARIOS.id` del JWT (nunca desde un ID enviado por el cliente). La política de `PROPINA` es **propia** de su tabla: insertar solo si el JWT corresponde a `comprador_id`, y leer solo si el usuario es `comprador_id`, `productor_id`, cooperativa del lote o admin.
+**Aislamiento de tenant:** toda política RLS se resuelve **siempre** desde `auth.uid()` → `USUARIOS.id` del JWT (nunca desde un ID enviado por el cliente), mediante `app_private.bean_rol()` (security definer). La política de `PROPINA` es **propia** de su tabla: insertar solo si el JWT corresponde a `comprador_id`, y leer solo si el usuario es `comprador_id`, `productor_id`, cooperativa del lote o admin.
 
-La matriz está implementada en `Backend/db/migrations/002_rls.sql` y es la misma regla que replica la capa de servicio en FastAPI (doble control, §12).
+La matriz está implementada en `Backend/db/migrations/002_rls.sql` y **recreada** por `006_hardening_storage_rls_rate_limit.sql` (que además mueve el helper a `app_private`, ajusta los grants y protege `storage.objects`); es la misma regla que replica la capa de servicio en FastAPI (doble control, §12).
 
 ---
 
@@ -1224,12 +1273,12 @@ A continuación, los ADR 9–14 en el formato estándar **Contexto → Decisión
 - **Opciones consideradas:** (a) endpoint propio — descartado: costo sin valor; (b) cálculo en cliente — elegido.
 - **Consecuencias:** cero superficie de error; el backend nunca guarda UI decorativa (§12).
 
-### ADR-14 — Evidencia fotográfica (Storage, url + sha256, fuera del hash canónico)
+### ADR-14 — Evidencia fotográfica (Storage privado, id + sha256, fuera del hash canónico)
 
-- **Contexto:** la trazabilidad pide respaldo visual (fotos del lote en campo).
-- **Decisión:** la evidencia sube a **Supabase Storage**; `LOTE` guarda `evidencia_url` + `evidencia_sha256`. La evidencia **queda fuera del hash canónico** por etapa: el hash cubre los datos estructurales del evento, no los binarios.
-- **Opciones consideradas:** (a) dentro del hash canónico — descartado: hace el hash frágil a re-uploads y pesado; (b) url + sha256 fuera del hash — elegido; (c) sin evidencia — descartado: no cumple la memoria.
-- **Consecuencias:** la foto es verificable por su `sha256` (integridad del binario) sin inflar la cadena; el pasaporte puede enlazarla al mostrar el lote.
+- **Contexto:** la trazabilidad pide respaldo visual (fotos del lote en campo) y el binario no debe ser accesible a usuarios ni mezclarse con el hash de los datos.
+- **Decisión:** la evidencia sube a un **bucket privado** de Supabase Storage (`evidencias-lotes`, 5 MB, JPEG/PNG/WebP) vía `POST /v1/evidencias` (multipart). El móvil nunca toca Storage: el backend valida MIME + *magic bytes* + tamaño, calcula SHA-256, sube con `service_role` y crea la fila `public.evidencias` (`PENDIENTE`). El lote referencia la foto por `evidencia_id` (no por URL); al adjuntarla el backend copia `evidencia_url`/`evidencia_sha256` **de la fila** y la marca `ADJUNTA`. La lectura es una URL firmada temporal (`GET /v1/lotes/{lote_id}/evidencia`). La evidencia **queda fuera del hash canónico** por etapa: el hash cubre los datos estructurales del evento, no los binarios.
+- **Opciones consideradas:** (a) dentro del hash canónico — descartado: hace el hash frágil a re-uploads y pesado; (b) URL pública — descartado: expone la foto; (c) bucket privado + id/sha256 fuera del hash — elegido; (d) sin evidencia — descartado: no cumple la memoria.
+- **Consecuencias:** la foto es verificable por su `sha256` (integridad del binario) sin inflar la cadena; el acceso está mediado por el backend y la tabla no tiene grants a `anon`/`authenticated`; los objetos `PENDIENTE` huérfanos se purgan a diario (migración 007 + Edge Function).
 
 ---
 
@@ -1252,13 +1301,13 @@ A continuación, los ADR 9–14 en el formato estándar **Contexto → Decisión
 - Servicios de aplicación = capa de comportamiento; routers = solo presentación (ver §4 OOP y §6).
 
 ### Base de datos (PostgreSQL / Supabase)
-- ENUM para estados, `TIMESTAMPTZ`, CHECK constraints, UUID `gen_random_uuid()`.
+- ENUM para estados, `TIMESTAMPTZ`, CHECK constraints, UUID generados en el cliente (offline-first).
 - `lote_eventos` como **append-only** (nada de UPDATE/DELETE).
 - Índices para las consultas más usadas (búsqueda por código QR, historial por lote).
 - RLS por cooperativa; la app nunca ve filas ajenas (skill Supabase best practices).
 - **Read-model / proyección**: el mercado y el Panel Comercio Justo se materializan en el servicio (read-only) — nunca se escriben desde el móvil (ADR-9).
 - **Hash por etapa**: `lote_eventos.hash_etapa` en cadena lineal; la raíz vive en `qr_certificado.hash_sha256` y se recalcula al verificar (ADR-11).
-- **Evidencia fotográfica**: `evidencia_url` + `evidencia_sha256` en `LOTE` (Storage); fuera del hash canónico (ADR-14).
+- **Evidencia fotográfica**: bucket privado `evidencias-lotes` + tabla `EVIDENCIAS` (metadata); `LOTE` guarda `evidencia_url` + `evidencia_sha256` copiados de la fila; fuera del hash canónico (ADR-14).
 
 ### Backend (FastAPI / Python)
 - **No persistir UI decorativa**: el Estado del Día se computa en el cliente; el backend jamás guarda campos de presentación (ADR-13).

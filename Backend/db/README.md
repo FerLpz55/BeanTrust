@@ -12,11 +12,15 @@ db/
 │   ├── 002_rls.sql               # políticas RLS por rol de negocio (§10)
 │   ├── 003_integridad.sql        # append-only de eventos + triggers
 │   ├── 004_cadena_completa_propina.sql  # sub-etapas + propinas
-│   └── 005_sync_auth_usuarios.sql       # espejo auth.users -> usuarios
+│   ├── 005_sync_auth_usuarios.sql       # espejo auth.users -> usuarios
+│   ├── 006_hardening_storage_rls_rate_limit.sql  # app_private.bean_rol + RLS efectiva + evidencias + rate limit
+│   └── 007_evidencias_storage_cron.sql           # bucket privado + cron de purga
 └── seed/
     ├── seed.sql                  # usuarios/fincas de desarrollo (ids fijos)
     └── seed_supabase.sql         # seed de un proyecto Supabase real
 ```
+
+El CLI de Supabase lee estas migraciones por el symlink `supabase/migrations -> ../Backend/db/migrations`. Las pruebas pgTAP viven en `supabase/tests/` (RLS, Storage, rate limit).
 
 ## Convenciones
 
@@ -30,7 +34,14 @@ db/
 - `pago.idempotency_key` es `unique` (desviación documentada del ERD, §9).
 - El disparo de `VENTA` exige un `pago` registrado (PENDIENTE).
 
-## RLS (defensa en profundidad, §10)
+## RLS efectiva (§10)
+
+Desde la migración **006**, la RLS se evalúa de verdad: los endpoints
+autenticados del backend adjuntan el JWT del usuario (cliente `anon` + Bearer) y
+Postgres aplica las políticas. La migración recrea todas las políticas sobre
+`app_private.bean_rol()` (security definer, `search_path` fijo) —ya no existe el
+helper `public.bean_rol()`—, revoca los grants directos de `anon`/`authenticated`
+y concede solo lo necesario; `service_role` (FastAPI) administra el backend.
 
 Cada usuario ve/escribe solo lo suyo:
 
@@ -40,6 +51,31 @@ Cada usuario ve/escribe solo lo suyo:
 | cooperativa| propias + de productores    | de sus fincas               | propias (escritura)    |
 | comprador  | — (verificación pública)   | — (verificación pública)    | —                      |
 | admin      | todas                       | todos                       | todos                  |
+
+`public.evidencias` y `storage.objects` **no tienen acceso de usuarios**: la
+tabla de evidencias no recibe grants y `storage.objects` queda con RLS habilitado
+y sin políticas para `anon`/`authenticated`, así que toda lectura devuelve 0
+filas y toda escritura falla. Solo el backend (`service_role`) sube, firma lectura
+y borra objetos.
+
+## Evidencias: bucket privado, cron y secretos de Vault
+
+- La migración **007** crea el bucket privado `evidencias-lotes` (5 MB, JPEG/PNG/WebP)
+  y programa el cron diario `purge-staged-evidence-daily` (03:00 UTC) que invoca la
+  Edge Function `purge-staged-evidence` (`supabase/functions/`) para borrar objetos
+  `PENDIENTE` huérfanos (fotos que nunca se adjuntaron a un lote).
+- La URL de la función y el secreto interno se leen de **Vault**
+  (`purge_evidence_url`, `purge_evidence_secret`). Si no existen, el job se crea
+  pero falla en ejecución; no rompe la migración. Para darlos de alta:
+
+  ```sql
+  select vault.create_secret('https://<ref>.supabase.co/functions/v1/purge-staged-evidence', 'purge_evidence_url');
+  select vault.create_secret('<secreto-largo-aleatorio>', 'purge_evidence_secret');
+  ```
+
+  El secreto debe coincidir con el que espera la Edge Function. Tras crear o
+  rotar un secreto, vuelve a aplicar la migración 007 para que el job lea el
+  valor nuevo (`cron.schedule` actualiza el job por su nombre).
 
 ## Cómo aplicar
 
@@ -58,6 +94,24 @@ supabase db query --linked --project-ref <ref> -f "$PWD/db/migrations/001_esquem
 Para un proyecto real, después de las migraciones: crear los usuarios en
 Supabase Auth (Admin API, con `email_confirm` y `user_metadata.rol`) y aplicar
 `seed/seed_supabase.sql`, que resuelve los uuid por email en vez de fijarlos.
+
+## Verificación local (lo que corre el CI)
+
+El job `supabase` de `.github/workflows/ci.yml` arranca un Supabase local,
+aplica las migraciones desde cero, corre pgTAP y falla ante cualquier *advisor*
+de tipo error:
+
+```sh
+supabase start          # levanta el stack local
+supabase db reset       # aplica 001–007 + seed desde cero
+supabase test db        # pgTAP: RLS, Storage y rate limit (supabase/tests/)
+supabase db advisors --local --fail-on error
+```
+
+Las pruebas pgTAP (`supabase/tests/rls_roles.test.sql`,
+`storage_evidencias.test.sql`, `rate_limit.test.sql`) cubren la matriz RLS, el
+acceso denegado a `storage.objects`/`evidencias` y la función
+`bean_consume_rate_limit`.
 
 ## Notas de implementación
 
