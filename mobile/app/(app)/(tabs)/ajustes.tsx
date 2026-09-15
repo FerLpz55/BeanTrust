@@ -32,10 +32,14 @@ const ETIQUETA_TEMA: Record<PreferenciaTema, string> = {
 
 /** Etiqueta legible de una operación en cola, sin exponer detalles internos. */
 function etiquetaOperacion(item: RegistroCola): string {
-  if (item.payload.tipo === 'registrar_cosecha') {
-    return `Cosecha ${item.payload.id.slice(0, 8)}`;
+  const payload = item.payload;
+  if (payload.tipo === 'registrar_cosecha') {
+    return `Cosecha ${payload.id.slice(0, 8)}`;
   }
-  return `Evento ${item.payload.evento.tipo} · lote ${item.payload.lote_id.slice(0, 8)}`;
+  if (payload.tipo === 'subir_evidencia') {
+    return `Foto · lote ${payload.lote_id.slice(0, 8)}`;
+  }
+  return `Evento ${payload.evento.tipo} · lote ${payload.lote_id.slice(0, 8)}`;
 }
 
 export default function AjustesScreen() {

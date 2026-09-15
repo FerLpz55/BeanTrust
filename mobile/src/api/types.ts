@@ -135,8 +135,39 @@ export interface LoteCreate {
   peso_kg: number;
   variedad?: string | null;
   metodo_beneficiado?: string | null;
-  evidencia_url?: string | null;
-  evidencia_sha256?: string | null;
+  /**
+   * Evidencia ya subida (`POST /v1/evidencias`) referenciada por id. La url y
+   * el sha256 los resuelve el backend desde la fila, nunca del cuerpo (ADR-14).
+   */
+  evidencia_id?: string | null;
+}
+
+/* ── Evidencia fotográfica privada (ADR-14) ────────────── */
+
+export type TipoImagen = 'image/jpeg' | 'image/png' | 'image/webp';
+export type EstadoEvidencia = 'PENDIENTE' | 'ADJUNTA';
+
+/** Respuesta de `POST /v1/evidencias` (multipart). */
+export interface EvidenciaRead {
+  id: string;
+  lote_id: string;
+  finca_id: string;
+  /**
+   * `storage_key` privado del objeto (no es una URL pública ni firmada): solo
+   * el subidor la necesita para referenciarla luego en el alta del lote.
+   */
+  evidencia_url: string;
+  evidencia_sha256: string;
+  content_type: TipoImagen;
+  size_bytes: number;
+  estado: EstadoEvidencia;
+}
+
+/** Respuesta de `GET /v1/lotes/{lote_id}/evidencia` (URL firmada ~10 min). */
+export interface EvidenciaUrlRead {
+  url: string;
+  expira_en: string;
+  evidencia_sha256: string;
 }
 
 /* ── Paginación por cursor ─────────────────────────────── */

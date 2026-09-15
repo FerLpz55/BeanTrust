@@ -20,7 +20,7 @@ export class ApiError extends Error {
   }
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   token?: string | null;
@@ -30,6 +30,9 @@ interface RequestOptions {
   /** Interno: evita reintentar en bucle tras renovar. */
   _reintentado?: boolean;
 }
+
+/** Construye el `RequestInit` de una petición a partir del token y la señal. */
+type ConstructorPeticion = (token: string | null, signal: AbortSignal) => RequestInit;
 
 /**
  * Puente con el store de auth, inyectado en el arranque para no crear un ciclo
@@ -58,23 +61,15 @@ function renovarUnaVez(): Promise<string | null> {
   return refreshEnCurso;
 }
 
-async function ejecutar(path: string, opciones: RequestOptions, token: string | null) {
-  const { method = 'GET', body, headers, idempotencyKey } = opciones;
+async function ejecutar(
+  path: string,
+  construir: ConstructorPeticion,
+  token: string | null,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
-    return await fetch(`${API_URL}${path}`, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-        ...headers,
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
+    return await fetch(`${API_URL}${path}`, construir(token, controller.signal));
   } finally {
     clearTimeout(timer);
   }
@@ -93,7 +88,15 @@ function detalleDeError(payload: unknown, status: number): string {
   return `Error ${status}`;
 }
 
-export async function apiRequest<T>(path: string, opciones: RequestOptions = {}): Promise<T> {
+/**
+ * Núcleo compartido por `apiRequest` y `apiFormData`: resuelve la sesión,
+ * aplica timeout, renueva una única vez ante un 401 y decodifica el error.
+ */
+async function solicitar<T>(
+  path: string,
+  opciones: RequestOptions,
+  construir: ConstructorPeticion,
+): Promise<T> {
   // `token` explícito gana; si no, se toma la sesión activa. `null` explícito
   // fuerza petición anónima (grupo público `verificar/`).
   const token =
@@ -101,7 +104,7 @@ export async function apiRequest<T>(path: string, opciones: RequestOptions = {})
 
   let response: Response;
   try {
-    response = await ejecutar(path, opciones, token);
+    response = await ejecutar(path, construir, token);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new ApiError(0, 'No se pudo contactar el servidor. Revisa tu conexión.');
@@ -118,7 +121,7 @@ export async function apiRequest<T>(path: string, opciones: RequestOptions = {})
   ) {
     const nuevo = await renovarUnaVez();
     if (nuevo) {
-      return apiRequest<T>(path, { ...opciones, token: nuevo, _reintentado: true });
+      return solicitar<T>(path, { ...opciones, token: nuevo, _reintentado: true }, construir);
     }
     await hooks?.cerrarSesion();
   }
@@ -137,4 +140,47 @@ export async function apiRequest<T>(path: string, opciones: RequestOptions = {})
     throw new ApiError(response.status, detalleDeError(payload, response.status));
   }
   return payload as T;
+}
+
+export function apiRequest<T>(path: string, opciones: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, headers, idempotencyKey } = opciones;
+  return solicitar<T>(path, opciones, (token, signal) => ({
+    method,
+    headers: {
+      Accept: 'application/json',
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      ...headers,
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
+  }));
+}
+
+/**
+ * Petición `multipart/form-data` (ADR-14).
+ *
+ * Regla dura: **nunca** se asigna `Content-Type` a mano. React Native crea el
+ * boundary del multipart a partir del `FormData`; fijar la cabecera rompe la
+ * subida. El resto de la lógica (token, refresh, timeout, errores) es la misma
+ * que la de `apiRequest`.
+ */
+export function apiFormData<T>(
+  path: string,
+  form: FormData,
+  opciones: RequestOptions = {},
+): Promise<T> {
+  const { method = 'POST', headers, idempotencyKey } = opciones;
+  return solicitar<T>(path, opciones, (token, signal) => ({
+    method,
+    headers: {
+      Accept: 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      ...headers,
+    },
+    body: form,
+    signal,
+  }));
 }

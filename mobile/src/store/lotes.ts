@@ -2,16 +2,19 @@
  * Estado de lotes (Zustand) — conectado al backend (F09) y al modo campo
  * offline (§7.5).
  *
- * Online: lee de la API y refresca la caché local. Offline (`ApiError.status
- * === 0`): sirve la caché y encola la operación de forma optimista. Un 4xx/5xx
- * de negocio nunca se disfraza de offline: se propaga tal cual.
+ * **Encolar primero**: toda mutación (alta de lote con/sin foto, avance de
+ * estado) se persiste como operación local y, si hay red, se intenta
+ * sincronizar en el acto. El mismo camino sirve online y offline; el backend
+ * confirma y, cuando la cola del lote se vacía, se recarga el dato real.
+ *
+ * Las lecturas siguen sirviendo la caché ante un fallo de red (`ApiError.status
+ * === 0`). Un 4xx/5xx de negocio nunca se disfraza de offline: se propaga.
  */
 
 import { create } from 'zustand';
 
 import { ApiError } from '@/src/api/client';
-import { crearLote, listarLotes, obtenerLote, registrarEvento } from '@/src/api/lotes';
-import type { OperacionSync } from '@/src/api/sync';
+import { listarLotes, obtenerLote, registrarEvento, crearLote } from '@/src/api/lotes';
 import type { EventoCreate, LoteCreate } from '@/src/api/types';
 import {
   aLoteDetalleVista,
@@ -20,7 +23,9 @@ import {
   ESTADO_TRAS_EVENTO,
   type Lote,
 } from '@/src/domain/lote';
+import type { AdjuntoLocal } from '@/src/evidencia/types';
 import * as offline from '@/src/offline';
+import type { OperacionPendiente } from '@/src/offline/types';
 import { useAuthStore } from '@/src/store/auth';
 
 // Re-exportado para que las pantallas sigan importando desde un único sitio.
@@ -52,7 +57,7 @@ interface LotesState {
   cargar: () => Promise<void>;
   cargarMas: () => Promise<void>;
   cargarDetalle: (loteId: string) => Promise<Lote | null>;
-  crear: (datos: LoteCreate) => Promise<Lote>;
+  crear: (datos: LoteCreate, adjunto?: AdjuntoLocal | null) => Promise<Lote>;
   avanzar: (loteId: string, evento: EventoCreate, clave: string) => Promise<Lote>;
 }
 
@@ -62,6 +67,12 @@ function mensajeDe(err: unknown, porDefecto: string): string {
 
 function esFalloDeRed(err: unknown): boolean {
   return err instanceof ApiError && err.status === 0;
+}
+
+/** ¿La operación pertenece al lote indicado? */
+function perteneceAlLote(payload: OperacionPendiente, loteId: string): boolean {
+  if (payload.tipo === 'registrar_cosecha') return payload.id === loteId;
+  return payload.lote_id === loteId;
 }
 
 /** Proyección optimista de una cosecha creada sin red. */
@@ -107,6 +118,25 @@ function eventoOptimista(actual: Lote, evento: EventoCreate, clave: string): Lot
       { id: clave, tipo: evento.tipo, hash_etapa: null, registrado_en: new Date().toISOString() },
     ]),
   };
+}
+
+/**
+ * Persiste recursos + adjunto + operaciones en una transacción, intenta el
+ * flush si hay red y responde si el lote quedó **sin** operaciones pendientes.
+ */
+async function encolarYConfirmar(
+  userId: string,
+  recursos: Parameters<typeof offline.guardarOptimista>[1],
+  operaciones: OperacionPendiente[],
+  loteId: string,
+  adjunto?: AdjuntoLocal,
+): Promise<boolean> {
+  await offline.guardarOptimista(userId, recursos, operaciones, adjunto);
+  if (offline.esOnline()) {
+    await offline.sincronizarAhora();
+  }
+  const cola = await offline.listarCola(userId);
+  return !cola.some((item) => perteneceAlLote(item.payload, loteId));
 }
 
 export const useLotesStore = create<LotesState>((set, get) => ({
@@ -175,45 +205,75 @@ export const useLotesStore = create<LotesState>((set, get) => ({
     }
   },
 
-  crear: async (datos) => {
+  crear: async (datos, adjunto = null) => {
     const userId = useAuthStore.getState().usuarioId;
-    try {
+    // Sin sesión o sin id no hay cola posible: alta directa (caso borde).
+    if (!userId || !datos.id) {
       const creado = aLoteVista(await crearLote(datos));
-      // Alta optimista en la lista para que aparezca sin esperar un refetch.
       set((s) => ({ lotes: [creado, ...s.lotes.filter((l) => l.id !== creado.id)] }));
-      if (userId) await offline.guardarRecurso(userId, 'lotes', 'all', get().lotes);
       return creado;
-    } catch (err) {
-      if (!esFalloDeRed(err) || !userId || !datos.id) throw err;
-      const optimista = loteOptimista(datos);
-      const lotes = [optimista, ...get().lotes.filter((l) => l.id !== optimista.id)];
-      const operacion: OperacionSync = {
-        tipo: 'registrar_cosecha',
-        id: datos.id,
-        finca_id: datos.finca_id,
-        fecha_cosecha: datos.fecha_cosecha,
-        peso_kg: datos.peso_kg,
-        variedad: datos.variedad ?? null,
-        metodo_beneficiado: datos.metodo_beneficiado ?? null,
-        evidencia_url: datos.evidencia_url ?? null,
-        evidencia_sha256: datos.evidencia_sha256 ?? null,
-      };
-      await offline.guardarOptimista(
-        userId,
-        [
-          { resource: 'lote_detalle', resourceId: optimista.id, data: optimista },
-          { resource: 'lotes', resourceId: 'all', data: lotes },
-        ],
-        operacion,
-      );
-      set((s) => ({ lotes, detalles: { ...s.detalles, [optimista.id]: optimista } }));
-      return optimista;
     }
+
+    const optimista = loteOptimista(datos);
+    const lotes = [optimista, ...get().lotes.filter((l) => l.id !== optimista.id)];
+    const evidenciaId = adjunto?.id ?? datos.evidencia_id ?? null;
+
+    // Con foto: primero `subir_evidencia`, luego `registrar_cosecha`. Sin foto:
+    // solo la cosecha. El orden FIFO garantiza que la foto exista antes.
+    const operaciones: OperacionPendiente[] = [];
+    if (adjunto) {
+      operaciones.push({
+        tipo: 'subir_evidencia',
+        id: adjunto.id,
+        lote_id: optimista.id,
+        finca_id: datos.finca_id,
+        adjunto_id: adjunto.id,
+      });
+    }
+    operaciones.push({
+      tipo: 'registrar_cosecha',
+      id: optimista.id,
+      finca_id: datos.finca_id,
+      fecha_cosecha: datos.fecha_cosecha,
+      peso_kg: datos.peso_kg,
+      variedad: datos.variedad ?? null,
+      metodo_beneficiado: datos.metodo_beneficiado ?? null,
+      evidencia_id: evidenciaId,
+    });
+
+    set((s) => ({ lotes, detalles: { ...s.detalles, [optimista.id]: optimista } }));
+
+    const confirmado = await encolarYConfirmar(
+      userId,
+      [
+        { resource: 'lote_detalle', resourceId: optimista.id, data: optimista },
+        { resource: 'lotes', resourceId: 'all', data: lotes },
+      ],
+      operaciones,
+      optimista.id,
+      adjunto ?? undefined,
+    );
+
+    // Confirmado: el backend es la fuente de verdad, se recarga el lote real.
+    if (confirmado) {
+      const real = await get().cargarDetalle(optimista.id);
+      if (real) {
+        set((s) => ({
+          lotes: s.lotes.map((l) => (l.id === real.id ? { ...real, historial: [] } : l)),
+        }));
+        return real;
+      }
+    }
+    return optimista;
   },
 
   avanzar: async (loteId, evento, clave) => {
     const userId = useAuthStore.getState().usuarioId;
-    try {
+    const actual = get().detalles[loteId];
+
+    // Sin proyección local no se puede encolar: se intenta directo (y si no
+    // hay red, propaga el ApiError como cualquier lectura).
+    if (!userId || !actual) {
       const detalle = aLoteDetalleVista(await registrarEvento(loteId, evento, clave));
       set((s) => ({
         detalles: { ...s.detalles, [loteId]: detalle },
@@ -221,26 +281,35 @@ export const useLotesStore = create<LotesState>((set, get) => ({
       }));
       if (userId) await offline.guardarRecurso(userId, 'lote_detalle', loteId, detalle);
       return detalle;
-    } catch (err) {
-      const actual = get().detalles[loteId];
-      if (!esFalloDeRed(err) || !userId || !actual) throw err;
-      const optimista = eventoOptimista(actual, evento, clave);
-      const operacion: OperacionSync = {
-        tipo: 'avanzar_estado',
-        id: clave,
-        lote_id: loteId,
-        evento,
-      };
-      await offline.guardarOptimista(
-        userId,
-        [{ resource: 'lote_detalle', resourceId: loteId, data: optimista }],
-        operacion,
-      );
-      set((s) => ({
-        detalles: { ...s.detalles, [loteId]: optimista },
-        lotes: s.lotes.map((l) => (l.id === loteId ? { ...optimista, historial: [] } : l)),
-      }));
-      return optimista;
     }
+
+    const optimista = eventoOptimista(actual, evento, clave);
+    const operacion: OperacionPendiente = {
+      tipo: 'avanzar_estado',
+      id: clave,
+      lote_id: loteId,
+      evento,
+    };
+    set((s) => ({
+      detalles: { ...s.detalles, [loteId]: optimista },
+      lotes: s.lotes.map((l) => (l.id === loteId ? { ...optimista, historial: [] } : l)),
+    }));
+
+    const confirmado = await encolarYConfirmar(
+      userId,
+      [{ resource: 'lote_detalle', resourceId: loteId, data: optimista }],
+      [operacion],
+      loteId,
+    );
+    if (confirmado) {
+      const real = await get().cargarDetalle(loteId);
+      if (real) {
+        set((s) => ({
+          lotes: s.lotes.map((l) => (l.id === real.id ? { ...real, historial: [] } : l)),
+        }));
+        return real;
+      }
+    }
+    return optimista;
   },
 }));

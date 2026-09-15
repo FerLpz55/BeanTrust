@@ -58,11 +58,15 @@ function idsAfectados(cola: RegistroCola[]): {
   const lotes = new Set<string>();
   const eventos: Record<string, number> = {};
   for (const item of cola) {
-    if (item.payload.tipo === 'registrar_cosecha') {
-      lotes.add(item.payload.id);
+    const payload = item.payload;
+    if (payload.tipo === 'registrar_cosecha') {
+      lotes.add(payload.id);
+    } else if (payload.tipo === 'avanzar_estado') {
+      lotes.add(payload.lote_id);
+      eventos[payload.lote_id] = (eventos[payload.lote_id] ?? 0) + 1;
     } else {
-      lotes.add(item.payload.lote_id);
-      eventos[item.payload.lote_id] = (eventos[item.payload.lote_id] ?? 0) + 1;
+      // `subir_evidencia`: pertenece al lote pero no cuenta como evento.
+      lotes.add(payload.lote_id);
     }
   }
   return { lotes: [...lotes], eventos };

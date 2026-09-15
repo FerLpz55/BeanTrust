@@ -42,7 +42,7 @@ describe('almacén en memoria', () => {
     const args = {
       userId: USER_A,
       recursos: [{ resource: 'lotes' as const, resourceId: 'all', data: ['optimista'] }],
-      operacion: cosecha('op-1'),
+      operaciones: [cosecha('op-1')],
     };
     await almacen.guardarOptimista(args);
     await almacen.guardarOptimista(args);
@@ -55,9 +55,9 @@ describe('almacén en memoria', () => {
 
   it('devuelve la cola en orden FIFO y respeta actualizar/eliminar', async () => {
     const almacen = crearAlmacenMemoria();
-    await almacen.guardarOptimista({ userId: USER_A, recursos: [], operacion: cosecha('a') });
-    await almacen.guardarOptimista({ userId: USER_A, recursos: [], operacion: cosecha('b') });
-    await almacen.guardarOptimista({ userId: USER_A, recursos: [], operacion: cosecha('c') });
+    await almacen.guardarOptimista({ userId: USER_A, recursos: [], operaciones: [cosecha('a')] });
+    await almacen.guardarOptimista({ userId: USER_A, recursos: [], operaciones: [cosecha('b')] });
+    await almacen.guardarOptimista({ userId: USER_A, recursos: [], operaciones: [cosecha('c')] });
 
     const cola = await almacen.listarCola(USER_A);
     expect(cola.map((item) => item.operationId)).toEqual(['a', 'b', 'c']);

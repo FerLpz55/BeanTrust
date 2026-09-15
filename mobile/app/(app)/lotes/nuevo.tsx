@@ -6,6 +6,7 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +21,15 @@ import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { ApiError } from '@/src/api/client';
 import { detalleCosecha, tituloCosecha } from '@/src/domain/mensajes';
+import {
+  elegirFoto,
+  eliminarArchivoLocal,
+  normalizarYGuardar,
+  recuperarResultadoPendiente,
+  tomarFoto,
+} from '@/src/evidencia/archivo';
+import type { ResultadoCaptura } from '@/src/evidencia/types';
+import { useAuthStore } from '@/src/store/auth';
 import { useLoteDraft } from '@/src/store/lote-draft';
 import { useLotesStore } from '@/src/store/lotes';
 import { usePerfilStore } from '@/src/store/perfil';
@@ -27,6 +37,13 @@ import { radii, spacing, typeScale } from '@/src/theme/tokens';
 
 const VARIEDADES = ['Caturra', 'Bourbon', 'Geisha'];
 const METODOS = ['Lavado', 'Semilavado', 'Honey', 'Natural'];
+
+/** Tamaño legible para el resumen de la foto. */
+function formatearBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function NuevoLoteScreen() {
   const crear = useLotesStore((s) => s.crear);
@@ -40,6 +57,7 @@ export default function NuevoLoteScreen() {
     peso_kg,
     fecha_cosecha,
     finca_id,
+    adjunto,
     enviando,
     error,
     setVariedad,
@@ -47,6 +65,7 @@ export default function NuevoLoteScreen() {
     setPeso,
     setFechaCosecha,
     setFinca,
+    setAdjunto,
     setEnviando,
     setError,
     nextStep,
@@ -60,6 +79,9 @@ export default function NuevoLoteScreen() {
   const enviandoRef = useRef(false);
   // Si el alta se encoló offline, el mensaje no debe afirmar confirmación.
   const [pendiente, setPendiente] = useState(false);
+  const [permisoDenegado, setPermisoDenegado] = useState(false);
+  const [capturando, setCapturando] = useState(false);
+  const recuperadoRef = useRef(false);
 
   // `POST /v1/lotes` exige `finca_id`: se resuelve con `GET /v1/fincas` (B15).
   useEffect(() => {
@@ -84,10 +106,76 @@ export default function NuevoLoteScreen() {
   const errorColor = useThemeColor('error');
 
   const handleClose = useCallback(() => {
+    // Si el usuario abandona antes de guardar, su foto no debe quedar huérfana.
+    // Tras un alta exitosa la cola es dueña del archivo: no se toca.
+    if (step !== 'success' && adjunto) {
+      void eliminarArchivoLocal(adjunto.localPath);
+    }
     setPendiente(false);
+    setPermisoDenegado(false);
     reset();
     router.back();
-  }, [reset]);
+  }, [step, adjunto, reset]);
+
+  /** Normaliza el asset capturado y lo guarda en disco (persistente). */
+  const aplicarCaptura = useCallback(
+    async (resultado: ResultadoCaptura) => {
+      if (resultado.estado === 'permiso_denegado') {
+        setPermisoDenegado(true);
+        return;
+      }
+      setPermisoDenegado(false);
+      if (resultado.estado !== 'ok') return;
+      if (!finca_id) {
+        setError('Selecciona una finca antes de adjuntar la foto.');
+        return;
+      }
+      setCapturando(true);
+      setError(null);
+      try {
+        const userId = useAuthStore.getState().usuarioId ?? 'anon';
+        const nuevo = await normalizarYGuardar(resultado.asset, loteId, userId);
+        // Reemplazo: el archivo anterior ya no es referenciado.
+        if (adjunto && adjunto.localPath !== nuevo.localPath) {
+          await eliminarArchivoLocal(adjunto.localPath);
+        }
+        setAdjunto(nuevo);
+      } catch {
+        setError('No se pudo procesar la foto. Reintenta.');
+      } finally {
+        setCapturando(false);
+      }
+    },
+    [finca_id, loteId, adjunto, setAdjunto, setError],
+  );
+
+  const handleTomarFoto = useCallback(async () => {
+    Haptics.selectionAsync();
+    await aplicarCaptura(await tomarFoto());
+  }, [aplicarCaptura]);
+
+  const handleElegirFoto = useCallback(async () => {
+    Haptics.selectionAsync();
+    await aplicarCaptura(await elegirFoto());
+  }, [aplicarCaptura]);
+
+  const handleEliminarFoto = useCallback(async () => {
+    if (!adjunto) return;
+    Haptics.selectionAsync();
+    await eliminarArchivoLocal(adjunto.localPath);
+    setAdjunto(null);
+  }, [adjunto, setAdjunto]);
+
+  // Android puede matar la MainActivity con el picker abierto: se recupera el
+  // resultado pendiente una sola vez, ya en el paso de evidencia.
+  useEffect(() => {
+    if (recuperadoRef.current || step !== 3 || !finca_id) return;
+    recuperadoRef.current = true;
+    void (async () => {
+      const resultado = await recuperarResultadoPendiente();
+      if (resultado.estado === 'ok') await aplicarCaptura(resultado);
+    })();
+  }, [step, finca_id, aplicarCaptura]);
 
   const handleBack = useCallback(() => {
     if (step === 1) {
@@ -112,14 +200,18 @@ export default function NuevoLoteScreen() {
     setError(null);
     try {
       // `id` va en el cuerpo (no en un header): reusarlo hace el alta idempotente.
-      const lote = await crear({
-        id: loteId,
-        finca_id: finca_id!,
-        fecha_cosecha,
-        peso_kg: peso_kg!,
-        variedad,
-        metodo_beneficiado,
-      });
+      const lote = await crear(
+        {
+          id: loteId,
+          finca_id: finca_id!,
+          fecha_cosecha,
+          peso_kg: peso_kg!,
+          variedad,
+          metodo_beneficiado,
+          evidencia_id: adjunto?.id ?? null,
+        },
+        adjunto,
+      );
       setPendiente(lote.pendiente === true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       nextStep();
@@ -139,6 +231,7 @@ export default function NuevoLoteScreen() {
     peso_kg,
     variedad,
     metodo_beneficiado,
+    adjunto,
     nextStep,
     setEnviando,
     setError,
@@ -350,9 +443,103 @@ export default function NuevoLoteScreen() {
               </View>
             )}
 
-            <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, marginTop: spacing.xl }]}>
-              La foto de evidencia llega con el almacenamiento real (ADR-14, B11).
+            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant, marginTop: spacing.xl, marginBottom: spacing.sm }]}>
+              FOTO DE EVIDENCIA (OPCIONAL)
             </Text>
+
+            {adjunto ? (
+              <>
+                <Image
+                  source={{ uri: adjunto.localPath }}
+                  style={styles.fotoPreview}
+                  resizeMode="cover"
+                  accessibilityLabel="Foto de evidencia adjunta"
+                />
+                <View style={styles.fotoMeta}>
+                  <Text style={[typeScale.dataMono, { color: onSurface }]} numberOfLines={1}>
+                    evidencia-{adjunto.id.slice(0, 8)}.jpg
+                  </Text>
+                  <Text style={[typeScale.dataMono, { color: onSurfaceVariant }]}>
+                    {formatearBytes(adjunto.bytes)} · 0x{adjunto.sha256.slice(0, 10)}…
+                  </Text>
+                </View>
+                <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, marginTop: spacing.sm }]}>
+                  Foto pendiente de sincronizar: se sube al guardar el lote o al recuperar conexión.
+                </Text>
+              </>
+            ) : (
+              <View style={[styles.fotoVacia, { borderColor: outlineVariant }]}>
+                <IconSymbol name="photo-camera" size={32} color={onSurfaceVariant} />
+                <Text
+                  style={[
+                    typeScale.bodySmall,
+                    { color: onSurfaceVariant, marginTop: spacing.sm, textAlign: 'center' },
+                  ]}
+                >
+                  Aún no hay foto adjunta.
+                </Text>
+              </View>
+            )}
+
+            {permisoDenegado ? (
+              <Text
+                style={[typeScale.bodySmall, { color: errorColor, marginTop: spacing.sm }]}
+                accessibilityLiveRegion="polite"
+              >
+                Permiso denegado. Habilita la cámara o las fotos en los ajustes del sistema.
+              </Text>
+            ) : null}
+
+            <View style={styles.fotoBotones}>
+              <Pressable
+                onPress={handleTomarFoto}
+                disabled={capturando}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.fotoBtn,
+                  { backgroundColor: primary, opacity: pressed || capturando ? 0.85 : 1 },
+                ]}
+              >
+                <IconSymbol name="photo-camera" size={18} color={onPrimary} />
+                <Text style={[typeScale.labelLarge, { color: onPrimary }]}>
+                  {adjunto ? 'Reemplazar' : 'Tomar foto'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleElegirFoto}
+                disabled={capturando}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.fotoBtn,
+                  { backgroundColor: surfaceContainerLow, opacity: pressed || capturando ? 0.85 : 1 },
+                ]}
+              >
+                <IconSymbol name="photo-library" size={18} color={onSurface} />
+                <Text style={[typeScale.labelLarge, { color: onSurface }]}>Elegir de galería</Text>
+              </Pressable>
+
+              {adjunto ? (
+                <Pressable
+                  onPress={handleEliminarFoto}
+                  disabled={capturando}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.fotoBtn,
+                    { backgroundColor: surfaceContainerLow, opacity: pressed || capturando ? 0.85 : 1 },
+                  ]}
+                >
+                  <IconSymbol name="delete-outline" size={18} color={errorColor} />
+                  <Text style={[typeScale.labelLarge, { color: errorColor }]}>Eliminar</Text>
+                </Pressable>
+              ) : null}
+            </View>
+
+            {capturando ? (
+              <Text style={[typeScale.bodySmall, { color: onSurfaceVariant, marginTop: spacing.sm }]}>
+                Procesando foto…
+              </Text>
+            ) : null}
 
             {error ? (
               <Text
@@ -485,6 +672,38 @@ const styles = StyleSheet.create({
     minHeight: 200,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  fotoVacia: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: radii.large,
+    minHeight: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  fotoPreview: {
+    width: '100%',
+    height: 220,
+    borderRadius: radii.large,
+  },
+  fotoMeta: {
+    marginTop: spacing.sm,
+    gap: 2,
+  },
+  fotoBotones: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  fotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.full,
   },
   footer: {
     padding: spacing.xl,

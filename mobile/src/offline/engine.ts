@@ -2,10 +2,13 @@
  * Motor de sincronización FIFO (§7.5).
  *
  * Reglas:
- * - Una operación por llamada a `/v1/sync`, en orden de `sequence`.
+ * - Una operación por llamada, en orden de `sequence`. La cola es **única**:
+ *   `subir_evidencia` (local) y `registrar_cosecha`/`avanzar_estado` (sync)
+ *   conviven, de modo que una cosecha nunca adelanta a su foto.
  * - Una sola ejecución en curso por usuario (single-flight): dos eventos de
  *   conectividad no envían la misma operación dos veces.
- * - `ok` → se borra de la cola.
+ * - `ok` → se borra de la cola. Al confirmarse la cosecha con evidencia, se
+ *   borra también el archivo y la fila del adjunto.
  * - `conflicto` → se marca y se corta el FIFO (no reintento automático; el
  *   usuario decide reintentar o descartar).
  * - `error` de negocio o fallo de red → se conserva `pendiente` y se corta el
@@ -17,7 +20,11 @@
 
 import type { OperacionSync, ResultadoSync } from '@/src/api/sync';
 import type { OfflineStorage } from '@/src/offline/storage';
-import type { ResumenSync } from '@/src/offline/types';
+import type {
+  OperacionPendiente,
+  OperacionSubirEvidencia,
+  ResumenSync,
+} from '@/src/offline/types';
 
 /** Contexto de sesión activo: `epoch` cambia en cada login/logout. */
 export interface ContextoSesion {
@@ -37,12 +44,14 @@ export interface MotorSync {
   enCurso(): boolean;
   flush(userId: string): Promise<ResumenSync>;
   reintentar(userId: string, sequence: number): Promise<ResumenSync>;
-  descartar(sequence: number): Promise<void>;
+  descartar(userId: string, sequence: number): Promise<void>;
 }
 
 interface OpcionesMotor {
   storage: OfflineStorage;
   ejecutar: (operacion: OperacionSync) => Promise<ResultadoSync>;
+  /** Sube una foto; su persistencia (`evidencia_json`) la resuelve la fachada. */
+  subirAdjunto?: (operacion: OperacionSubirEvidencia) => Promise<ResultadoSync>;
   /** Contexto de sesión actual; se compara con el capturado al iniciar el flush. */
   contexto?: () => ContextoSesion;
   onFlush?: (resultado: ResultadoFlush) => void;
@@ -56,11 +65,22 @@ function mensaje(err: unknown): string {
 export function crearMotor({
   storage,
   ejecutar,
+  subirAdjunto,
   contexto,
   onFlush,
   onCambio,
 }: OpcionesMotor): MotorSync {
   const enVuelo = new Map<string, Promise<ResumenSync>>();
+
+  async function ejecutarOperacion(payload: OperacionPendiente): Promise<ResultadoSync> {
+    if (payload.tipo === 'subir_evidencia') {
+      if (!subirAdjunto) {
+        return { id: payload.id, estado: 'error', detalle: 'Subida de evidencia no configurada.' };
+      }
+      return subirAdjunto(payload);
+    }
+    return ejecutar(payload);
+  }
 
   async function drenar(userId: string): Promise<ResumenSync> {
     const resumen: ResumenSync = {
@@ -78,14 +98,32 @@ export function crearMotor({
       return actual.userId === inicial.userId && actual.epoch === inicial.epoch;
     };
 
-    for (const item of await storage.listarCola(userId)) {
+    const cola = await storage.listarCola(userId);
+    // Fotos aún sin confirmar: una cosecha que las referencia no puede salir.
+    const evidenciasPendientes = new Set(
+      cola
+        .filter((item) => item.payload.tipo === 'subir_evidencia')
+        .map((item) => (item.payload as OperacionSubirEvidencia).adjunto_id),
+    );
+
+    for (const item of cola) {
       if (item.estado === 'conflicto') continue;
       // La sesión pudo cambiar mientras se listaba la cola.
       if (!sesionVigente()) break;
 
+      // La foto de esta cosecha sigue en la cola (pendiente o en conflicto):
+      // no se puede crear el lote con una `evidencia_id` que no existe aún.
+      if (
+        item.payload.tipo === 'registrar_cosecha' &&
+        item.payload.evidencia_id &&
+        evidenciasPendientes.has(item.payload.evidencia_id)
+      ) {
+        break;
+      }
+
       let resultado: ResultadoSync;
       try {
-        resultado = await ejecutar(item.payload);
+        resultado = await ejecutarOperacion(item.payload);
       } catch (err) {
         // Sesión cambiada al volver del request: no tocar la cola ajena.
         if (!sesionVigente()) break;
@@ -103,6 +141,14 @@ export function crearMotor({
 
       resumen.enviadas += 1;
       if (resultado.estado === 'ok') {
+        if (item.payload.tipo === 'subir_evidencia') {
+          // Subida confirmada: la foto ya vive en el backend, pero el archivo
+          // local se conserva hasta que el lote la referencie.
+          evidenciasPendientes.delete(item.payload.adjunto_id);
+        } else if (item.payload.tipo === 'registrar_cosecha' && item.payload.evidencia_id) {
+          // Lote creado: la evidencia ya es del backend, se puede soltar disco.
+          await storage.eliminarAdjunto(userId, item.payload.evidencia_id);
+        }
         await storage.eliminarOperacion(item.sequence);
         resumen.ok += 1;
         continue;
@@ -157,8 +203,40 @@ export function crearMotor({
       return flush(userId);
     },
 
-    async descartar(sequence) {
-      await storage.eliminarOperacion(sequence);
+    /**
+     * Descarta una operación y su pareja de evidencia. Si la operación es una
+     * foto, arrastra la cosecha que la referencia; si es una cosecha con foto,
+     * arrastra la subida. En ambos casos se borra el adjunto (fila + archivo).
+     */
+    async descartar(userId, sequence) {
+      const cola = await storage.listarCola(userId);
+      const objetivo = cola.find((item) => item.sequence === sequence);
+      if (!objetivo) return;
+
+      const aEliminar = new Set<number>([objetivo.sequence]);
+      let adjuntoId: string | null = null;
+
+      if (objetivo.payload.tipo === 'subir_evidencia') {
+        adjuntoId = objetivo.payload.adjunto_id;
+        for (const item of cola) {
+          if (
+            item.payload.tipo === 'registrar_cosecha' &&
+            item.payload.evidencia_id === adjuntoId
+          ) {
+            aEliminar.add(item.sequence);
+          }
+        }
+      } else if (objetivo.payload.tipo === 'registrar_cosecha' && objetivo.payload.evidencia_id) {
+        adjuntoId = objetivo.payload.evidencia_id;
+        for (const item of cola) {
+          if (item.payload.tipo === 'subir_evidencia' && item.payload.adjunto_id === adjuntoId) {
+            aEliminar.add(item.sequence);
+          }
+        }
+      }
+
+      for (const seq of aEliminar) await storage.eliminarOperacion(seq);
+      if (adjuntoId) await storage.eliminarAdjunto(userId, adjuntoId);
       onCambio?.();
     },
   };

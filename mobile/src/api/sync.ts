@@ -18,8 +18,11 @@ export type OperacionSync =
       peso_kg: number;
       variedad?: string | null;
       metodo_beneficiado?: string | null;
-      evidencia_url?: string | null;
-      evidencia_sha256?: string | null;
+      /**
+       * Evidencia ya subida (`POST /v1/evidencias`); la url/sha las resuelve el
+       * backend desde la fila (ADR-14). Nunca viajan en el cuerpo.
+       */
+      evidencia_id?: string | null;
     }
   | {
       tipo: 'avanzar_estado';

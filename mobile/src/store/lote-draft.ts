@@ -9,6 +9,7 @@
 
 import { create } from 'zustand';
 
+import type { AdjuntoLocal } from '@/src/evidencia/types';
 import { nuevaClaveIdempotencia } from '@/src/utils/idempotencia';
 
 interface LoteDraftState {
@@ -20,8 +21,8 @@ interface LoteDraftState {
   peso_kg: number | null;
   fecha_cosecha: string;
   finca_id: string | null;
-  evidencia_url: string | null;
-  evidencia_sha256: string | null;
+  /** Foto normalizada y persistida en disco (null si no se adjuntó). */
+  adjunto: AdjuntoLocal | null;
   enviando: boolean;
   error: string | null;
 
@@ -30,6 +31,7 @@ interface LoteDraftState {
   setPeso: (p: number) => void;
   setFechaCosecha: (f: string) => void;
   setFinca: (id: string) => void;
+  setAdjunto: (adjunto: AdjuntoLocal | null) => void;
   setEnviando: (v: boolean) => void;
   setError: (e: string | null) => void;
   nextStep: () => void;
@@ -52,8 +54,7 @@ function estadoInicial() {
     peso_kg: null,
     fecha_cosecha: hoy(),
     finca_id: null,
-    evidencia_url: null,
-    evidencia_sha256: null,
+    adjunto: null,
     enviando: false,
     error: null,
   };
@@ -67,6 +68,7 @@ export const useLoteDraft = create<LoteDraftState>((set, get) => ({
   setPeso: (p) => set({ peso_kg: p, error: null }),
   setFechaCosecha: (f) => set({ fecha_cosecha: f, error: null }),
   setFinca: (id) => set({ finca_id: id, error: null }),
+  setAdjunto: (adjunto) => set({ adjunto, error: null }),
   setEnviando: (v) => set({ enviando: v }),
   setError: (e) => set({ error: e }),
 
@@ -94,8 +96,15 @@ export const useLoteDraft = create<LoteDraftState>((set, get) => ({
       return s.variedad !== null && s.metodo_beneficiado !== null && s.fecha_cosecha !== '';
     }
     if (s.step === 2) return s.peso_kg !== null && s.peso_kg > 0 && !Number.isNaN(s.peso_kg);
-    // Paso 3: la finca es obligatoria (`LoteCreate.finca_id`).
-    if (s.step === 3) return s.finca_id !== null;
+    // Paso 3: la finca es obligatoria (`LoteCreate.finca_id`). La evidencia es
+    // opcional; si existe debe estar persistida, hasheada y con tamaño válido.
+    if (s.step === 3) {
+      if (s.finca_id === null) return false;
+      if (s.adjunto === null) return true;
+      return (
+        s.adjunto.localPath !== '' && s.adjunto.bytes > 0 && s.adjunto.sha256.length === 64
+      );
+    }
     return false;
   },
 }));

@@ -47,12 +47,12 @@ pnpm typecheck        # tsc --noEmit (los tipos deben compilar limpio)
 | Ajustes | `(app)/(tabs)/ajustes.tsx` | **Real** — perfil y fincas del backend |
 | Registrar evento | `src/components/registrar-evento-modal.tsx` | **Real** — `POST /v1/lotes/{id}/eventos` (F11) |
 | Offline / cola de sync | `src/offline/` | **Real** — SQLite + NetInfo, cola FIFO, reintento y descarte (§7.5) |
-| Evidencia fotografica | — | **Pendiente** (ADR-14, con B11) |
+| Evidencia fotografica | `src/evidencia/` | **Real** — cámara/galería → JPEG+SHA-256 persistido → `POST /v1/evidencias` encolado (ADR-14) |
 
 ### Pruebas
 
 ```bash
-pnpm test             # vitest: capa de API (fetch mockeado)
+pnpm test             # vitest: API, offline/cola y evidencia (mocks nativos)
 pnpm typecheck        # tsc --noEmit
 pnpm lint             # ESLint
 ```
@@ -67,6 +67,5 @@ pnpm lint             # ESLint
   hardcodeados en pantallas (deuda a limpiar).
 - Estado de auth: `src/store/auth.ts` (zustand), tokens en `expo-secure-store`
   (`src/storage/secure.ts`), JWT util en `src/utils/jwt.ts`.
-- Sin tests automatizados aún (deuda).
 - Antes de tocar APIs de Expo, consultar la documentación versionada
   (https://docs.expo.dev/versions/v54.0.0/).

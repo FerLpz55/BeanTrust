@@ -49,6 +49,14 @@
           "recordAudioAndroid": false
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "BeanTrust usa la cámara para registrar evidencia de la cosecha.",
+          "photosPermission": "BeanTrust usa tus fotos para registrar evidencia de la cosecha.",
+          "microphonePermission": false
+        }
+      ],
       "expo-sqlite"
     ],
     "experiments": {

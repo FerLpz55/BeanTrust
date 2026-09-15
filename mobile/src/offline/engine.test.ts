@@ -29,7 +29,7 @@ async function encolar(
   userId: string = USER,
 ): Promise<void> {
   for (const operacion of ops) {
-    await storage.guardarOptimista({ userId, recursos: [], operacion });
+    await storage.guardarOptimista({ userId, recursos: [], operaciones: [operacion] });
   }
 }
 
@@ -211,7 +211,7 @@ describe('motor de sincronización', () => {
     await motor.flush(USER);
 
     const [enConflicto] = await storage.listarCola(USER);
-    await motor.descartar(enConflicto.sequence);
+    await motor.descartar(USER, enConflicto.sequence);
     await expect(storage.listarCola(USER)).resolves.toHaveLength(0);
   });
 });
