@@ -219,3 +219,4 @@ __marimo__/
 
 # Supabase CLI (estado local del proyecto enlazado)
 supabase/.temp/
+supabase/.branches/
