@@ -80,13 +80,18 @@ export async function crearAlmacenSqlite(
 ): Promise<OfflineStorage> {
   const db = await SQLite.openDatabaseAsync(nombre);
 
-  async function guardarEnTx(
+  // `Transaction` extiende `SQLiteDatabase`: el mismo helper sirve para `db` y
+  // para el `txn` de una transacción exclusiva (nunca se mezclan ambos).
+  type Ejecutor = Pick<SQLite.SQLiteDatabase, 'runAsync'>;
+
+  async function upsertRecurso(
+    ejecutor: Ejecutor,
     userId: string,
     resource: RecursoCache,
     resourceId: string,
     data: unknown,
   ): Promise<void> {
-    await db.runAsync(UPSERT_RECURSO, [
+    await ejecutor.runAsync(UPSERT_RECURSO, [
       userId,
       resource,
       resourceId,
@@ -105,7 +110,7 @@ export async function crearAlmacenSqlite(
     },
 
     async guardarRecurso<T>(userId: string, resource: RecursoCache, resourceId: string, data: T) {
-      await guardarEnTx(userId, resource, resourceId, data);
+      await upsertRecurso(db, userId, resource, resourceId, data);
     },
 
     async leerRecurso<T>(userId: string, resource: RecursoCache, resourceId: string) {
@@ -117,18 +122,20 @@ export async function crearAlmacenSqlite(
     },
 
     async eliminarUsuario(userId) {
-      await db.withTransactionAsync(async () => {
-        await db.runAsync('delete from cached_resource where user_id = ?', [userId]);
-        await db.runAsync('delete from sync_queue where user_id = ?', [userId]);
+      // Exclusiva: sin otra conexión intercalada que pueda dejar la limpieza a
+      // medias (el usuario A y el B no deben cruzarse).
+      await db.withExclusiveTransactionAsync(async (txn) => {
+        await txn.runAsync('delete from cached_resource where user_id = ?', [userId]);
+        await txn.runAsync('delete from sync_queue where user_id = ?', [userId]);
       });
     },
 
     async guardarOptimista({ userId, recursos, operacion }: GuardarOptimistaArgs) {
-      await db.withTransactionAsync(async () => {
+      await db.withExclusiveTransactionAsync(async (txn) => {
         for (const recurso of recursos) {
-          await guardarEnTx(userId, recurso.resource, recurso.resourceId, recurso.data);
+          await upsertRecurso(txn, userId, recurso.resource, recurso.resourceId, recurso.data);
         }
-        await db.runAsync(
+        await txn.runAsync(
           `insert or ignore into sync_queue
              (operation_id, user_id, tipo, payload_json, estado, attempts, last_error, created_at)
            values (?, ?, ?, ?, 'pendiente', 0, null, ?)`,

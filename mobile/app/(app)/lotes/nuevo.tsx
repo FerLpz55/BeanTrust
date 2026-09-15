@@ -4,7 +4,7 @@
 
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -19,6 +19,7 @@ import { PrimaryButton } from '@/src/components/primary-button';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { ApiError } from '@/src/api/client';
+import { detalleCosecha, tituloCosecha } from '@/src/domain/mensajes';
 import { useLoteDraft } from '@/src/store/lote-draft';
 import { useLotesStore } from '@/src/store/lotes';
 import { usePerfilStore } from '@/src/store/perfil';
@@ -57,6 +58,8 @@ export default function NuevoLoteScreen() {
   // que un doble-tap en "Guardar lote" dispare dos altas antes de que
   // `enviando` (estado) alcance a reflejarse en el siguiente render.
   const enviandoRef = useRef(false);
+  // Si el alta se encoló offline, el mensaje no debe afirmar confirmación.
+  const [pendiente, setPendiente] = useState(false);
 
   // `POST /v1/lotes` exige `finca_id`: se resuelve con `GET /v1/fincas` (B15).
   useEffect(() => {
@@ -81,6 +84,7 @@ export default function NuevoLoteScreen() {
   const errorColor = useThemeColor('error');
 
   const handleClose = useCallback(() => {
+    setPendiente(false);
     reset();
     router.back();
   }, [reset]);
@@ -108,7 +112,7 @@ export default function NuevoLoteScreen() {
     setError(null);
     try {
       // `id` va en el cuerpo (no en un header): reusarlo hace el alta idempotente.
-      await crear({
+      const lote = await crear({
         id: loteId,
         finca_id: finca_id!,
         fecha_cosecha,
@@ -116,6 +120,7 @@ export default function NuevoLoteScreen() {
         variedad,
         metodo_beneficiado,
       });
+      setPendiente(lote.pendiente === true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       nextStep();
     } catch (err) {
@@ -146,10 +151,10 @@ export default function NuevoLoteScreen() {
         <View style={styles.successContainer}>
           <IconSymbol name="check-circle" size={100} color={secondary} />
           <Text style={[typeScale.headlineMedium, { color: onSurface, marginTop: spacing.xl }]}>
-            Lote registrado
+            {tituloCosecha(pendiente)}
           </Text>
           <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant, marginTop: spacing.sm, textAlign: 'center' }]}>
-            Tu cosecha ha sido registrada exitosamente
+            {detalleCosecha(pendiente)}
           </Text>
         </View>
         <View style={styles.footer}>

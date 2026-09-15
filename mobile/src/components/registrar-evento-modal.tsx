@@ -18,6 +18,7 @@ import * as Haptics from 'expo-haptics';
 
 import { ApiError } from '@/src/api/client';
 import type { EventoCreate } from '@/src/api/types';
+import { detalleEvento, tituloEvento } from '@/src/domain/mensajes';
 import { IconSymbol } from '@/src/components/ui/icon-symbol';
 import { PrimaryButton } from '@/src/components/primary-button';
 import { TextField } from '@/src/components/text-field';
@@ -40,7 +41,8 @@ interface RegistrarEventoModalProps {
   /** Tipos ya registrados al menos una vez (para sugerir el siguiente, no repetir). */
   completados: EventoTipo[];
   onClose: () => void;
-  onSubmit: (evento: EventoCreate, claveIdempotencia: string) => Promise<void>;
+  /** Devuelve `true` si el evento quedó encolado offline (pendiente de sync). */
+  onSubmit: (evento: EventoCreate, claveIdempotencia: string) => Promise<boolean>;
 }
 
 export function RegistrarEventoModal({
@@ -57,6 +59,7 @@ export function RegistrarEventoModal({
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [registrado, setRegistrado] = useState<EventoTipo | null>(null);
+  const [registradoPendiente, setRegistradoPendiente] = useState(false);
   // Bloqueo síncrono: `enviando` (estado) puede quedar "viejo" un instante
   // entre un doble-tap y el siguiente render, dejando pasar dos envíos con
   // la misma intención — el segundo choca contra el backend (409) aunque el
@@ -93,6 +96,7 @@ export function RegistrarEventoModal({
     setClaveIdempotencia(null);
     setError(null);
     setRegistrado(null);
+    setRegistradoPendiente(false);
     enviandoRef.current = false;
     onClose();
   };
@@ -120,10 +124,11 @@ export function RegistrarEventoModal({
         (evento as unknown as Record<string, unknown>)[campo.key] =
           campo.tipo === 'numero' ? Number(bruto) : bruto;
       }
-      await onSubmit(evento, claveIdempotencia);
+      const pendiente = await onSubmit(evento, claveIdempotencia);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Confirmación explícita en vez de cerrar en silencio: sin esto el
       // productor no tiene forma de saber que sí se guardó.
+      setRegistradoPendiente(pendiente);
       setRegistrado(tipo);
     } catch (err) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -149,7 +154,7 @@ export function RegistrarEventoModal({
         <View style={styles.header}>
           <Text style={[typeScale.titleLarge, { color: onSurface, flex: 1 }]}>
             {registrado
-              ? 'Evento registrado'
+              ? tituloEvento(registradoPendiente)
               : tipo
                 ? EVENTO_DESCRIPCION[tipo]
                 : 'Registrar evento'}
@@ -172,7 +177,7 @@ export function RegistrarEventoModal({
                 {registrado} guardado
               </Text>
               <Text style={[typeScale.bodySmall, { color: onPrimaryContainer }]}>
-                Ya quedó en la trazabilidad del lote, con su hash de etapa.
+                {detalleEvento(registrado, registradoPendiente)}
               </Text>
             </View>
           ) : !tipo ? (

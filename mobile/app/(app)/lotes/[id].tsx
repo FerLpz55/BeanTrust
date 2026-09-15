@@ -50,6 +50,7 @@ export default function LoteDetailScreen() {
   const [rechazando, setRechazando] = useState(false);
   const [errorRechazo, setErrorRechazo] = useState<string | null>(null);
   const [rechazoConfirmado, setRechazoConfirmado] = useState(false);
+  const [rechazoPendiente, setRechazoPendiente] = useState(false);
   // Bloqueo síncrono: ver la misma nota en `registrar-evento-modal.tsx`. Sin
   // esto, un segundo toque mientras el primero seguía en vuelo chocaba
   // contra el backend (409) aunque el primero ya hubiera rechazado el lote.
@@ -115,7 +116,8 @@ export default function LoteDetailScreen() {
   const puedeRegistrarVenta = puedeVender(rol) && lote.estado === 'TOSTADO';
 
   const handleAvanzar = async (evento: EventoCreate, claveIdempotencia: string) => {
-    await avanzar(lote.id, evento, claveIdempotencia);
+    const detalle = await avanzar(lote.id, evento, claveIdempotencia);
+    return detalle.pendiente === true;
   };
 
   const ejecutarRechazo = async () => {
@@ -125,8 +127,9 @@ export default function LoteDetailScreen() {
     setRechazando(true);
     setErrorRechazo(null);
     try {
-      await avanzar(lote.id, { tipo: 'RECHAZADO' }, nuevaClaveIdempotencia());
+      const detalle = await avanzar(lote.id, { tipo: 'RECHAZADO' }, nuevaClaveIdempotencia());
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setRechazoPendiente(detalle.pendiente === true);
       setRechazoConfirmado(true);
     } catch (err) {
       setErrorRechazo(
@@ -245,7 +248,9 @@ export default function LoteDetailScreen() {
                 style={[typeScale.bodySmall, { color: onSurfaceVariant }]}
                 accessibilityLiveRegion="polite"
               >
-                Lote rechazado.
+                {rechazoPendiente
+                  ? 'Rechazo guardado en el dispositivo; pendiente de sincronizar.'
+                  : 'Lote rechazado.'}
               </Text>
             ) : null}
             {errorRechazo ? (
