@@ -8,7 +8,7 @@
 
 begin;
 
-select plan(21);
+select plan(22);
 
 -- ------------------------------------------------------------------ esquema
 select is(
@@ -151,14 +151,24 @@ select is(
     where lote_id = '00000000-0000-0000-0000-0000000000a1'),
   1, 'el reintento no duplica el evento génesis');
 
+select is(
+  (select reintento from public.registrar_cosecha_con_evidencia(
+    '00000000-0000-0000-0000-0000000000a1',
+    '00000000-0000-0000-0000-0000000000b1',
+    '00000000-0000-0000-0000-000000000011',
+    'LT-TEST0001', '2026-09-15', 87.6, 'Typica', 'lavado',
+    '00000000-0000-0000-0000-0000000000e1', repeat('9', 64))),
+  true,
+  'reintento con hash nuevo (timestamp) sigue siendo idempotente');
+
 select throws_ok($$
   select * from public.registrar_cosecha_con_evidencia(
     '00000000-0000-0000-0000-0000000000a1',
     '00000000-0000-0000-0000-0000000000b1',
     '00000000-0000-0000-0000-000000000011',
-    'LT-TEST0001', '2026-09-15', 87.6, 'Typica', 'lavado',
+    'LT-TEST0001', '2026-09-15', 99.0, 'Typica', 'lavado',
     '00000000-0000-0000-0000-0000000000e1', repeat('9', 64))
-$$, '23505', null::text, 'reintento con hash distinto se rechaza');
+$$, '23505', null::text, 'reintento con datos distintos se rechaza');
 
 -- ------------------------------------------------------------------ RPC: tenencia
 reset role;
