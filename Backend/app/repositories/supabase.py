@@ -386,12 +386,20 @@ class SupabaseLoteRepo:
             raise RepoError("No se pudo registrar el evento.") from exc
 
     def listar_eventos(self, lote_id: uuid.UUID) -> list[LoteEvento]:
+        """Historial en orden cronológico ascendente.
+
+        El dominio y el repositorio en memoria devuelven la cadena en orden de
+        registro; el smoke, el pasaporte público (`reversed`) y el móvil asumen
+        ese orden. Ordenar descendente aquí rompía la lectura del evento más
+        reciente y el corte de integridad.
+        """
         try:
             resp = (
                 self._cliente.table("lote_eventos")
                 .select("*")
                 .eq("lote_id", str(lote_id))
-                .order("registrado_en", desc=True)
+                .order("registrado_en")
+                .order("id")
                 .execute()
             )
         except APIError as exc:

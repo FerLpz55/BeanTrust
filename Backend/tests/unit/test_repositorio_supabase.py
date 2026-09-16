@@ -88,7 +88,8 @@ class ConsultaFalsa:
         self._registro.setdefault("in_", []).append((self._tabla, columna, list(valores)))
         return self
 
-    def order(self, *_args, **_kwargs):
+    def order(self, columna, *, desc=False, **_kwargs):
+        self._registro.setdefault("orden", []).append((self._tabla, columna, desc))
         return self
 
     def limit(self, *_args):
@@ -200,3 +201,15 @@ def test_evidencia_marcar_adjunta_actualiza_estado_y_fecha() -> None:
     tabla, valores = cliente.registro["updates"][0]
     assert tabla == "evidencias"
     assert valores == {"estado": "ADJUNTA", "adjuntada_en": AHORA.isoformat()}
+
+
+def test_listar_eventos_ordena_ascendente() -> None:
+    """El historial se consume en orden cronológico: el smoke, el pasaporte
+    público (`reversed`) y el móvil (`campoMasReciente`) asumen ascendente."""
+    cliente = ClienteFalso({"lote_eventos": []})
+    SupabaseLoteRepo(cliente).listar_eventos(LOTE_ID)
+    orden = [item for item in cliente.registro["orden"] if item[0] == "lote_eventos"]
+    assert orden == [
+        ("lote_eventos", "registrado_en", False),
+        ("lote_eventos", "id", False),
+    ]
