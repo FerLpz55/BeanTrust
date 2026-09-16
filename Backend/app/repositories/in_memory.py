@@ -20,11 +20,15 @@ from app.models.dominio import (
     EstadoPropina,
     EventoDuplicado,
     Evidencia,
+    EvidenciaNoEncontrada,
+    EvidenciaYaAdjunta,
     Finca,
     Lote,
     LoteEvento,
+    NoAutorizado,
     Pago,
     Propina,
+    TipoEvento,
     Usuario,
 )
 from app.repositories.sesiones import SesionRefresh
@@ -118,6 +122,70 @@ class InMemoryLoteRepo:
     def listar_eventos(self, lote_id: uuid.UUID) -> list[LoteEvento]:
         lote = self._memoria.lotes.get(lote_id)
         return sorted(lote.historial, key=lambda e: e.registrado_en) if lote else []
+
+    def registrar_cosecha_con_evidencia(
+        self,
+        lote: Lote,
+        evento: LoteEvento,
+        evidencia_id: uuid.UUID,
+        adjuntada_en: datetime,
+    ) -> Lote:
+        """Alta atómica de lote + evidencia (espejo del RPC de la migración 008).
+
+        Valida tenencia y estado de la evidencia, y en el reintento solo acepta
+        un lote idéntico (mismo hash génesis). El `hash_etapa` ya lo trae
+        `evento`: aquí no se recalcula nada.
+        """
+        evidencia = self._memoria.evidencias.get(evidencia_id)
+        if evidencia is None:
+            raise EvidenciaNoEncontrada("La evidencia no existe.")
+        if (
+            evidencia.uploader_id != evento.actor_id
+            or evidencia.finca_id != lote.finca_id
+            or evidencia.lote_id != lote.id
+        ):
+            raise NoAutorizado("La evidencia no corresponde a este lote.")
+
+        existente = self._memoria.lotes.get(lote.id)
+        if existente is not None:
+            hash_existente = next(
+                (
+                    e.hash_etapa
+                    for e in existente.historial
+                    if e.tipo is TipoEvento.COSECHA
+                ),
+                None,
+            )
+            adjunta = self._buscar_adjunta(existente.id)
+            if (
+                existente.finca_id == lote.finca_id
+                and hash_existente == evento.hash_etapa
+                and (adjunta is None or adjunta.id == evidencia_id)
+            ):
+                if evidencia.estado is EstadoEvidencia.PENDIENTE:
+                    evidencia.estado = EstadoEvidencia.ADJUNTA
+                    evidencia.adjuntada_en = adjuntada_en
+                return existente
+            raise EvidenciaYaAdjunta("El lote ya existe con datos distintos.")
+
+        if evidencia.estado is not EstadoEvidencia.PENDIENTE:
+            raise EvidenciaYaAdjunta("La evidencia no está disponible para adjuntar.")
+
+        lote.evidencia_url = evidencia.storage_key
+        lote.evidencia_sha256 = evidencia.sha256
+        self._memoria.lotes[lote.id] = lote
+        self._memoria.eventos[evento.id] = evento
+        if evento not in lote.historial:
+            lote.historial.append(evento)
+        evidencia.estado = EstadoEvidencia.ADJUNTA
+        evidencia.adjuntada_en = adjuntada_en
+        return lote
+
+    def _buscar_adjunta(self, lote_id: uuid.UUID) -> Evidencia | None:
+        for evidencia in self._memoria.evidencias.values():
+            if evidencia.lote_id == lote_id and evidencia.estado is EstadoEvidencia.ADJUNTA:
+                return evidencia
+        return None
 
 
 class InMemoryQRRepo:

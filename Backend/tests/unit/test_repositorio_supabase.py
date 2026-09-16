@@ -8,8 +8,22 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from dataclasses import replace
 
-from app.models.dominio import Estado, EstadoEvidencia
+import pytest
+from postgrest import APIError
+
+from app.models.dominio import (
+    Estado,
+    EstadoEvidencia,
+    EvidenciaNoEncontrada,
+    EvidenciaYaAdjunta,
+    Lote,
+    LoteEvento,
+    NoAutorizado,
+    RepoError,
+    TipoEvento,
+)
 from app.repositories.supabase import (
     SupabaseEvidenciaRepo,
     SupabaseLoteRepo,
@@ -21,7 +35,9 @@ from app.repositories.supabase import (
 AHORA = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.UTC)
 LOTE_ID = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000001")
 FINCA_ID = uuid.UUID("bbbbbbbb-0000-0000-0000-000000000002")
+ACTOR_ID = uuid.UUID("cccccccc-0000-0000-0000-000000000003")
 EVIDENCIA_ID = uuid.UUID("aaaaaaaa-0000-0000-0000-0000000000e1")
+EVENTO_ID = uuid.UUID("dddddddd-0000-0000-0000-000000000004")
 
 
 def fila_lote() -> dict:
@@ -101,6 +117,7 @@ class ConsultaFalsa:
 
     def insert(self, fila):
         self._registro.setdefault("insertados", []).append((self._tabla, fila))
+        self._registro["_operacion"] = "insert"
         return self
 
     def upsert(self, fila):
@@ -112,11 +129,29 @@ class ConsultaFalsa:
         return self
 
     def execute(self):
+        if self._registro.get("_operacion") == "insert":
+            self._registro["_operacion"] = None
+            if "error_insert" in self._registro:
+                raise self._registro["error_insert"]
         filas = self._registro["datos"].get(self._tabla, [])
         if self._maybe_single:
             # Comportamiento real del SDK: devuelve None, no una respuesta vacía.
             return RespuestaFalsa(filas[0]) if filas else None
         return RespuestaFalsa(filas)
+
+
+class RpcFalsa:
+    """Simula `cliente.rpc(...).execute()`."""
+
+    def __init__(self, registro: dict, nombre: str) -> None:
+        self._registro = registro
+        self._nombre = nombre
+
+    def execute(self):
+        self._registro.setdefault("rpc_llamadas", []).append(self._nombre)
+        if "error_rpc" in self._registro:
+            raise self._registro["error_rpc"]
+        return RespuestaFalsa(self._registro.get("rpc_respuesta"))
 
 
 class ClienteFalso:
@@ -125,6 +160,10 @@ class ClienteFalso:
 
     def table(self, nombre: str) -> ConsultaFalsa:
         return ConsultaFalsa(nombre, self.registro)
+
+    def rpc(self, nombre: str, parametros: dict) -> RpcFalsa:
+        self.registro.setdefault("rpc_parametros", []).append((nombre, parametros))
+        return RpcFalsa(self.registro, nombre)
 
 
 def test_buscar_por_id_sin_fila_devuelve_none() -> None:
@@ -167,14 +206,55 @@ def test_saldo_usa_el_nombre_real_de_la_tabla_en_el_embed() -> None:
     assert "lotes.finca.productor_id" in columnas
 
 
-def test_evidencia_crear_usa_upsert_idempotente() -> None:
-    """`upsert` y no `insert`: un reintento con la misma clave no puede reventar."""
+def _error_pg(code: str) -> APIError:
+    return APIError({"message": "conflicto", "code": code, "details": None, "hint": None})
+
+
+def test_evidencia_crear_usa_insert_no_destructivo() -> None:
+    """`insert` y no `upsert`: jamás se sobrescribe una evidencia existente."""
     cliente = ClienteFalso({})
-    SupabaseEvidenciaRepo(cliente).crear(fila_a_evidencia(fila_evidencia()))
-    tabla, fila = cliente.registro["upserts"][0]
+    resultado = SupabaseEvidenciaRepo(cliente).crear(fila_a_evidencia(fila_evidencia()))
+    tabla, fila = cliente.registro["insertados"][0]
     assert tabla == "evidencias"
     assert fila["id"] == str(EVIDENCIA_ID)
     assert fila["estado"] == "PENDIENTE"
+    assert resultado.id == EVIDENCIA_ID
+    assert "upserts" not in cliente.registro
+
+
+def test_evidencia_crear_replay_identico_devuelve_la_fila() -> None:
+    """Conflicto de PK con los mismos datos: es un replay, no un fallo."""
+    fila = fila_evidencia()
+    cliente = ClienteFalso({"evidencias": [fila]})
+    cliente.registro["error_insert"] = _error_pg("23505")
+    resultado = SupabaseEvidenciaRepo(cliente).crear(fila_a_evidencia(fila))
+    assert resultado.id == EVIDENCIA_ID
+    assert resultado.sha256 == fila["sha256"]
+
+
+def test_evidencia_crear_conflicto_con_datos_distintos_es_409() -> None:
+    """Misma PK, otro contenido: la fila existente manda y se responde 409."""
+    fila = fila_evidencia()
+    cliente = ClienteFalso({"evidencias": [fila]})
+    cliente.registro["error_insert"] = _error_pg("23505")
+    otra = replace(fila_a_evidencia(fila), sha256="b" * 64)
+    with pytest.raises(EvidenciaYaAdjunta):
+        SupabaseEvidenciaRepo(cliente).crear(otra)
+
+
+def test_evidencia_crear_conflicto_sin_fila_existente_es_409() -> None:
+    """Si la PK choca pero la fila no se puede leer, no se asume replay."""
+    cliente = ClienteFalso({})
+    cliente.registro["error_insert"] = _error_pg("23505")
+    with pytest.raises(EvidenciaYaAdjunta):
+        SupabaseEvidenciaRepo(cliente).crear(fila_a_evidencia(fila_evidencia()))
+
+
+def test_evidencia_crear_error_no_conflicto_es_repo_error() -> None:
+    cliente = ClienteFalso({})
+    cliente.registro["error_insert"] = _error_pg("42P01")
+    with pytest.raises(RepoError):
+        SupabaseEvidenciaRepo(cliente).crear(fila_a_evidencia(fila_evidencia()))
 
 
 def test_evidencia_buscar_por_id_hidrata_la_fila() -> None:
@@ -213,3 +293,107 @@ def test_listar_eventos_ordena_ascendente() -> None:
         ("lote_eventos", "registrado_en", False),
         ("lote_eventos", "id", False),
     ]
+
+
+# ------------------------------------------------------- RPC atómica (008)
+
+
+def _lote_dominio() -> Lote:
+    return Lote(
+        id=LOTE_ID,
+        finca_id=FINCA_ID,
+        codigo_publico="LT-0001",
+        fecha_cosecha=dt.date(2026, 8, 1),
+    )
+
+
+def _evento_dominio() -> LoteEvento:
+    return LoteEvento(
+        id=EVENTO_ID,
+        lote_id=LOTE_ID,
+        tipo=TipoEvento.COSECHA,
+        de_estado=None,
+        a_estado=Estado.CEREZA,
+        actor_id=ACTOR_ID,
+        peso_kg=87.6,
+        hash_etapa="h" * 64,
+        registrado_en=AHORA,
+    )
+
+
+def _fila_evento() -> dict:
+    return {
+        "id": str(EVENTO_ID),
+        "lote_id": str(LOTE_ID),
+        "tipo": TipoEvento.COSECHA.value,
+        "de_estado": None,
+        "a_estado": Estado.CEREZA.value,
+        "actor_id": str(ACTOR_ID),
+        "peso_kg": 87.6,
+        "hash_etapa": "h" * 64,
+        "registrado_en": AHORA.isoformat(),
+    }
+
+
+def _cliente_con_lote() -> ClienteFalso:
+    return ClienteFalso(
+        {"lotes": [fila_lote()], "lote_eventos": [_fila_evento()], "qr_certificado": []}
+    )
+
+
+def test_registrar_cosecha_con_evidencia_llama_rpc_y_relee() -> None:
+    cliente = _cliente_con_lote()
+    cliente.registro["rpc_respuesta"] = [{"lote_id": str(LOTE_ID), "reintento": False}]
+
+    resultado = SupabaseLoteRepo(cliente).registrar_cosecha_con_evidencia(
+        _lote_dominio(), _evento_dominio(), EVIDENCIA_ID, AHORA
+    )
+
+    nombre, parametros = cliente.registro["rpc_parametros"][0]
+    assert nombre == "registrar_cosecha_con_evidencia"
+    assert parametros["p_lote_id"] == str(LOTE_ID)
+    assert parametros["p_evento_id"] == str(EVENTO_ID)
+    assert parametros["p_finca_id"] == str(FINCA_ID)
+    assert parametros["p_evidencia_id"] == str(EVIDENCIA_ID)
+    assert parametros["p_hash_etapa"] == "h" * 64
+    assert parametros["p_peso_kg"] == 87.6
+    # Se relee de la BD (con historial y certificado), no se devuelve el objeto local.
+    assert resultado.id == LOTE_ID
+    assert len(resultado.historial) == 1
+
+
+def test_registrar_cosecha_con_evidencia_reintento_relee_igual() -> None:
+    """La carrera/reintento del RPC devuelve reintento=true: se relee el lote."""
+    cliente = _cliente_con_lote()
+    cliente.registro["rpc_respuesta"] = [{"lote_id": str(LOTE_ID), "reintento": True}]
+    resultado = SupabaseLoteRepo(cliente).registrar_cosecha_con_evidencia(
+        _lote_dominio(), _evento_dominio(), EVIDENCIA_ID, AHORA
+    )
+    assert resultado.id == LOTE_ID
+
+
+@pytest.mark.parametrize(
+    ("codigo", "esperado"),
+    [
+        ("28000", NoAutorizado),
+        ("42501", NoAutorizado),
+        ("P0002", EvidenciaNoEncontrada),
+        ("23505", EvidenciaYaAdjunta),
+    ],
+)
+def test_registrar_cosecha_con_evidencia_mapea_sqlstate(codigo, esperado) -> None:
+    cliente = ClienteFalso({})
+    cliente.registro["error_rpc"] = _error_pg(codigo)
+    with pytest.raises(esperado):
+        SupabaseLoteRepo(cliente).registrar_cosecha_con_evidencia(
+            _lote_dominio(), _evento_dominio(), EVIDENCIA_ID, AHORA
+        )
+
+
+def test_registrar_cosecha_con_evidencia_error_desconocido_es_repo_error() -> None:
+    cliente = ClienteFalso({})
+    cliente.registro["error_rpc"] = _error_pg("XX000")
+    with pytest.raises(RepoError):
+        SupabaseLoteRepo(cliente).registrar_cosecha_con_evidencia(
+            _lote_dominio(), _evento_dominio(), EVIDENCIA_ID, AHORA
+        )

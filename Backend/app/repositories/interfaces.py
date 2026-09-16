@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from app.models.dominio import (
@@ -37,6 +38,20 @@ class RepositorioLote(Protocol):
     def adjuntar_evento(self, evento: LoteEvento) -> None: ...
 
     def listar_eventos(self, lote_id: uuid.UUID) -> list[LoteEvento]: ...
+
+    def registrar_cosecha_con_evidencia(
+        self,
+        lote: Lote,
+        evento: LoteEvento,
+        evidencia_id: uuid.UUID,
+        adjuntada_en: datetime,
+    ) -> Lote:
+        """Persiste lote + evento génesis y adjunta la evidencia en una sola transacción.
+
+        El `hash_etapa` ya viene calculado por el dominio: el repositorio jamás lo
+        recalcula ni acepta url/sha del cliente (ADR-14).
+        """
+        ...
 
 
 @runtime_checkable

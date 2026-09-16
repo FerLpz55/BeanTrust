@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -14,8 +15,10 @@ from app.models.dominio import (
     ArchivoInvalido,
     EstadoEvidencia,
     EvidenciaNoEncontrada,
+    EvidenciaYaAdjunta,
     Finca,
     NoAutorizado,
+    RepoError,
     Rol,
 )
 from app.repositories.evidencia import InMemoryAlmacenEvidencia
@@ -29,7 +32,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 16
 WEBP = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"0" * 8
 
 
-def _contexto(max_bytes: int = 1024):
+def _contexto(max_bytes: int = 1024, *, repo_factory=None, almacen=None):
     usuario = CurrentUser(id=uuid.uuid4(), rol=Rol.PRODUCTOR, email="prod@test.dev")
     memoria = Memoria()
     memoria.fincas[FINCA_ID] = Finca(
@@ -39,9 +42,10 @@ def _contexto(max_bytes: int = 1024):
         nombre="Finca La Esperanza",
         municipio="Coatepec",
     )
-    almacen = InMemoryAlmacenEvidencia()
+    almacen = almacen or InMemoryAlmacenEvidencia()
+    repo = repo_factory(memoria) if repo_factory else InMemoryEvidenciaRepo(memoria)
     servicio = EvidenciaService(
-        repo_evidencia=InMemoryEvidenciaRepo(memoria),
+        repo_evidencia=repo,
         almacen=almacen,
         repo_finca=InMemoryFincaRepo(memoria),
         bucket="evidencias-lotes",
@@ -141,3 +145,83 @@ def test_url_de_lote_firmada_tras_adjuntar() -> None:
     assert url.startswith("https://storage.local/")
     assert expira_en > datetime.now(UTC)
     assert sha256 == evidencia.sha256
+
+
+# ------------------------------------------------- idempotencia y extensión
+
+
+@pytest.mark.parametrize(
+    ("datos", "content_type", "extension"),
+    [(JPEG, "image/jpeg", ".jpg"), (PNG, "image/png", ".png"), (WEBP, "image/webp", ".webp")],
+)
+def test_extension_del_storage_key_coincide_con_el_mime(
+    datos: bytes, content_type: str, extension: str
+) -> None:
+    servicio, almacen, _, usuario = _contexto()
+    evidencia = servicio.subir(
+        FINCA_ID, uuid.uuid4(), uuid.uuid4(), _upload(datos, content_type), usuario
+    )
+    assert evidencia.storage_key.endswith(extension)
+    assert almacen.contenido(evidencia.storage_key) == datos
+
+
+def test_replay_con_otro_contenido_es_409_y_no_sube() -> None:
+    """Misma Idempotency-Key con otra foto: no se sobrescribe ni se sube."""
+    servicio, almacen, memoria, usuario = _contexto()
+    lote_id = uuid.uuid4()
+    clave = uuid.uuid4()
+    primera = servicio.subir(FINCA_ID, lote_id, clave, _upload(PNG, "image/png"), usuario)
+    with pytest.raises(EvidenciaYaAdjunta):
+        servicio.subir(FINCA_ID, lote_id, clave, _upload(JPEG, "image/jpeg"), usuario)
+    assert almacen.claves() == [primera.storage_key]
+    assert len(memoria.evidencias) == 1
+
+
+# ------------------------------------------------- compensación (rollback)
+
+
+class _RepoQueFalla(InMemoryEvidenciaRepo):
+    def __init__(self, memoria: Memoria, error: Exception) -> None:
+        super().__init__(memoria)
+        self._error = error
+
+    def crear(self, evidencia):
+        raise self._error
+
+
+class _AlmacenQueNoBorra(InMemoryAlmacenEvidencia):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self._error = error
+
+    def eliminar(self, storage_key: str) -> None:
+        raise self._error
+
+
+def test_fallo_al_crear_compensa_el_objeto_huerfano() -> None:
+    """Si la fila no se crea, el binario subido se borra del bucket."""
+    error = RepoError("la BD no respondió")
+    servicio, almacen, _, usuario = _contexto(
+        repo_factory=lambda memoria: _RepoQueFalla(memoria, error)
+    )
+    with pytest.raises(RepoError):
+        servicio.subir(FINCA_ID, uuid.uuid4(), uuid.uuid4(), _upload(PNG, "image/png"), usuario)
+    assert almacen.claves() == []
+
+
+def test_compensacion_fallida_registra_y_propaga_repo_error(caplog) -> None:
+    """Si además falla el borrado, no se oculta: se loguea y se propaga 500."""
+    almacen = _AlmacenQueNoBorra(RepoError("Storage caído"))
+    servicio, _, _, usuario = _contexto(
+        repo_factory=lambda memoria: _RepoQueFalla(memoria, RepoError("la BD no respondió")),
+        almacen=almacen,
+    )
+    with (
+        caplog.at_level(logging.ERROR, logger="app.services.evidencia_service"),
+        pytest.raises(RepoError),
+    ):
+        servicio.subir(
+            FINCA_ID, uuid.uuid4(), uuid.uuid4(), _upload(PNG, "image/png"), usuario
+        )
+    assert "No se pudo eliminar el objeto huérfano" in caplog.text
+    assert almacen.claves() != []

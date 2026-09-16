@@ -9,6 +9,7 @@ lote; nunca ve credenciales de Storage ni Postgres.
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from datetime import datetime, timedelta
 
@@ -21,13 +22,24 @@ from app.models.dominio import (
     EvidenciaNoEncontrada,
     EvidenciaYaAdjunta,
     NoAutorizado,
+    RepoError,
     ahora_utc,
 )
 from app.schemas.auth import CurrentUser
 from app.schemas.evidencia import EvidenciaSubida
 from app.services.autorizacion import autorizar_finca
 
+logger = logging.getLogger(__name__)
+
 TIPOS_PERMITIDOS = ("image/jpeg", "image/png", "image/webp")
+# La extensión del `storage_key` debe ser coherente con el MIME real: el bucket
+# sirve el objeto con su `content_type`, pero un `.jpg` para un PNG confunde a
+# cualquier consumidor que mire la clave.
+EXTENSION_POR_MIME = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 # Las URLs firmadas son de vida corta: el móvil las pide al abrir la foto y no
 # las cachea. La expiración de PENDIENTES huérfanas la barre el cron (006).
 TTL_FIRMA_S = 600
@@ -99,6 +111,15 @@ class EvidenciaService:
                 or existente.lote_id != lote_id
             ):
                 raise NoAutorizado("La evidencia no pertenece a este usuario.")
+            # Replay idempotente: mismo id, mismo contenido. Si el contenido
+            # cambió, la clave fue reutilizada para otra foto y no se sube nada.
+            contenido = archivo.file.read(self._max_bytes + 1)
+            if len(contenido) > self._max_bytes:
+                raise ArchivoInvalido("La imagen supera el tamaño máximo permitido.")
+            if hashlib.sha256(contenido).hexdigest() != existente.sha256:
+                raise EvidenciaYaAdjunta(
+                    "La clave de idempotencia ya existe con otro contenido."
+                )
             return existente
 
         content_type = (archivo.content_type or "").lower()
@@ -125,7 +146,8 @@ class EvidenciaService:
 
     def _persistir(self, datos: EvidenciaSubida) -> Evidencia:
         sha256 = hashlib.sha256(datos.contenido).hexdigest()
-        storage_key = f"{datos.usuario.id}/{datos.lote_id}/{datos.idempotency_key}.jpg"
+        extension = EXTENSION_POR_MIME.get(datos.content_type, ".jpg")
+        storage_key = f"{datos.usuario.id}/{datos.lote_id}/{datos.idempotency_key}{extension}"
         evidencia = Evidencia(
             id=datos.idempotency_key,
             lote_id=datos.lote_id,
@@ -137,7 +159,27 @@ class EvidenciaService:
             size_bytes=len(datos.contenido),
         )
         self._almacen.subir(storage_key, datos.contenido, datos.content_type)
-        return self._repo_evidencia.crear(evidencia)
+        try:
+            return self._repo_evidencia.crear(evidencia)
+        except EvidenciaYaAdjunta:
+            # Conflicto real: la fila existente manda. Un replay idempotente no
+            # llega hasta aquí (lo corta `subir` con la comparación de SHA).
+            raise
+        except Exception as exc:
+            # La fila no se creó: el objeto recién subido queda huérfano y hay
+            # que compensarlo. Si la compensación falla, no se oculta: se
+            # registra el fallo técnico y se propaga un RepoError.
+            self._compensar(storage_key, exc)
+            raise
+
+    def _compensar(self, storage_key: str, causa: Exception) -> None:
+        try:
+            self._almacen.eliminar(storage_key)
+        except Exception:
+            logger.exception("No se pudo eliminar el objeto huérfano %s", storage_key)
+            raise RepoError(
+                "No se pudo guardar la evidencia y falló la compensación."
+            ) from causa
 
     # ------------------------------------------------------------------ lectura
 

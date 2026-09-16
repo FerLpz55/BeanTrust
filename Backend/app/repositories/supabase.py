@@ -22,9 +22,12 @@ from app.models.dominio import (
     EstadoPago,
     EstadoPropina,
     Evidencia,
+    EvidenciaNoEncontrada,
+    EvidenciaYaAdjunta,
     Finca,
     Lote,
     LoteEvento,
+    NoAutorizado,
     Pago,
     Propina,
     RepoError,
@@ -59,6 +62,38 @@ def _dia(valor: Any) -> date:
 
 def _o_none(valor: Any) -> Any:
     return None if valor is None else valor
+
+
+# SQLSTATE que el RPC `registrar_cosecha_con_evidencia` levanta a propósito
+# (migración 008). Cualquier otro código es un fallo de infraestructura.
+_ERRORES_RPC_COSECHA: dict[str, type] = {
+    "28000": NoAutorizado,
+    "42501": NoAutorizado,
+    "P0002": EvidenciaNoEncontrada,
+    "23505": EvidenciaYaAdjunta,
+}
+
+_MENSAJES_RPC_COSECHA: dict[type, str] = {
+    NoAutorizado: "La finca o la evidencia no corresponden al usuario.",
+    EvidenciaNoEncontrada: "La evidencia no existe.",
+    EvidenciaYaAdjunta: "El lote ya existe con datos distintos.",
+}
+
+
+def _misma_evidencia(a: Evidencia, b: Evidencia) -> bool:
+    """¿Dos evidencias con el mismo id describen exactamente el mismo objeto?
+
+    Si difieren, el `insert` chocó con la PK de una evidencia ajena y jamás se
+    puede sobrescribir: la fila existente es la fuente de verdad.
+    """
+    return (
+        a.uploader_id == b.uploader_id
+        and a.finca_id == b.finca_id
+        and a.lote_id == b.lote_id
+        and a.sha256 == b.sha256
+        and a.content_type == b.content_type
+        and a.size_bytes == b.size_bytes
+    )
 
 
 # ---------------------------------------------------------------- Lote
@@ -406,6 +441,49 @@ class SupabaseLoteRepo:
             raise RepoError("No se pudo consultar el historial.") from exc
         return [fila_a_evento(fila) for fila in (resp.data or [])]
 
+    def registrar_cosecha_con_evidencia(
+        self,
+        lote: Lote,
+        evento: LoteEvento,
+        evidencia_id: uuid.UUID,
+        adjuntada_en: datetime,
+    ) -> Lote:
+        """Alta atómica lote + evento + evidencia vía RPC `security definer`.
+
+        El hash ya lo calculó el dominio. La RPC valida tenencia e idempotencia;
+        aquí solo se traduce su SQLSTATE a errores de dominio y se relee el lote
+        (con historial y certificado) para devolver el estado real persistido.
+        """
+        parametros = {
+            "p_lote_id": str(lote.id),
+            "p_evento_id": str(evento.id),
+            "p_finca_id": str(lote.finca_id),
+            "p_codigo_publico": lote.codigo_publico,
+            "p_fecha_cosecha": lote.fecha_cosecha.isoformat(),
+            "p_peso_kg": evento.peso_kg,
+            "p_variedad": lote.variedad,
+            "p_metodo_beneficiado": lote.metodo_beneficiado,
+            "p_evidencia_id": str(evidencia_id),
+            "p_hash_etapa": evento.hash_etapa,
+        }
+        try:
+            self._cliente.rpc("registrar_cosecha_con_evidencia", parametros).execute()
+        except APIError as exc:
+            clase = _ERRORES_RPC_COSECHA.get(getattr(exc, "code", "") or "")
+            if clase is None:
+                raise RepoError("No se pudo registrar la cosecha con evidencia.") from exc
+            # El mensaje del RPC distingue conflicto de lote de evidencia ya
+            # adjunta; el mapa queda como respaldo si PostgREST no lo trae.
+            mensaje = getattr(exc, "message", None) or _MENSAJES_RPC_COSECHA[clase]
+            raise clase(mensaje) from exc
+
+        # Éxito o reintento idempotente: en ambos casos el lote ya está en la BD
+        # y se devuelve la fila real, con su historial y su certificado.
+        lote_leido = self.buscar_por_id(lote.id)
+        if lote_leido is None:
+            raise RepoError("La cosecha se registró pero no se pudo releer el lote.")
+        return lote_leido
+
 
 class SupabaseQRRepo:
     def __init__(self, cliente) -> None:
@@ -453,11 +531,23 @@ class SupabaseEvidenciaRepo:
         self._cliente = cliente
 
     def crear(self, evidencia: Evidencia) -> Evidencia:
-        # `upsert` y no `insert`: dos reintentos con la misma Idempotency-Key no
-        # deben reventar por PK duplicada si el primer request quedó a medias.
+        """Inserta la fila sin sobrescribir jamás una evidencia existente.
+
+        `insert` (no `upsert`): si la PK ya existe, se lee la fila y solo se
+        devuelve cuando describe el mismo objeto (replay idempotente). Si los
+        datos difieren, la clave de idempotencia fue reutilizada con otro
+        contenido y se responde 409.
+        """
         try:
-            self._cliente.table("evidencias").upsert(evidencia_a_fila(evidencia)).execute()
+            self._cliente.table("evidencias").insert(evidencia_a_fila(evidencia)).execute()
         except APIError as exc:
+            if getattr(exc, "code", "") == "23505":
+                existente = self.buscar_por_id(evidencia.id)
+                if existente is not None and _misma_evidencia(existente, evidencia):
+                    return existente
+                raise EvidenciaYaAdjunta(
+                    "Ya existe una evidencia con ese id y datos distintos."
+                ) from exc
             raise RepoError("No se pudo guardar la evidencia.") from exc
         return evidencia
 

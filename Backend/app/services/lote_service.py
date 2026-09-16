@@ -70,6 +70,12 @@ class LoteService:
     # ------------------------------------------------------------------ operaciones
 
     def registrar_cosecha(self, datos: LoteCreate, usuario: CurrentUser) -> Lote:
+        # Con evidencia, el alta es atómica (RPC migración 008): el repositorio
+        # persiste lote + evento génesis + evidencia ADJUNTA en una transacción.
+        # No aplica el atajo de "lote existente": un replay lo resuelve el RPC.
+        if datos.evidencia_id is not None:
+            return self._registrar_cosecha_con_evidencia(datos, usuario)
+
         lote_id = datos.id or uuid.uuid4()
         if datos.id is not None:
             existente = self._repo_lote.buscar_por_id(datos.id)
@@ -106,6 +112,33 @@ class LoteService:
         self._repo_lote.adjuntar_evento(evento)
         self._marcar_evidencia_pendiente(datos.evidencia_id, lote.id, usuario)
         return lote
+
+    def _registrar_cosecha_con_evidencia(
+        self, datos: LoteCreate, usuario: CurrentUser
+    ) -> Lote:
+        """Alta atómica con evidencia: el repo/RPC resuelve url y sha de la fila.
+
+        El dominio calcula el hash génesis; el repositorio jamás acepta la
+        evidencia del cliente sin validar tenencia y estado (ADR-14).
+        """
+        self._autorizar_finca(usuario, datos.finca_id)
+        lote = Lote(
+            id=datos.id or uuid.uuid4(),
+            finca_id=datos.finca_id,
+            codigo_publico=self._qr_service.generar_codigo_publico(),
+            fecha_cosecha=datos.fecha_cosecha,
+            variedad=datos.variedad,
+            metodo_beneficiado=datos.metodo_beneficiado,
+        )
+        evento = lote.registrar_cosecha(
+            usuario.id,
+            datos.peso_kg,
+            variedad=datos.variedad,
+            metodo_beneficiado=datos.metodo_beneficiado,
+        )
+        return self._repo_lote.registrar_cosecha_con_evidencia(
+            lote, evento, datos.evidencia_id, ahora_utc()
+        )
 
     def _resolver_evidencia(
         self,
