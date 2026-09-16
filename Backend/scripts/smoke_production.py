@@ -27,6 +27,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,6 +38,12 @@ EVENTO_DESPULPADO_ID = "f0000000-0000-4000-8000-000000000002"
 EVENTO_DESCASCARADO_ID = "f0000000-0000-4000-8000-000000000003"
 EVENTO_TOSTADO_ID = "f0000000-0000-4000-8000-000000000004"
 FECHA_COSECHA = "2026-01-15"
+
+# Evidencia fotográfica (ADR-14): lote canónico propio para no ensuciar el
+# lote de trazabilidad. Ambos UUID fijos => el smoke es repetible.
+LOTE_EVIDENCIA_ID = "f0000000-0000-4000-8000-000000000011"
+EVIDENCIA_ID = "f0000000-0000-4000-8000-000000000012"
+JPEG_MINIMO = b"\xff\xd8\xff\xe0" + b"\x00" * 512
 
 # Orden esperado de la cadena de trazabilidad hasta el certificado.
 SECUENCIA = ["COSECHA", "DESPULPADO", "DESCASCARADO", "TOSTADO"]
@@ -128,6 +135,47 @@ def _exigir(condicion: bool, mensaje: str) -> None:
 
 def _log(mensaje: str) -> None:
     print(f"  {mensaje}", flush=True)
+
+
+def _peticion_multipart(
+    ruta: str,
+    *,
+    token: str,
+    campos: dict[str, str],
+    archivo: bytes,
+    nombre_archivo: str,
+    content_type: str,
+    idempotency_key: str,
+) -> tuple[int, Any]:
+    """POST multipart manual (el smoke no depende de `requests`)."""
+    boundary = "----beantrust" + uuid.uuid4().hex
+    partes = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{clave}"\r\n\r\n{valor}\r\n'
+        for clave, valor in campos.items()
+    ]
+    partes.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="archivo"; '
+        f'filename="{nombre_archivo}"\r\nContent-Type: {content_type}\r\n\r\n'
+    )
+    cuerpo = "".join(partes).encode() + archivo + f"\r\n--{boundary}--\r\n".encode()
+    peticion = urllib.request.Request(
+        f"{_base_url()}{ruta}",
+        data=cuerpo,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": idempotency_key,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(peticion, timeout=TIMEOUT_S) as respuesta:
+            crudo = respuesta.read().decode("utf-8")
+            return respuesta.status, json.loads(crudo) if crudo else None
+    except urllib.error.HTTPError as exc:
+        crudo = exc.read().decode("utf-8")
+        return exc.code, json.loads(crudo) if crudo else None
 
 
 def _iso_utc(valor: str) -> str:
@@ -254,6 +302,56 @@ def verificar_publico(codigo: str, hash_certificado: str) -> None:
     _log(f"GET /v1/verificar/{{codigo}} -> {status} (sin token, hash coincide)")
 
 
+def subir_evidencia(token: str, finca_id: str) -> None:
+    """Sube una foto al bucket privado (idempotente por Idempotency-Key)."""
+    status, payload = _peticion_multipart(
+        "/v1/evidencias",
+        token=token,
+        campos={"finca_id": finca_id, "lote_id": LOTE_EVIDENCIA_ID},
+        archivo=JPEG_MINIMO,
+        nombre_archivo=f"{EVIDENCIA_ID}.jpg",
+        content_type="image/jpeg",
+        idempotency_key=EVIDENCIA_ID,
+    )
+    _exigir(status == 201, f"subida de evidencia devolvió {status}.")
+    sha = hashlib.sha256(JPEG_MINIMO).hexdigest()
+    _exigir(payload.get("evidencia_sha256") == sha, "el SHA-256 de la evidencia no coincide.")
+    _exigir(payload.get("size_bytes") == len(JPEG_MINIMO), "tamaño de evidencia inesperado.")
+    _log(f"POST /v1/evidencias -> {status} (SHA-256 y tamaño verificados)")
+
+
+def crear_lote_con_evidencia(token: str, finca_id: str) -> None:
+    status, payload = _peticion(
+        "POST",
+        "/v1/lotes",
+        token=token,
+        idempotency_key=LOTE_EVIDENCIA_ID,
+        body={
+            "id": LOTE_EVIDENCIA_ID,
+            "finca_id": finca_id,
+            "fecha_cosecha": FECHA_COSECHA,
+            "peso_kg": 10.0,
+            "evidencia_id": EVIDENCIA_ID,
+        },
+    )
+    _exigir(status == 201, f"alta de lote con evidencia devolvió {status}.")
+    _exigir(bool(payload.get("evidencia_sha256")), "el lote no heredó el SHA de la evidencia.")
+    _log(f"POST /v1/lotes (con evidencia) -> {status}")
+
+
+def obtener_url_evidencia(token: str) -> None:
+    status, payload = _peticion("GET", f"/v1/lotes/{LOTE_EVIDENCIA_ID}/evidencia", token=token)
+    _exigir(status == 200, f"GET evidencia devolvió {status}.")
+    sha = hashlib.sha256(JPEG_MINIMO).hexdigest()
+    _exigir(payload.get("evidencia_sha256") == sha, "la URL no corresponde a la evidencia.")
+    url = payload.get("url")
+    _exigir(bool(url), "la respuesta no trae URL firmada.")
+    with urllib.request.urlopen(url, timeout=TIMEOUT_S) as respuesta:
+        binario = respuesta.read()
+    _exigir(binario.startswith(b"\xff\xd8\xff"), "la URL firmada no sirve un JPEG.")
+    _log(f"GET /v1/lotes/{{id}}/evidencia -> {status} (URL firmada sirve el binario)")
+
+
 def main() -> int:
     print("BeanTrust · smoke test de producción", flush=True)
     try:
@@ -270,6 +368,10 @@ def main() -> int:
         certificado = detalle.get("certificado") or {}
         codigo = validar_cadena(token)
         verificar_publico(codigo, certificado["hash_sha256"])
+
+        subir_evidencia(token, finca_id)
+        crear_lote_con_evidencia(token, finca_id)
+        obtener_url_evidencia(token)
     except SmokeError as exc:
         print(f"\nFALLO: {exc}", file=sys.stderr, flush=True)
         return 1
@@ -277,7 +379,11 @@ def main() -> int:
         print(f"\nFALLO de red: {exc.reason}", file=sys.stderr, flush=True)
         return 1
 
-    print("\nOK: flujo Android -> API -> lote -> eventos -> certificado -> QR verificado.")
+    print(
+        "\nOK: flujo Android -> API -> lote -> eventos -> certificado -> QR verificado; "
+        "evidencia subida y servida por URL firmada.",
+        flush=True,
+    )
     return 0
 
 
