@@ -64,18 +64,28 @@ y borra objetos.
   y programa el cron diario `purge-staged-evidence-daily` (03:00 UTC) que invoca la
   Edge Function `purge-staged-evidence` (`supabase/functions/`) para borrar objetos
   `PENDIENTE` huérfanos (fotos que nunca se adjuntaron a un lote).
-- La URL de la función y el secreto interno se leen de **Vault**
-  (`purge_evidence_url`, `purge_evidence_secret`). Si no existen, el job se crea
-  pero falla en ejecución; no rompe la migración. Para darlos de alta:
+- La URL de la función y el secreto interno se leen de **Vault** en cada
+  ejecución del cron (`purge_evidence_url`, `purge_evidence_secret`). Si no
+  existen, el job se crea pero falla en ejecución; no rompe la migración. Para
+  darlos de alta:
 
   ```sql
   select vault.create_secret('https://<ref>.supabase.co/functions/v1/purge-staged-evidence', 'purge_evidence_url');
   select vault.create_secret('<secreto-largo-aleatorio>', 'purge_evidence_secret');
   ```
 
-  El secreto debe coincidir con el que espera la Edge Function. Tras crear o
-  rotar un secreto, vuelve a aplicar la migración 007 para que el job lea el
-  valor nuevo (`cron.schedule` actualiza el job por su nombre).
+  El secreto debe coincidir con el de la Edge Function
+  (`supabase secrets set PURGE_EVIDENCE_SECRET=...`). **La consulta a Vault
+  ocurre al ejecutar el cron**, así que rotar el secreto NO requiere reaplicar
+  la migración 007; se actualiza en su lugar:
+
+  ```sql
+  select vault.update_secret(id, '<secreto-nuevo>')
+    from vault.secrets where name = 'purge_evidence_secret';
+  ```
+
+  No crees un segundo secreto con el mismo nombre: la consulta del cron espera
+  una sola fila.
 
 ## Cómo aplicar
 
