@@ -50,6 +50,22 @@ const OPERACION_COSECHA: OperacionSync = {
   evidencia_id: ADJUNTO.id,
 };
 
+function evento(
+  id: string,
+  loteId: string,
+  tipo: 'DESPULPADO' | 'TOSTADO' = 'DESPULPADO',
+): OperacionSync {
+  return { tipo: 'avanzar_estado', id, lote_id: loteId, evento: { tipo } };
+}
+
+async function encolarEventos(
+  storage: OfflineStorage,
+  operaciones: OperacionSync[],
+  userId = USER,
+): Promise<void> {
+  await storage.guardarOptimista({ userId, recursos: [], operaciones });
+}
+
 async function encolarConFoto(storage: OfflineStorage, userId = USER): Promise<void> {
   await storage.guardarOptimista({
     userId,
@@ -244,6 +260,88 @@ describe('evidencia en la cola FIFO', () => {
     await motor.descartar(USER, cosecha!.sequence);
 
     await expect(storage.listarCola(USER)).resolves.toHaveLength(0);
+    await expect(storage.leerAdjunto(USER, ADJUNTO.id)).resolves.toBeNull();
+    expect(archivosBorrados).toEqual([ADJUNTO.localPath]);
+  });
+
+  it('descartarLote elimina cosecha, foto y TODOS los eventos del lote', async () => {
+    const { storage, motor, archivosBorrados } = crearHarness();
+    await encolarConFoto(storage);
+    await encolarEventos(storage, [evento('ev-a', LOTE), evento('ev-b', LOTE, 'TOSTADO')]);
+
+    await motor.descartarLote(USER, LOTE);
+
+    await expect(storage.listarCola(USER)).resolves.toHaveLength(0);
+    await expect(storage.leerAdjunto(USER, ADJUNTO.id)).resolves.toBeNull();
+    expect(archivosBorrados).toEqual([ADJUNTO.localPath]);
+  });
+
+  it('descartar la cosecha arrastra sus eventos posteriores (misma ruta de lote)', async () => {
+    const { storage, motor, archivosBorrados } = crearHarness();
+    await encolarConFoto(storage);
+    await encolarEventos(storage, [evento('ev-a', LOTE), evento('ev-b', LOTE, 'TOSTADO')]);
+    const cola = await storage.listarCola(USER);
+    const cosecha = cola.find((item) => item.operationId === LOTE);
+
+    await motor.descartar(USER, cosecha!.sequence);
+
+    await expect(storage.listarCola(USER)).resolves.toHaveLength(0);
+    await expect(storage.leerAdjunto(USER, ADJUNTO.id)).resolves.toBeNull();
+    expect(archivosBorrados).toEqual([ADJUNTO.localPath]);
+  });
+
+  it('descartar la foto de la cosecha también arrastra los eventos del lote', async () => {
+    const { storage, motor } = crearHarness();
+    await encolarConFoto(storage);
+    await encolarEventos(storage, [evento('ev-a', LOTE), evento('ev-b', LOTE, 'TOSTADO')]);
+    const cola = await storage.listarCola(USER);
+    const foto = cola.find((item) => item.operationId === ADJUNTO.id);
+
+    await motor.descartar(USER, foto!.sequence);
+
+    await expect(storage.listarCola(USER)).resolves.toHaveLength(0);
+  });
+
+  it('lote ya confirmado: descartar un evento no elimina los demás del lote', async () => {
+    const { storage, motor } = crearHarness({
+      ejecutar: async (op) =>
+        op.id === 'ev-a'
+          ? { id: op.id, estado: 'error', detalle: 'transición inválida' }
+          : ok(op),
+    });
+    await encolarConFoto(storage);
+    await encolarEventos(storage, [evento('ev-a', LOTE), evento('ev-b', LOTE, 'TOSTADO')]);
+
+    // La cosecha se confirma (y con ella la foto); el primer evento falla y
+    // corta el FIFO, así que ambos eventos quedan en la cola.
+    await motor.flush(USER);
+    let cola = await storage.listarCola(USER);
+    expect(cola.map((item) => item.operationId)).toEqual(['ev-a', 'ev-b']);
+
+    const primero = cola.find((item) => item.operationId === 'ev-a');
+    await motor.descartar(USER, primero!.sequence);
+
+    cola = await storage.listarCola(USER);
+    expect(cola.map((item) => item.operationId)).toEqual(['ev-b']);
+  });
+
+  it('foto huérfana (sin cosecha en cola) se descarta sola sin tocar sus eventos', async () => {
+    const { storage, motor, archivosBorrados } = crearHarness();
+    // Lote ya confirmado: solo queda una foto colgada y un evento suelto.
+    await storage.guardarOptimista({
+      userId: USER,
+      recursos: [],
+      operaciones: [OPERACION_EVIDENCIA],
+      adjunto: ADJUNTO,
+    });
+    await encolarEventos(storage, [evento('ev-a', LOTE)]);
+    const cola = await storage.listarCola(USER);
+    const foto = cola.find((item) => item.operationId === ADJUNTO.id);
+
+    await motor.descartar(USER, foto!.sequence);
+
+    const despues = await storage.listarCola(USER);
+    expect(despues.map((item) => item.operationId)).toEqual(['ev-a']);
     await expect(storage.leerAdjunto(USER, ADJUNTO.id)).resolves.toBeNull();
     expect(archivosBorrados).toEqual([ADJUNTO.localPath]);
   });

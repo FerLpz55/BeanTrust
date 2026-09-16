@@ -23,6 +23,7 @@ import type { OfflineStorage } from '@/src/offline/storage';
 import type {
   OperacionPendiente,
   OperacionSubirEvidencia,
+  RegistroCola,
   ResumenSync,
 } from '@/src/offline/types';
 
@@ -44,7 +45,18 @@ export interface MotorSync {
   enCurso(): boolean;
   flush(userId: string): Promise<ResumenSync>;
   reintentar(userId: string, sequence: number): Promise<ResumenSync>;
+  /**
+   * Descarta una operación concreta. Si es la cosecha de un lote (o su foto),
+   * enruta al descarte del lote; en cualquier otro caso (un evento suelto, una
+   * foto huérfana) elimina solo esa operación y su adjunto.
+   */
   descartar(userId: string, sequence: number): Promise<void>;
+  /**
+   * Descarta **todas** las operaciones de un lote (cosecha, foto y eventos),
+   * con sus adjuntos. Solo aplica si la cosecha sigue en la cola: un lote ya
+   * confirmado por el servidor no arrastra historial.
+   */
+  descartarLote(userId: string, loteId: string): Promise<void>;
 }
 
 interface OpcionesMotor {
@@ -60,6 +72,18 @@ interface OpcionesMotor {
 
 function mensaje(err: unknown): string {
   return err instanceof Error ? err.message : 'Error desconocido.';
+}
+
+/** Lote al que pertenece una operación de la cola (la cosecha lo lleva en `id`). */
+function loteDe(payload: OperacionPendiente): string {
+  return payload.tipo === 'registrar_cosecha' ? payload.id : payload.lote_id;
+}
+
+/** Adjunto local referenciado por una operación, si aplica. */
+function adjuntoDe(payload: OperacionPendiente): string | null {
+  if (payload.tipo === 'subir_evidencia') return payload.adjunto_id;
+  if (payload.tipo === 'registrar_cosecha') return payload.evidencia_id ?? null;
+  return null;
 }
 
 export function crearMotor({
@@ -189,6 +213,43 @@ export function crearMotor({
     return promesa;
   }
 
+  /**
+   * Elimina una única operación y, si referencia un adjunto local, su fila y
+   * archivo. Es el descarte "sin cascada".
+   */
+  async function descartarOperacion(userId: string, item: RegistroCola): Promise<void> {
+    await storage.eliminarOperacion(item.sequence);
+    const adjuntoId = adjuntoDe(item.payload);
+    if (adjuntoId) await storage.eliminarAdjunto(userId, adjuntoId);
+    onCambio?.();
+  }
+
+  /**
+   * Cascada por lote: borra **todas** sus operaciones (cosecha, foto y eventos)
+   * y los adjuntos referenciados. La regla de confirmación vive aquí: si el
+   * `registrar_cosecha` del lote ya no está en la cola (el servidor lo
+   * confirmó), no hay nada que descartar en cascada y devuelve `false` para que
+   * el descarte individual decida.
+   */
+  async function cascadaLote(userId: string, loteId: string): Promise<boolean> {
+    const cola = await storage.listarCola(userId);
+    const cosechaEnCola = cola.some(
+      (item) => item.payload.tipo === 'registrar_cosecha' && item.payload.id === loteId,
+    );
+    if (!cosechaEnCola) return false;
+
+    const adjuntos = new Set<string>();
+    for (const item of cola) {
+      if (loteDe(item.payload) !== loteId) continue;
+      await storage.eliminarOperacion(item.sequence);
+      const adjuntoId = adjuntoDe(item.payload);
+      if (adjuntoId) adjuntos.add(adjuntoId);
+    }
+    for (const adjuntoId of adjuntos) await storage.eliminarAdjunto(userId, adjuntoId);
+    onCambio?.();
+    return true;
+  }
+
   return {
     enCurso: () => enVuelo.size > 0,
 
@@ -203,41 +264,24 @@ export function crearMotor({
       return flush(userId);
     },
 
-    /**
-     * Descarta una operación y su pareja de evidencia. Si la operación es una
-     * foto, arrastra la cosecha que la referencia; si es una cosecha con foto,
-     * arrastra la subida. En ambos casos se borra el adjunto (fila + archivo).
-     */
     async descartar(userId, sequence) {
       const cola = await storage.listarCola(userId);
       const objetivo = cola.find((item) => item.sequence === sequence);
       if (!objetivo) return;
 
-      const aEliminar = new Set<number>([objetivo.sequence]);
-      let adjuntoId: string | null = null;
-
-      if (objetivo.payload.tipo === 'subir_evidencia') {
-        adjuntoId = objetivo.payload.adjunto_id;
-        for (const item of cola) {
-          if (
-            item.payload.tipo === 'registrar_cosecha' &&
-            item.payload.evidencia_id === adjuntoId
-          ) {
-            aEliminar.add(item.sequence);
-          }
-        }
-      } else if (objetivo.payload.tipo === 'registrar_cosecha' && objetivo.payload.evidencia_id) {
-        adjuntoId = objetivo.payload.evidencia_id;
-        for (const item of cola) {
-          if (item.payload.tipo === 'subir_evidencia' && item.payload.adjunto_id === adjuntoId) {
-            aEliminar.add(item.sequence);
-          }
-        }
+      // La cosecha y su foto son operaciones de lote: misma ruta que
+      // `descartarLote`. Si el lote ya fue confirmado, la cascada no aplica y
+      // se cae al descarte individual (foto huérfana o evento suelto).
+      if (objetivo.payload.tipo === 'registrar_cosecha' || objetivo.payload.tipo === 'subir_evidencia') {
+        const aplicada = await cascadaLote(userId, loteDe(objetivo.payload));
+        if (aplicada) return;
       }
 
-      for (const seq of aEliminar) await storage.eliminarOperacion(seq);
-      if (adjuntoId) await storage.eliminarAdjunto(userId, adjuntoId);
-      onCambio?.();
+      await descartarOperacion(userId, objetivo);
+    },
+
+    async descartarLote(userId, loteId) {
+      await cascadaLote(userId, loteId);
     },
   };
 }

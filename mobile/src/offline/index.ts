@@ -219,31 +219,16 @@ export async function descartar(sequence: number): Promise<void> {
 /**
  * Descarta todo lo pendiente de un lote: sus operaciones, los adjuntos que
  * referencian (fila + archivo). Se usa al abandonar un alta encolada.
+ *
+ * Delega en la ruta única del motor (`descartarLote`), que solo aplica la
+ * cascada si la cosecha del lote sigue en la cola: un lote ya confirmado por el
+ * servidor no arrastra su historial remoto.
  */
 export async function descartarLotePendiente(loteId: string): Promise<void> {
-  const store = await obtenerAlmacen();
+  await obtenerAlmacen();
   const userId = contexto.userId;
-  if (!userId) return;
-
-  const cola = await store.listarCola(userId);
-  const aEliminar: number[] = [];
-  const adjuntos = new Set<string>();
-
-  for (const item of cola) {
-    const payload = item.payload;
-    const delLote =
-      payload.tipo === 'registrar_cosecha' ? payload.id === loteId : payload.lote_id === loteId;
-    if (!delLote) continue;
-    aEliminar.push(item.sequence);
-    if (payload.tipo === 'subir_evidencia') adjuntos.add(payload.adjunto_id);
-    if (payload.tipo === 'registrar_cosecha' && payload.evidencia_id) {
-      adjuntos.add(payload.evidencia_id);
-    }
-  }
-
-  for (const sequence of aEliminar) await store.eliminarOperacion(sequence);
-  for (const adjuntoId of adjuntos) await store.eliminarAdjunto(userId, adjuntoId);
-  notificar();
+  if (!userId || !motor) return;
+  await motor.descartarLote(userId, loteId);
 }
 
 export function esOnline(): boolean {
