@@ -59,8 +59,10 @@ pnpm typecheck        # tsc --noEmit (los tipos deben compilar limpio)
   expone `subirEvidencia` y `obtenerUrlEvidencia` (URL firmada ~10 min).
 - En la cola offline la foto vive en la tabla `attachments`: el motor sube
   primero `subir_evidencia` y después la operación de cosecha, conserva el
-  archivo hasta que el lote lo referencia y lo borra al confirmar. Descartar la
-  operación arrastra la pareja lote+foto.
+  archivo hasta que el lote lo referencia y lo borra al confirmar. El descarte
+  es **en cascada solo para lotes no confirmados**: si la cosecha sigue en cola,
+  borra foto + cosecha + eventos locales del lote; si el lote ya fue confirmado,
+  descarta únicamente la operación concreta y nunca arrastra historial remoto.
 
 ### Rendimiento
 

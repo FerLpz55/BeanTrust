@@ -14,13 +14,33 @@ db/
 │   ├── 004_cadena_completa_propina.sql  # sub-etapas + propinas
 │   ├── 005_sync_auth_usuarios.sql       # espejo auth.users -> usuarios
 │   ├── 006_hardening_storage_rls_rate_limit.sql  # app_private.bean_rol + RLS efectiva + evidencias + rate limit
-│   └── 007_evidencias_storage_cron.sql           # bucket privado + cron de purga
+│   ├── 007_evidencias_storage_cron.sql           # bucket privado + cron de purga
+│   ├── 008_integridad_evidencias.sql             # double precision + bitácora + RPC atómica de cosecha
+│   └── 009_fix_rpc_replay.sql                    # idempotencia de la RPC por datos estables
 └── seed/
     ├── seed.sql                  # usuarios/fincas de desarrollo (ids fijos)
     └── seed_supabase.sql         # seed de un proyecto Supabase real
 ```
 
-El CLI de Supabase lee estas migraciones por el symlink `supabase/migrations -> ../Backend/db/migrations`. Las pruebas pgTAP viven en `supabase/tests/` (RLS, Storage, rate limit).
+El CLI de Supabase lee estas migraciones por el symlink `supabase/migrations -> ../Backend/db/migrations`. Las pruebas pgTAP viven en `supabase/tests/` (RLS, Storage, rate limit, integridad).
+
+### Integridad de la cadena (008/009)
+
+- Los campos físicos que entran al hash por etapa (`peso_kg`, `merma_pct`,
+  `humedad_*`, `densidad`, …) son `double precision`, no `real`: así el float64
+  que serializa FastAPI coincide de forma estable con lo que devuelve Postgres y
+  la cadena es reproducible.
+- `app_private.reparacion_cadena_evento` es la bitácora permanente de la
+  reparación histórica (hash/raíz anterior y nueva, motivo, versión, operador,
+  checksum). Sin grants de usuario.
+- `public.registrar_cosecha_con_evidencia(...)` es la RPC `security definer`
+  (solo `authenticated`) que crea lote + evento génesis + evidencia `ADJUNTA` en
+  una transacción. La 009 corrige su idempotencia: compara datos estables, no el
+  hash (que incluye `registrado_en`).
+- La reparación se audita y se genera con
+  `python -m scripts.auditar_integridad_historica` (solo lectura por defecto;
+  `--generar-reparacion plan.sql` escribe el SQL transaccional con backup lógico,
+  locks y bitácora, pero **no lo ejecuta**).
 
 ## Convenciones
 

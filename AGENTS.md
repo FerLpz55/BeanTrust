@@ -70,7 +70,11 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   (`bean_consume_rate_limit`, HMAC de `ip|ruta` en login/register/refresh/recover) y **refresh
   rotativo** local (`jti`+`family`; reuso revoca la familia). **Evidencia privada (ADR-14)**
   real: `POST /v1/evidencias` + `GET /v1/lotes/{lote_id}/evidencia` (bucket privado, migraciones
-  006/007, Edge Function de purga).
+  006/007, Edge Function de purga). **Integridad (008/009)**: los campos hasheados son
+  `double precision` (hash reproducible), el alta con foto es atómica vía RPC
+  `registrar_cosecha_con_evidencia`, y la reparación histórica queda auditada en
+  `app_private.reparacion_cadena_evento` (`scripts/auditar_integridad_historica.py`,
+  solo lectura por defecto).
 - Mobile: **todos los flujos consumen el backend real** (no quedan stores mock).
   `src/api/` cubre auth, fincas, lotes, verificar, pagos, propinas, mercado y evidencias;
   `client.ts` renueva el token ante un 401 y manda `Idempotency-Key`. El adaptador
