@@ -7,6 +7,7 @@ replicar: tenencia, estado PENDIENTE y reintento idempotente.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
@@ -22,6 +23,7 @@ from app.models.dominio import (
 from app.repositories.in_memory import InMemoryLoteRepo, Memoria
 
 AHORA = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+OTRO = datetime(2026, 8, 25, 13, 30, tzinfo=UTC)
 ACTOR = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
@@ -95,6 +97,28 @@ def test_reintento_identico_devuelve_el_lote_existente() -> None:
     assert segunda is primera
     assert len(memoria.lotes) == 1
     assert len(memoria.eventos) == 1
+
+
+def test_alta_conserva_el_timestamp_del_evento() -> None:
+    """El evento persistido usa exactamente el `registrado_en` que entró al hash."""
+    repo, memoria, lote, evento, evidencia = _contexto()
+    repo.registrar_cosecha_con_evidencia(lote, evento, evidencia.id, AHORA)
+    assert memoria.eventos[evento.id].registrado_en == evento.registrado_en
+    assert lote.historial[0].registrado_en == evento.registrado_en
+
+
+def test_reintento_con_timestamp_distinto_no_duplica() -> None:
+    """El replay (sync offline) trae otro `registrado_en`: es idempotente igual."""
+    repo, memoria, lote, evento, evidencia = _contexto()
+    repo.registrar_cosecha_con_evidencia(lote, evento, evidencia.id, AHORA)
+
+    replay = replace(evento, registrado_en=OTRO)
+    assert replay.registrado_en != evento.registrado_en
+    resultado = repo.registrar_cosecha_con_evidencia(lote, replay, evidencia.id, AHORA)
+
+    assert resultado is lote
+    assert len(memoria.eventos) == 1
+    assert len(lote.historial) == 1
 
 
 def test_reintento_con_datos_distintos_conflicto() -> None:

@@ -465,6 +465,7 @@ class SupabaseLoteRepo:
             "p_metodo_beneficiado": lote.metodo_beneficiado,
             "p_evidencia_id": str(evidencia_id),
             "p_hash_etapa": evento.hash_etapa,
+            "p_registrado_en": evento.registrado_en.isoformat(),
         }
         try:
             self._cliente.rpc("registrar_cosecha_con_evidencia", parametros).execute()

@@ -494,6 +494,21 @@ def require_rol(*roles: Rol):
     return dependencia
 
 
+def bloquear_escrituras_mantenimiento(settings: SettingsDep) -> None:
+    """Corta los POST de escritura durante una ventana de mantenimiento.
+
+    Se aplica como dependencia de router/endpoint. Devuelve 503 con
+    `Retry-After` cuando `BEAN_MAINTENANCE_WRITES=true`; en cualquier otro caso
+    no hace nada.
+    """
+    if settings.maintenance_writes:
+        raise HTTPException(
+            status_code=503,
+            detail="maintenance_writes_disabled",
+            headers={"Retry-After": "600"},
+        )
+
+
 IdempotenciaDep = Annotated[uuid.UUID, Header(alias="Idempotency-Key")]
 
 

@@ -12,6 +12,7 @@ from app.dependencies import (
     IdempotenciaDep,
     PagoServiceDep,
     PropinaServiceDep,
+    bloquear_escrituras_mantenimiento,
     require_rol,
 )
 from app.models.dominio import Rol
@@ -29,7 +30,10 @@ router = APIRouter(prefix="/pagos", tags=["pagos"])
 @router.post(
     "",
     status_code=202,
-    dependencies=[Depends(require_rol(Rol.COOPERATIVA))],
+    dependencies=[
+        Depends(require_rol(Rol.COOPERATIVA)),
+        Depends(bloquear_escrituras_mantenimiento),
+    ],
 )
 def registrar_pago(
     body: PagoCreate,
@@ -86,7 +90,14 @@ router_propinas = APIRouter(
 )
 
 
-@router_propinas.post("", status_code=201, dependencies=[Depends(require_rol(Rol.COMPRADOR))])
+@router_propinas.post(
+    "",
+    status_code=201,
+    dependencies=[
+        Depends(require_rol(Rol.COMPRADOR)),
+        Depends(bloquear_escrituras_mantenimiento),
+    ],
+)
 def registrar_propina(
     body: PropinaCreate,
     idempotencia: IdempotenciaDep,

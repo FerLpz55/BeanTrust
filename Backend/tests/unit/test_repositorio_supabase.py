@@ -357,6 +357,10 @@ def test_registrar_cosecha_con_evidencia_llama_rpc_y_relee() -> None:
     assert parametros["p_evidencia_id"] == str(EVIDENCIA_ID)
     assert parametros["p_hash_etapa"] == "h" * 64
     assert parametros["p_peso_kg"] == 87.6
+    # El timestamp canónico viaja explícito: es el mismo que entró al hash.
+    assert parametros["p_registrado_en"] == AHORA.isoformat()
+    # `adjuntada_en` es el reloj de la evidencia, no un parámetro del RPC.
+    assert "adjuntada_en" not in parametros
     # Se relee de la BD (con historial y certificado), no se devuelve el objeto local.
     assert resultado.id == LOTE_ID
     assert len(resultado.historial) == 1

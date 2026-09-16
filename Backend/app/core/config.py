@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     docs_enabled: bool = True
 
+    # Ventana de mantenimiento: con `True` los POST que mutan la cadena de
+    # integridad (lotes, eventos, sync, evidencias, pagos y propinas) responden
+    # 503 con `Retry-After`. Los GET, login/refresh/recover y la verificación
+    # pública siguen disponibles.
+    maintenance_writes: bool = False
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _parsear_origins(cls, valor: object) -> object:

@@ -148,18 +148,22 @@ class InMemoryLoteRepo:
 
         existente = self._memoria.lotes.get(lote.id)
         if existente is not None:
-            hash_existente = next(
-                (
-                    e.hash_etapa
-                    for e in existente.historial
-                    if e.tipo is TipoEvento.COSECHA
-                ),
+            # Idempotencia por datos ESTABLES, no por hash: el `hash_etapa`
+            # incluye `registrado_en`, que cambia en cada reintento. Espeja la
+            # rama de replay de la RPC (migración 010).
+            genesis = next(
+                (e for e in existente.historial if e.tipo is TipoEvento.COSECHA),
                 None,
             )
             adjunta = self._buscar_adjunta(existente.id)
             if (
                 existente.finca_id == lote.finca_id
-                and hash_existente == evento.hash_etapa
+                and existente.fecha_cosecha == lote.fecha_cosecha
+                and existente.variedad == lote.variedad
+                and existente.metodo_beneficiado == lote.metodo_beneficiado
+                and genesis is not None
+                and genesis.peso_kg == evento.peso_kg
+                and genesis.actor_id == evento.actor_id
                 and (adjunta is None or adjunta.id == evidencia_id)
             ):
                 if evidencia.estado is EstadoEvidencia.PENDIENTE:

@@ -6,14 +6,23 @@ import uuid
 
 from fastapi import APIRouter, Depends
 
-from app.dependencies import CurrentUserDep, IdempotenciaDep, LoteServiceDep, require_rol
+from app.dependencies import (
+    CurrentUserDep,
+    IdempotenciaDep,
+    LoteServiceDep,
+    bloquear_escrituras_mantenimiento,
+    require_rol,
+)
 from app.models.dominio import Rol
 from app.schemas.lote import EventoCreate, LoteDetalleRead
 
 router = APIRouter(
     prefix="/lotes/{lote_id}/eventos",
     tags=["lotes"],
-    dependencies=[Depends(require_rol(Rol.PRODUCTOR, Rol.COOPERATIVA, Rol.ADMIN))],
+    dependencies=[
+        Depends(require_rol(Rol.PRODUCTOR, Rol.COOPERATIVA, Rol.ADMIN)),
+        Depends(bloquear_escrituras_mantenimiento),
+    ],
 )
 
 

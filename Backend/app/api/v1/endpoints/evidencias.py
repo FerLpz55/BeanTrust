@@ -16,6 +16,7 @@ from app.dependencies import (
     CurrentUserDep,
     EvidenciaServiceDep,
     IdempotenciaDep,
+    bloquear_escrituras_mantenimiento,
     require_rol,
 )
 from app.models.dominio import Rol
@@ -24,7 +25,10 @@ from app.schemas.evidencia import EvidenciaRead
 router = APIRouter(
     prefix="/evidencias",
     tags=["evidencias"],
-    dependencies=[Depends(require_rol(Rol.PRODUCTOR, Rol.COOPERATIVA, Rol.ADMIN))],
+    dependencies=[
+        Depends(require_rol(Rol.PRODUCTOR, Rol.COOPERATIVA, Rol.ADMIN)),
+        Depends(bloquear_escrituras_mantenimiento),
+    ],
 )
 
 

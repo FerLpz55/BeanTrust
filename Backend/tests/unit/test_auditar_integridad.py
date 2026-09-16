@@ -97,7 +97,14 @@ def test_detecta_hash_corrupto_y_genera_reparacion() -> None:
     assert "historical_desc_order_repair" in sql
     assert "008_integridad_evidencias" in sql
     assert reporte.checksum in sql
-    assert "app_private.backup_test_lotes" in sql
+    # Guarda de fila: bloque `do` con `get diagnostics` y aborto si no es 1.
+    assert "do $reparacion$" in sql
+    assert "get diagnostics v_count = row_count" in sql
+    assert "repair_row_count_expected_1_got_%" in sql
+    # No hay backup dentro de la transacción (desaparecería en el rollback).
+    assert "create table app_private.backup" not in sql
+    # El lock se toma antes de cualquier corrección.
+    assert sql.index("lock table public.lotes") < sql.index("do $reparacion$")
 
 
 def test_certificado_corrupto_se_detecta_y_se_repara() -> None:
@@ -126,6 +133,28 @@ def test_certificado_corrupto_se_detecta_y_se_repara() -> None:
         f"where id = '{qr.id}' and hash_sha256 = '{'f' * 64}'" in sql
     )
     assert f"'{qr.id}'" in sql
+
+
+def test_certificado_emitido_antes_de_eventos_posteriores_usa_el_corte() -> None:
+    """La bitácora enlaza el último evento con `registrado_en <= emitido_en`."""
+    servicio = QrService()
+    lote = _lote_tostado()
+    eventos = list(lote.historial)
+    # Certificado emitido al segundo evento: los posteriores no entran al corte.
+    qr = replace(
+        servicio.crear_certificado(lote),
+        emitido_en=eventos[1].registrado_en,
+        hash_sha256="f" * 64,
+    )
+    lote.generar_certificado(qr)
+
+    reporte = auditar_integridad([lote], {lote.id: eventos}, {lote.id: [qr]}, servicio)
+
+    assert reporte.certificados_invalidos == 1
+    diferencia = reporte.certificados_a_reparar[0]
+    assert diferencia.evento_id == eventos[1].id
+    assert diferencia.emitido_en == eventos[1].registrado_en
+    assert diferencia.hash_evento_anterior == eventos[1].hash_etapa
 
 
 def test_reporte_sano_genera_sql_sin_operaciones() -> None:

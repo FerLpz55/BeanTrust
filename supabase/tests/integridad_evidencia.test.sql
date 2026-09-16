@@ -8,7 +8,7 @@
 
 begin;
 
-select plan(22);
+select plan(25);
 
 -- ------------------------------------------------------------------ esquema
 select is(
@@ -52,16 +52,30 @@ select ok(
 select ok(
   has_function_privilege(
     'authenticated',
-    'public.registrar_cosecha_con_evidencia(uuid,uuid,uuid,text,date,double precision,text,text,uuid,text)',
+    'public.registrar_cosecha_con_evidencia(uuid,uuid,uuid,text,date,double precision,text,text,uuid,text,timestamptz)',
     'EXECUTE'),
-  'authenticated puede ejecutar la RPC');
+  'authenticated puede ejecutar el wrapper público');
 
 select ok(
   not has_function_privilege(
     'anon',
-    'public.registrar_cosecha_con_evidencia(uuid,uuid,uuid,text,date,double precision,text,text,uuid,text)',
+    'public.registrar_cosecha_con_evidencia(uuid,uuid,uuid,text,date,double precision,text,text,uuid,text,timestamptz)',
     'EXECUTE'),
-  'anon no puede ejecutar la RPC');
+  'anon no puede ejecutar el wrapper público');
+
+select ok(
+  not has_function_privilege(
+    'anon',
+    'app_private.registrar_cosecha_con_evidencia(uuid,uuid,uuid,text,date,double precision,text,text,uuid,text,timestamptz)',
+    'EXECUTE'),
+  'anon no puede ejecutar la función privada');
+
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'app_private.registrar_cosecha_con_evidencia(uuid,uuid,uuid,text,date,double precision,text,text,uuid,text,timestamptz)',
+    'EXECUTE'),
+  'authenticated puede ejecutar la función privada (wrapper invoker)');
 
 -- ------------------------------------------------------------------ fixtures
 insert into public.usuarios (id, email, rol, nombre) values
@@ -112,7 +126,8 @@ select is(
     '00000000-0000-0000-0000-0000000000b1',
     '00000000-0000-0000-0000-000000000011',
     'LT-TEST0001', '2026-09-15', 87.6, 'Typica', 'lavado',
-    '00000000-0000-0000-0000-0000000000e1', repeat('1', 64))),
+    '00000000-0000-0000-0000-0000000000e1', repeat('1', 64),
+    '2026-09-15T12:00:00Z')),
   false,
   'RPC crea el lote (reintento = false)');
 
@@ -130,6 +145,12 @@ select is(
   1, 'el evento génesis quedó creado');
 
 select is(
+  (select registrado_en from public.lote_eventos
+    where lote_id = '00000000-0000-0000-0000-0000000000a1' and tipo = 'COSECHA'),
+  '2026-09-15T12:00:00Z'::timestamptz,
+  'el evento persiste exactamente el p_registrado_en recibido');
+
+select is(
   (select estado from public.evidencias where id = '00000000-0000-0000-0000-0000000000e1'),
   'ADJUNTA', 'la evidencia quedó ADJUNTA');
 
@@ -142,7 +163,8 @@ select is(
     '00000000-0000-0000-0000-0000000000b1',
     '00000000-0000-0000-0000-000000000011',
     'LT-TEST0001', '2026-09-15', 87.6, 'Typica', 'lavado',
-    '00000000-0000-0000-0000-0000000000e1', repeat('1', 64))),
+    '00000000-0000-0000-0000-0000000000e1', repeat('1', 64),
+    '2026-09-15T13:00:00Z')),
   true,
   'reintento idéntico devuelve el lote existente (reintento = true)');
 
@@ -157,7 +179,8 @@ select is(
     '00000000-0000-0000-0000-0000000000b1',
     '00000000-0000-0000-0000-000000000011',
     'LT-TEST0001', '2026-09-15', 87.6, 'Typica', 'lavado',
-    '00000000-0000-0000-0000-0000000000e1', repeat('9', 64))),
+    '00000000-0000-0000-0000-0000000000e1', repeat('9', 64),
+    '2026-09-15T14:00:00Z')),
   true,
   'reintento con hash nuevo (timestamp) sigue siendo idempotente');
 
@@ -167,7 +190,8 @@ select throws_ok($$
     '00000000-0000-0000-0000-0000000000b1',
     '00000000-0000-0000-0000-000000000011',
     'LT-TEST0001', '2026-09-15', 99.0, 'Typica', 'lavado',
-    '00000000-0000-0000-0000-0000000000e1', repeat('9', 64))
+    '00000000-0000-0000-0000-0000000000e1', repeat('9', 64),
+    '2026-09-15T15:00:00Z')
 $$, '23505', null::text, 'reintento con datos distintos se rechaza');
 
 -- ------------------------------------------------------------------ RPC: tenencia
@@ -182,7 +206,8 @@ select throws_ok($$
     '00000000-0000-0000-0000-0000000000b2',
     '00000000-0000-0000-0000-000000000011',
     'LT-TEST0002', '2026-09-15', 10.0, null, null,
-    '00000000-0000-0000-0000-0000000000e2', repeat('2', 64))
+    '00000000-0000-0000-0000-0000000000e2', repeat('2', 64),
+    '2026-09-15T12:00:00Z')
 $$, '42501', null::text, 'productor ajeno no puede crear lote en la finca');
 
 reset role;
@@ -196,7 +221,8 @@ select throws_ok($$
     '00000000-0000-0000-0000-0000000000b2',
     '00000000-0000-0000-0000-000000000011',
     'LT-TEST0002', '2026-09-15', 10.0, null, null,
-    '00000000-0000-0000-0000-0000000000e2', repeat('2', 64))
+    '00000000-0000-0000-0000-0000000000e2', repeat('2', 64),
+    '2026-09-15T12:00:00Z')
 $$, '42501', null::text, 'no se puede usar evidencia de otro uploader');
 
 select throws_ok($$
@@ -205,7 +231,8 @@ select throws_ok($$
     '00000000-0000-0000-0000-0000000000b3',
     '00000000-0000-0000-0000-000000000011',
     'LT-TEST0003', '2026-09-15', 10.0, null, null,
-    '00000000-0000-0000-0000-0000000000e3', repeat('3', 64))
+    '00000000-0000-0000-0000-0000000000e3', repeat('3', 64),
+    '2026-09-15T12:00:00Z')
 $$, '23505', null::text, 'una evidencia ya ADJUNTA no se puede reusar');
 
 reset role;
@@ -232,7 +259,8 @@ select throws_ok($$
     '00000000-0000-0000-0000-0000000000b9',
     '00000000-0000-0000-0000-000000000011',
     'LT-TEST0009', '2026-09-15', 10.0, null, null,
-    '00000000-0000-0000-0000-0000000000e1', repeat('4', 64))
+    '00000000-0000-0000-0000-0000000000e1', repeat('4', 64),
+    '2026-09-15T12:00:00Z')
 $$, '28000', null::text, 'sin auth.uid() la RPC rechaza');
 
 select * from finish();

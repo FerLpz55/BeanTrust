@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response
 
-from app.dependencies import CurrentUserDep, LoteServiceDep, require_rol
+from app.dependencies import (
+    CurrentUserDep,
+    LoteServiceDep,
+    bloquear_escrituras_mantenimiento,
+    require_rol,
+)
 from app.models.dominio import (
     ErrorDeDominio,
     EventoDuplicado,
@@ -24,7 +29,10 @@ from app.schemas.sync import (
 router = APIRouter(
     prefix="/sync",
     tags=["sync"],
-    dependencies=[Depends(require_rol(Rol.PRODUCTOR, Rol.COOPERATIVA, Rol.ADMIN))],
+    dependencies=[
+        Depends(require_rol(Rol.PRODUCTOR, Rol.COOPERATIVA, Rol.ADMIN)),
+        Depends(bloquear_escrituras_mantenimiento),
+    ],
 )
 
 

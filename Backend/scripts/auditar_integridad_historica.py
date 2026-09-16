@@ -75,6 +75,7 @@ class CertificadoAReparar:
     hash_evento_nuevo: str
     raiz_anterior: str
     raiz_nueva: str
+    emitido_en: datetime
 
 
 @dataclass(frozen=True)
@@ -207,10 +208,19 @@ def auditar_integridad(
             raiz = servicio.hash_lote(verificado, hasta_emitido_en=True)
             if raiz == qr.hash_sha256:
                 continue
-            if corregidos:
-                evento_id = corregidos[-1].id
-                hash_anterior = eventos[-1].hash_etapa
-                hash_nuevo = esperados[-1]
+            # El certificado se corta por `emitido_en`: el eslabón que hay que
+            # registrar es el último evento con `registrado_en <= emitido_en`,
+            # nunca el último del lote (puede haber eventos posteriores).
+            al_corte = [
+                (evento, esperado)
+                for evento, esperado in zip(eventos, esperados, strict=True)
+                if evento.registrado_en <= qr.emitido_en
+            ]
+            if al_corte:
+                evento_corte, hash_corte = al_corte[-1]
+                evento_id = evento_corte.id
+                hash_anterior = evento_corte.hash_etapa
+                hash_nuevo = hash_corte
             else:
                 # Un certificado sin eventos es imposible por la máquina de
                 # estados; se deja una fila de bitácora con hashes vacíos.
@@ -226,6 +236,7 @@ def auditar_integridad(
                     hash_evento_nuevo=hash_nuevo,
                     raiz_anterior=qr.hash_sha256,
                     raiz_nueva=raiz,
+                    emitido_en=qr.emitido_en,
                 )
             )
 
@@ -262,6 +273,76 @@ def _sufijo_seguro(sufijo: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", sufijo)
 
 
+def _do_update_evento(evento: EventoAReparar, checksum: str, operador: str) -> str:
+    """Bloque `do` que corrige un hash y exige exactamente una fila afectada."""
+    return "\n".join(
+        [
+            "do $reparacion$",
+            "declare",
+            "  v_count integer;",
+            "begin",
+            "  update public.lote_eventos",
+            f"     set hash_etapa = {_literal(evento.hash_nuevo)}",
+            f"   where id = {_literal(str(evento.evento_id))} "
+            f"and {_condicion_optimista('hash_etapa', evento.hash_anterior)};",
+            "  get diagnostics v_count = row_count;",
+            "  if v_count <> 1 then",
+            "    raise exception 'repair_row_count_expected_1_got_%', v_count;",
+            "  end if;",
+            "  insert into app_private.reparacion_cadena_evento",
+            "    (lote_id, evento_id, hash_anterior, hash_nuevo, motivo, "
+            "version_migracion, operador, checksum_reporte)",
+            f"  values ({_literal(str(evento.lote_id))}, "
+            f"{_literal(str(evento.evento_id))}, "
+            f"{_literal_o_null(evento.hash_anterior)}, "
+            f"{_literal(evento.hash_nuevo)}, {_literal(MOTIVO)}, "
+            f"{_literal(VERSION_MIGRACION)}, {_literal(operador)}, "
+            f"{_literal(checksum)});",
+            "end",
+            "$reparacion$;",
+            "",
+        ]
+    )
+
+
+def _do_update_certificado(
+    certificado: CertificadoAReparar, checksum: str, operador: str
+) -> str:
+    """Bloque `do` que corrige una raíz y exige exactamente una fila afectada."""
+    return "\n".join(
+        [
+            "do $reparacion$",
+            "declare",
+            "  v_count integer;",
+            "begin",
+            "  update public.qr_certificado",
+            f"     set hash_sha256 = {_literal(certificado.raiz_nueva)}",
+            f"   where id = {_literal(str(certificado.certificado_id))} "
+            f"and {_condicion_optimista('hash_sha256', certificado.raiz_anterior)};",
+            "  get diagnostics v_count = row_count;",
+            "  if v_count <> 1 then",
+            "    raise exception 'repair_row_count_expected_1_got_%', v_count;",
+            "  end if;",
+            "  insert into app_private.reparacion_cadena_evento",
+            "    (lote_id, evento_id, hash_anterior, hash_nuevo, raiz_anterior, "
+            "raiz_nueva, certificado_id, motivo, version_migracion, operador, "
+            "checksum_reporte)",
+            f"  values ({_literal(str(certificado.lote_id))}, "
+            f"{_literal(str(certificado.evento_id))}, "
+            f"{_literal_o_null(certificado.hash_evento_anterior)}, "
+            f"{_literal(certificado.hash_evento_nuevo)}, "
+            f"{_literal(certificado.raiz_anterior)}, "
+            f"{_literal(certificado.raiz_nueva)}, "
+            f"{_literal(str(certificado.certificado_id))}, {_literal(MOTIVO)}, "
+            f"{_literal(VERSION_MIGRACION)}, {_literal(operador)}, "
+            f"{_literal(checksum)});",
+            "end",
+            "$reparacion$;",
+            "",
+        ]
+    )
+
+
 def generar_sql_reparacion(
     reporte: ReporteIntegridad,
     *,
@@ -270,16 +351,23 @@ def generar_sql_reparacion(
     lock_timeout: str = "5s",
     statement_timeout: str = "5min",
 ) -> str:
-    """Genera el SQL transaccional de reparación. No lo ejecuta."""
+    """Genera el SQL transaccional de reparación. No lo ejecuta.
+
+    El SQL no crea backups dentro de la transacción (un `create table` se
+    desharía en el rollback): el respaldo recuperable es externo
+    (`supabase db dump` / `pg_dump`). Cada `update` va dentro de un bloque `do`
+    que exige `row_count = 1` y solo entonces inserta la bitácora.
+    """
     if not reporte.hay_diferencias:
         return "-- Nada que reparar: la cadena de eventos es íntegra.\n"
 
-    etiqueta = _sufijo_seguro(sufijo)
     lineas: list[str] = [
         "-- =============================================================================",
-        "-- BeanTrust · Reparación histórica de la cadena de eventos (migración 008)",
+        "-- BeanTrust · Reparación histórica de la cadena de eventos (migraciones 008-010)",
         "-- Generado por scripts/auditar_integridad_historica.py. NO se ejecuta solo:",
-        "-- revísalo y córrelo en una ventana de mantenimiento.",
+        "-- revísalo y córrelo en una ventana de mantenimiento con conexión de owner.",
+        "-- El backup recuperable es EXTERNO (supabase db dump / pg_dump); este script",
+        "-- no crea tablas de backup dentro de la transacción.",
         f"-- operador: {operador}",
         f"-- checksum_reporte: {reporte.checksum}",
         f"-- eventos a reparar: {reporte.eventos_invalidos}",
@@ -292,86 +380,32 @@ def generar_sql_reparacion(
         f"set local lock_timeout = {_literal(lock_timeout)};",
         f"set local statement_timeout = {_literal(statement_timeout)};",
         "",
-        "-- (2) Backup lógico de las tres tablas.",
-        f"create table app_private.backup_{etiqueta}_lotes as select * from public.lotes;",
-        f"create table app_private.backup_{etiqueta}_lote_eventos as "
-        "select * from public.lote_eventos;",
-        f"create table app_private.backup_{etiqueta}_qr_certificado as "
-        "select * from public.qr_certificado;",
-        "",
-        "-- (3) Bloqueo exclusivo durante la reparación.",
+        "-- (2) Bloqueo exclusivo antes de leer/corregir: sin escrituras concurrentes.",
         "lock table public.lotes, public.lote_eventos, public.qr_certificado "
         "in access exclusive mode;",
         "",
-        "-- (4) Desactivar los triggers append-only para poder corregir hashes.",
+        "-- (3) Desactivar los triggers append-only para poder corregir hashes.",
         "alter table public.lote_eventos disable trigger lote_eventos_no_update;",
         "alter table public.lote_eventos disable trigger lote_eventos_no_delete;",
         "",
-        "-- (5) Corregir hash_etapa con condición optimista (solo si sigue corrupto).",
+        "-- (4) Corregir hash_etapa: condición optimista + exactamente una fila.",
     ]
 
     for evento in reporte.eventos_a_reparar:
-        lineas.extend(
-            [
-                "update public.lote_eventos",
-                f"   set hash_etapa = {_literal(evento.hash_nuevo)}",
-                f" where id = {_literal(str(evento.evento_id))} "
-                f"and {_condicion_optimista('hash_etapa', evento.hash_anterior)};",
-            ]
-        )
+        lineas.append(_do_update_evento(evento, reporte.checksum, operador))
 
     if reporte.certificados_a_reparar:
         lineas.append("")
         lineas.append(
-            "-- (5b) Corregir la raíz de los certificados con condición optimista."
+            "-- (5) Corregir la raíz de los certificados con la misma guarda."
         )
         for certificado in reporte.certificados_a_reparar:
-            lineas.extend(
-                [
-                    "update public.qr_certificado",
-                    f"   set hash_sha256 = {_literal(certificado.raiz_nueva)}",
-                    f" where id = {_literal(str(certificado.certificado_id))} "
-                    f"and {_condicion_optimista('hash_sha256', certificado.raiz_anterior)};",
-                ]
-            )
-
-    lineas.append("")
-    lineas.append("-- (6) Bitácora de la reparación (hash/raíz anterior y nueva).")
-    for evento in reporte.eventos_a_reparar:
-        lineas.extend(
-            [
-                "insert into app_private.reparacion_cadena_evento",
-                "  (lote_id, evento_id, hash_anterior, hash_nuevo, motivo, "
-                "version_migracion, operador, checksum_reporte)",
-                f"values ({_literal(str(evento.lote_id))}, {_literal(str(evento.evento_id))}, "
-                f"{_literal_o_null(evento.hash_anterior)}, {_literal(evento.hash_nuevo)}, "
-                f"{_literal(MOTIVO)}, {_literal(VERSION_MIGRACION)}, "
-                f"{_literal(operador)}, {_literal(reporte.checksum)});",
-            ]
-        )
-    for certificado in reporte.certificados_a_reparar:
-        lineas.extend(
-            [
-                "insert into app_private.reparacion_cadena_evento",
-                "  (lote_id, evento_id, hash_anterior, hash_nuevo, raiz_anterior, "
-                "raiz_nueva, certificado_id, motivo, version_migracion, operador, "
-                "checksum_reporte)",
-                f"values ({_literal(str(certificado.lote_id))}, "
-                f"{_literal(str(certificado.evento_id))}, "
-                f"{_literal_o_null(certificado.hash_evento_anterior)}, "
-                f"{_literal(certificado.hash_evento_nuevo)}, "
-                f"{_literal(certificado.raiz_anterior)}, "
-                f"{_literal(certificado.raiz_nueva)}, "
-                f"{_literal(str(certificado.certificado_id))}, {_literal(MOTIVO)}, "
-                f"{_literal(VERSION_MIGRACION)}, {_literal(operador)}, "
-                f"{_literal(reporte.checksum)});",
-            ]
-        )
+            lineas.append(_do_update_certificado(certificado, reporte.checksum, operador))
 
     lineas.extend(
         [
             "",
-            "-- (7) Reactivar los triggers append-only.",
+            "-- (6) Reactivar los triggers append-only.",
             "alter table public.lote_eventos enable trigger lote_eventos_no_update;",
             "alter table public.lote_eventos enable trigger lote_eventos_no_delete;",
             "",

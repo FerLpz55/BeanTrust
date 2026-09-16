@@ -400,3 +400,26 @@ def test_paginacion_por_cursor(client, header_admin):
 
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_mantenimiento_bloquea_escrituras_y_permite_lectura(client, header_productor):
+    """Con `BEAN_MAINTENANCE_WRITES` los POST de integridad dan 503; los GET siguen."""
+    from app import dependencies as deps
+    from app.core.config import get_settings
+
+    client.app.dependency_overrides[deps.get_settings] = lambda: get_settings().model_copy(
+        update={"maintenance_writes": True}
+    )
+
+    r = client.post(
+        "/v1/lotes",
+        headers=header_productor,
+        json={"finca_id": FINCA, "fecha_cosecha": "2026-08-01", "peso_kg": 100.0},
+    )
+    assert r.status_code == 503
+    assert r.headers.get("Retry-After") == "600"
+    assert r.json()["detail"] == "maintenance_writes_disabled"
+
+    # La lectura y la verificación pública no se bloquean.
+    assert client.get("/v1/fincas", headers=header_productor).status_code == 200
+    assert client.get("/health").status_code == 200

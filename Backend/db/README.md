@@ -16,7 +16,8 @@ db/
 │   ├── 006_hardening_storage_rls_rate_limit.sql  # app_private.bean_rol + RLS efectiva + evidencias + rate limit
 │   ├── 007_evidencias_storage_cron.sql           # bucket privado + cron de purga
 │   ├── 008_integridad_evidencias.sql             # double precision + bitácora + RPC atómica de cosecha
-│   └── 009_fix_rpc_replay.sql                    # idempotencia de la RPC por datos estables
+│   ├── 009_fix_rpc_replay.sql                    # idempotencia de la RPC por datos estables
+│   └── 010_integridad_rpc_reparacion.sql         # timestamp canónico del evento + RPC privada/wrapper
 └── seed/
     ├── seed.sql                  # usuarios/fincas de desarrollo (ids fijos)
     └── seed_supabase.sql         # seed de un proyecto Supabase real
@@ -24,7 +25,7 @@ db/
 
 El CLI de Supabase lee estas migraciones por el symlink `supabase/migrations -> ../Backend/db/migrations`. Las pruebas pgTAP viven en `supabase/tests/` (RLS, Storage, rate limit, integridad).
 
-### Integridad de la cadena (008/009)
+### Integridad de la cadena (008–010)
 
 - Los campos físicos que entran al hash por etapa (`peso_kg`, `merma_pct`,
   `humedad_*`, `densidad`, …) son `double precision`, no `real`: así el float64
@@ -33,10 +34,15 @@ El CLI de Supabase lee estas migraciones por el symlink `supabase/migrations -> 
 - `app_private.reparacion_cadena_evento` es la bitácora permanente de la
   reparación histórica (hash/raíz anterior y nueva, motivo, versión, operador,
   checksum). Sin grants de usuario.
-- `public.registrar_cosecha_con_evidencia(...)` es la RPC `security definer`
-  (solo `authenticated`) que crea lote + evento génesis + evidencia `ADJUNTA` en
-  una transacción. La 009 corrige su idempotencia: compara datos estables, no el
-  hash (que incluye `registrado_en`).
+- `public.registrar_cosecha_con_evidencia(...)` es un wrapper `security invoker`
+  (solo `authenticated`) que delega en
+  `app_private.registrar_cosecha_con_evidencia(...)` (`security definer`,
+  `search_path = ''`). Crea lote + evento génesis + evidencia `ADJUNTA` en una
+  transacción. La 009 corrige su idempotencia: compara datos estables, no el
+  hash. La 010 añade `p_registrado_en` y lo persiste tal cual, para que el
+  `registrado_en` almacenado sea exactamente el que entró al `hash_etapa`
+  (sin depender del `default now()`); también endurece los triggers de 003 para
+  que funcionen con `search_path = ''`.
 - La reparación se audita y se genera con
   `python -m scripts.auditar_integridad_historica` (solo lectura por defecto;
   `--generar-reparacion plan.sql` escribe el SQL transaccional con backup lógico,

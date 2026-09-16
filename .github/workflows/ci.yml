@@ -71,3 +71,14 @@ jobs:
         run: pnpm exec expo lint --max-warnings=0
       - name: Tests (vitest)
         run: pnpm test
+
+  edge:
+    name: Edge Functions (Deno)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Tests de la purga de evidencia
+        run: deno test --allow-env --allow-net supabase/functions/purge-staged-evidence/index_test.ts
