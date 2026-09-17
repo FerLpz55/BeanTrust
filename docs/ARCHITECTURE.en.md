@@ -62,7 +62,7 @@ Business model (B2B2C): the producer **does not pay**. Cooperatives (subscriptio
 
 - **FastAPI** is the only gate that validates business rules and the only one that knows the coffee state machine. **The app never writes directly to the database.**
 - **Supabase** is the relational source of truth (PostgreSQL) + Auth + Row Level Security (RLS) + Storage (a **private** evidence bucket; the app never talks to Storage, only to FastAPI).
-- **Smart Contracts (Polygon)**: only contain the *flow of money*, never the full business logic. **Web3 is paused** (B7): the MVP uses `FakeGatewayPagos`.
+- **Smart Contracts (Polygon)**: only contain the *flow of money*, never the full business logic. The current MVP uses `FakeGatewayPagos`; the real integration resumes first on testnet.
 
 | Component | Role | Consumed by |
 |---|---|---|
@@ -81,7 +81,8 @@ BeanTrust/
 ├── docs/
 │   ├── ARCHITECTURE.md        # Spanish original (source of truth for the design)
 │   ├── ARCHITECTURE.en.md     # ← This document (English translation)
-│   ├── 06-contratos.md         # Solidity contracts (design; web3 paused — B7)
+│   ├── 06-contratos.md         # Solidity contracts (web3 design)
+│   ├── guia-blockchain-testnet.md # Free path for Polygon Amoy
 │   └── (ADRs live inline in §11 of ARCHITECTURE.md)
 ├── Backend/                     # FastAPI (capitalized folder)
 │   ├── app/
@@ -114,14 +115,13 @@ BeanTrust/
 │   │   ├── storage/            # SecureStore (tokens)
 │   │   └── theme/              # "Copa de cata" design tokens
 │   └── package.json            # scripts: start, lint, typecheck
-├── .opencode/                  # Agent config (login-flow = project memory)
 ├── AGENTS.md                   # ← Persistent memory and docs↔code alignment rules
 └── README.md
 ```
 
-> **`contracts/` (Solidity) and a root `db/` do NOT exist yet.** Web3 is paused
-> (debt B7): the contract design lives in `docs/06-contratos.md` and the fake
-> gateway simulates it in development. The real DB lives in `Backend/db/`.
+> **`contracts/` (Solidity) and a root `db/` do NOT exist yet.** The MVP uses a
+> fake gateway for payments/tips; blockchain integration resumes on testnet
+> through `docs/guia-blockchain-testnet.md`. The real DB lives in `Backend/db/`.
 > The source of truth for the real structure is this monorepo (not the old
 > sections of this document or the root README).
 

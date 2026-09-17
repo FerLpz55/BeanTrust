@@ -10,11 +10,16 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.models.dominio import (
+    AnclaBlockchain,
+    AnclaOnchain,
     CertificadoQR,
     Cooperativa,
+    ErrorAnclajePermanente,
+    ErrorAnclajeTransitorio,
+    EstadoAncla,
     EstadoEvidencia,
     EstadoPago,
     EstadoPropina,
@@ -22,12 +27,14 @@ from app.models.dominio import (
     Evidencia,
     EvidenciaNoEncontrada,
     EvidenciaYaAdjunta,
+    FencingPerdido,
     Finca,
     Lote,
     LoteEvento,
     NoAutorizado,
     Pago,
     Propina,
+    ReciboAncla,
     TipoEvento,
     Usuario,
 )
@@ -72,6 +79,8 @@ class Memoria:
     fincas: dict[uuid.UUID, Finca] = field(default_factory=dict)
     usuarios: dict[uuid.UUID, Usuario] = field(default_factory=dict)
     evidencias: dict[uuid.UUID, Evidencia] = field(default_factory=dict)
+    anclas: dict[uuid.UUID, AnclaBlockchain] = field(default_factory=dict)
+    anclas_locks: dict[str, dict] = field(default_factory=dict)
     verificaciones: list[tuple[uuid.UUID, str | None]] = field(default_factory=list)
 
 
@@ -379,6 +388,340 @@ class FakeGatewayPagos:
 
     def confirmar_pago(self, tx_hash: str) -> bool:
         return bool(tx_hash)
+
+
+class InMemoryAnclaRepo:
+    """Anclaje en memoria con lease global y fencing (espejo de la migración 012)."""
+
+    def __init__(self, memoria: Memoria) -> None:
+        self._memoria = memoria
+        self._lock = threading.Lock()
+
+    def encolar(self, ancla: AnclaBlockchain) -> AnclaBlockchain:
+        with self._lock:
+            existente = self.buscar_por_certificado(ancla.qr_certificado_id)
+            if existente is not None:
+                return existente
+            self._memoria.anclas[ancla.id] = ancla
+            return ancla
+
+    def buscar_por_certificado(self, qr_id: uuid.UUID) -> AnclaBlockchain | None:
+        return next(
+            (a for a in self._memoria.anclas.values() if a.qr_certificado_id == qr_id),
+            None,
+        )
+
+    def buscar_por_lote(self, lote_id: uuid.UUID) -> AnclaBlockchain | None:
+        return next((a for a in self._memoria.anclas.values() if a.lote_id == lote_id), None)
+
+    # ------------------------------------------------------------ lock global
+
+    def adquirir_lock(self, nombre: str, lease_segundos: int) -> uuid.UUID | None:
+        with self._lock:
+            ahora = datetime.now(UTC)
+            actual = self._memoria.anclas_locks.get(nombre)
+            if actual is not None and actual["hasta"] > ahora:
+                return None
+            token = uuid.uuid4()
+            self._memoria.anclas_locks[nombre] = {
+                "token": token,
+                "hasta": ahora + timedelta(seconds=lease_segundos),
+            }
+            return token
+
+    def renovar_lock(self, nombre: str, token: uuid.UUID, lease_segundos: int) -> bool:
+        with self._lock:
+            actual = self._memoria.anclas_locks.get(nombre)
+            if actual is None or actual["token"] != token:
+                return False
+            actual["hasta"] = datetime.now(UTC) + timedelta(seconds=lease_segundos)
+            return True
+
+    def liberar_lock(self, nombre: str, token: uuid.UUID) -> bool:
+        with self._lock:
+            actual = self._memoria.anclas_locks.get(nombre)
+            if actual is None or actual["token"] != token:
+                return False
+            del self._memoria.anclas_locks[nombre]
+            return True
+
+    # ------------------------------------------------------------- trabajos
+
+    def reclamar_siguiente(
+        self, lock_token: uuid.UUID, lease_segundos: int
+    ) -> AnclaBlockchain | None:
+        with self._lock:
+            ahora = datetime.now(UTC)
+            candidatas = sorted(
+                (
+                    a
+                    for a in self._memoria.anclas.values()
+                    if a.estado
+                    in (EstadoAncla.PENDIENTE, EstadoAncla.ENVIANDO, EstadoAncla.ENVIADA)
+                    and a.proximo_intento <= ahora
+                    and (a.lock_hasta is None or a.lock_hasta <= ahora)
+                ),
+                key=lambda a: (a.creado_en, a.id),
+            )
+            if not candidatas:
+                return None
+            ancla = candidatas[0]
+            ancla.lock_token = lock_token
+            ancla.lock_hasta = ahora + timedelta(seconds=lease_segundos)
+            return ancla
+
+    def marcar_enviando(
+        self, ancla_id: uuid.UUID, lock_token: uuid.UUID, nonce: int
+    ) -> None:
+        ancla = self._exigir_fencing(ancla_id, lock_token)
+        ancla.estado = EstadoAncla.ENVIANDO
+        ancla.nonce = nonce
+        ancla.actualizado_en = datetime.now(UTC)
+
+    def marcar_enviada(
+        self,
+        ancla_id: uuid.UUID,
+        lock_token: uuid.UUID,
+        tx_hash: str,
+        enviada_en: datetime,
+    ) -> None:
+        ancla = self._exigir_fencing(ancla_id, lock_token)
+        ancla.estado = EstadoAncla.ENVIADA
+        ancla.tx_hash = tx_hash
+        ancla.enviada_en = enviada_en
+        ancla.ultimo_chequeo_en = enviada_en
+        ancla.actualizado_en = datetime.now(UTC)
+
+    def marcar_confirmada(
+        self,
+        ancla_id: uuid.UUID,
+        lock_token: uuid.UUID,
+        bloque: int,
+        tx_hash: str,
+        confirmada_en: datetime,
+    ) -> None:
+        ancla = self._exigir_fencing(ancla_id, lock_token)
+        ancla.estado = EstadoAncla.CONFIRMADA
+        ancla.bloque = bloque
+        ancla.tx_hash = tx_hash
+        ancla.confirmada_en = confirmada_en
+        ancla.ultimo_chequeo_en = confirmada_en
+        ancla.codigo_error = None
+        ancla.error = None
+        self._liberar(ancla)
+
+    def marcar_fallida(
+        self,
+        ancla_id: uuid.UUID,
+        lock_token: uuid.UUID,
+        codigo: str,
+        error: str,
+        proximo_intento: datetime,
+    ) -> None:
+        ancla = self._exigir_fencing(ancla_id, lock_token)
+        ancla.estado = EstadoAncla.FALLIDA
+        ancla.codigo_error = codigo
+        ancla.error = error
+        ancla.proximo_intento = proximo_intento
+        self._liberar(ancla)
+
+    def reprogramar(
+        self,
+        ancla_id: uuid.UUID,
+        lock_token: uuid.UUID,
+        proximo_intento: datetime,
+        codigo: str,
+        error: str,
+        contar_intento: bool = True,
+    ) -> None:
+        ancla = self._exigir_fencing(ancla_id, lock_token)
+        if contar_intento:
+            ancla.intentos += 1
+        ancla.proximo_intento = proximo_intento
+        ancla.codigo_error = codigo
+        ancla.error = error
+        ancla.ultimo_chequeo_en = datetime.now(UTC)
+        # Se conserva el token y el lock_hasta: el mismo worker puede seguir
+        # operando la fila; otro worker la reclamará al vencer el lease.
+        ancla.actualizado_en = datetime.now(UTC)
+
+    def marcar_reintento_manual(self, ancla_id: uuid.UUID, proximo_intento: datetime) -> None:
+        ancla = self._memoria.anclas.get(ancla_id)
+        if ancla is None:
+            return
+        ancla.estado = EstadoAncla.PENDIENTE
+        ancla.tx_hash = None
+        ancla.nonce = None
+        ancla.bloque = None
+        ancla.enviada_en = None
+        ancla.confirmada_en = None
+        ancla.codigo_error = None
+        ancla.error = None
+        ancla.proximo_intento = proximo_intento
+        self._liberar(ancla)
+
+    def _exigir_fencing(
+        self, ancla_id: uuid.UUID, lock_token: uuid.UUID
+    ) -> AnclaBlockchain:
+        ancla = self._memoria.anclas.get(ancla_id)
+        if ancla is None:
+            raise FencingPerdido("El ancla ya no existe.")
+        if ancla.lock_token != lock_token:
+            raise FencingPerdido("El lease venció: otro worker tomó el trabajo.")
+        return ancla
+
+    @staticmethod
+    def _liberar(ancla: AnclaBlockchain) -> None:
+        ancla.lock_token = None
+        ancla.lock_hasta = None
+        ancla.actualizado_en = datetime.now(UTC)
+
+
+class FakeGatewayTrazabilidad:
+    """Gateway de anclaje simulado para dev y tests (sin cadena).
+
+    `confirmar_al_enviar=True` mina en el acto (camino feliz). Con `False`, la tx
+    queda pendiente hasta `minar_pendientes()`, lo que permite probar `ENVIADA`,
+    el backoff y la recuperación por evento.
+    """
+
+    _ACTOR = "0x" + "11" * 20
+
+    def __init__(
+        self,
+        *,
+        confirmar_al_enviar: bool = True,
+        chain_id: int = 84532,
+        contrato: str = "0x" + "ab" * 20,
+        code_hash: str = "0x" + "cd" * 32,
+        confirmaciones_requeridas: int = 2,
+    ) -> None:
+        self._chain_id = chain_id
+        self._contrato = contrato
+        self._code_hash = code_hash
+        self.confirmaciones_requeridas = confirmaciones_requeridas
+        self.confirmaciones = 0
+        self._anclas: dict[str, AnclaOnchain] = {}
+        self._txs: dict[str, list] = {}
+        self._bloque = 1000
+        self._nonce = 0
+        self.confirmar_al_enviar = confirmar_al_enviar
+        # Simula una RPC caída: `enviar_ancla` lanza un error transitorio.
+        self.fallar_transitorio = False
+        # Simula una RPC caída antes de reservar nonce (fallo contabilizable).
+        self.fallar_nonce = False
+        # Simula un crash tras transmitir: mina la tx pero no devuelve el hash.
+        self.perder_respuesta = False
+        # Fuerza un fallo de preflight con ese código (p.ej. "CADENA_INCORRECTA").
+        self.fallar_preflight: str | None = None
+
+    @property
+    def chain_id(self) -> int:
+        return self._chain_id
+
+    @property
+    def contrato(self) -> str:
+        return self._contrato
+
+    @property
+    def code_hash(self) -> str:
+        return self._code_hash
+
+    def preflight(self) -> None:
+        if self.fallar_preflight is not None:
+            raise ErrorAnclajePermanente(
+                "Preflight falló (fake).", codigo=self.fallar_preflight
+            )
+
+    def leer_ancla(self, lote_id_bytes32: str) -> AnclaOnchain | None:
+        return self._anclas.get(lote_id_bytes32.lower())
+
+    def buscar_ancla_por_evento(
+        self, lote_id_bytes32: str, hash_raiz_bytes32: str, desde_bloque: int
+    ) -> ReciboAncla | None:
+        for tx_hash, registro in self._txs.items():
+            lote, hash_raiz, _nonce, bloque = registro
+            if (
+                lote.lower() == lote_id_bytes32.lower()
+                and hash_raiz.lower() == hash_raiz_bytes32.lower()
+                and bloque is not None
+                and bloque >= desde_bloque
+            ):
+                return ReciboAncla(
+                    tx_hash=tx_hash,
+                    bloque=bloque,
+                    lote_id_bytes32=lote_id_bytes32,
+                    hash_raiz=hash_raiz_bytes32,
+                    actor=self._ACTOR,
+                )
+        return None
+
+    def reservar_nonce(self) -> int:
+        if self.fallar_nonce:
+            raise ErrorAnclajeTransitorio("RPC caído al reservar nonce (fake).")
+        nonce = self._nonce
+        self._nonce += 1
+        return nonce
+
+    def enviar_ancla(
+        self, lote_id_bytes32: str, hash_raiz_bytes32: str, nonce: int
+    ) -> str:
+        if self.fallar_transitorio:
+            raise ErrorAnclajeTransitorio("RPC caído (fake).")
+        tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex
+        self._txs[tx_hash] = [lote_id_bytes32, hash_raiz_bytes32, nonce, None]
+        if self.confirmar_al_enviar:
+            self._minar(tx_hash)
+        if self.perder_respuesta:
+            raise ErrorAnclajeTransitorio(
+                "Respuesta perdida tras transmitir (fake).", codigo="BROADCAST_INCIERTO"
+            )
+        return tx_hash
+
+    def confirmar_ancla(
+        self, tx_hash: str, lote_id_bytes32: str, hash_raiz_bytes32: str
+    ) -> ReciboAncla | None:
+        registro = self._txs.get(tx_hash)
+        if registro is None:
+            raise ErrorAnclajeTransitorio(
+                "Transacción desconocida para el gateway fake.", codigo="TX_DESCONOCIDA"
+            )
+        if registro[3] is None or self.confirmaciones < self.confirmaciones_requeridas:
+            return None
+        onchain = self._anclas.get(lote_id_bytes32.lower())
+        if onchain is None or onchain.hash_raiz.lower() != hash_raiz_bytes32.lower():
+            raise ErrorAnclajePermanente(
+                "El hash on-chain no coincide con el anclaje.", codigo="EVENTO_INVALIDO"
+            )
+        return ReciboAncla(
+            tx_hash=tx_hash,
+            bloque=registro[3],
+            lote_id_bytes32=lote_id_bytes32,
+            hash_raiz=hash_raiz_bytes32,
+            actor=self._ACTOR,
+        )
+
+    def minar_pendientes(self) -> None:
+        """Mina todas las tx pendientes (simula confirmaciones de bloque)."""
+        for tx_hash, registro in self._txs.items():
+            if registro[3] is None:
+                self._minar(tx_hash)
+        self.confirmaciones = self.confirmaciones_requeridas
+
+    def simular_ancla_ajena(self, lote_id_bytes32: str, hash_raiz_bytes32: str) -> None:
+        """Inyecta un anclaje preexistente (para probar reconciliación/colisión)."""
+        self._anclas[lote_id_bytes32.lower()] = AnclaOnchain(
+            hash_raiz=hash_raiz_bytes32, actor=self._ACTOR, anchored_at=0
+        )
+
+    def _minar(self, tx_hash: str) -> None:
+        registro = self._txs[tx_hash]
+        registro[3] = self._bloque
+        self._anclas[registro[0].lower()] = AnclaOnchain(
+            hash_raiz=registro[1], actor=self._ACTOR, anchored_at=self._bloque
+        )
+        self._bloque += 1
+        self.confirmaciones = self.confirmaciones_requeridas
 
 
 class InMemorySesionRefreshRepo:

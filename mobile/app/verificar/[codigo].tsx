@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
@@ -16,10 +16,83 @@ import { spacing, typeScale, radii } from '@/src/theme/tokens';
 import { useVerificarStore } from '@/src/store/verificar';
 import { useAuthStore } from '@/src/store/auth';
 import { LoteEstado } from '@/src/store/lotes';
+import type { AnclajeOnchain } from '@/src/api/types';
 import { useLocalSearchParams, router, type Href } from 'expo-router';
 
 interface LocalParams {
   codigo: string;
+}
+
+/** Estado del anclaje del Pasaporte en la cadena (ADR-11). */
+function AnclajeCard({ anclaje }: { anclaje: AnclajeOnchain | null }) {
+  const onSurface = useThemeColor('onSurface');
+  const onSurfaceVariant = useThemeColor('onSurfaceVariant');
+  const primary = useThemeColor('primary');
+  const tertiary = useThemeColor('tertiary');
+  const surfaceContainerLow = useThemeColor('surfaceContainerLow');
+
+  const confirmada = anclaje?.estado === 'CONFIRMADA';
+  const enEspera = anclaje?.estado === 'PENDIENTE' || anclaje?.estado === 'ENVIANDO' || anclaje?.estado === 'ENVIADA';
+  const enlaceValido =
+    confirmada && !!anclaje?.tx_hash && !!anclaje?.bloque && !!anclaje?.explorer_url;
+
+  const titulo =
+    anclaje === null
+      ? 'Sin evidencia on-chain'
+      : confirmada
+        ? `Anclado en ${anclaje.red_nombre}`
+        : anclaje.estado === 'FALLIDA'
+          ? 'El Pasaporte sigue siendo válido'
+          : 'Anclaje en curso';
+
+  const detalle =
+    anclaje === null
+      ? 'Este Pasaporte se verifica off-chain; la evidencia en la cadena no está activa.'
+      : confirmada
+        ? 'La raíz SHA-256 quedó registrada de forma inmutable en la cadena.'
+        : anclaje.estado === 'FALLIDA'
+          ? 'Evidencia on-chain pendiente de revisión; el Pasaporte conserva su validez.'
+          : 'El certificado ya es válido; la confirmación en la cadena puede tardar.';
+
+  return (
+    <View style={[styles.sectionCard, { backgroundColor: surfaceContainerLow }]}>
+      <View style={styles.sectionHeader}>
+        <Text style={[typeScale.labelLarge, { color: onSurface }]}>EVIDENCIA ON-CHAIN</Text>
+        {anclaje ? (
+          <View style={[styles.pill, { backgroundColor: surfaceContainerLow }]}>
+            <Text style={[typeScale.eyebrow, { color: onSurfaceVariant }]}>{anclaje.estado}</Text>
+          </View>
+        ) : null}
+      </View>
+      <View style={styles.anchorRow}>
+        {enEspera ? (
+          <ActivityIndicator size="small" color={primary} />
+        ) : (
+          <IconSymbol
+            size={20}
+            name={confirmada ? 'verified' : 'link'}
+            color={confirmada ? tertiary : onSurfaceVariant}
+          />
+        )}
+        <Text style={[typeScale.bodyMedium, { color: onSurface, flex: 1 }]}>{titulo}</Text>
+      </View>
+      <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }, styles.anchorDetail]}>
+        {detalle}
+      </Text>
+      {enlaceValido ? (
+        <>
+          <Text style={[typeScale.dataMono, { color: onSurfaceVariant }]}>
+            {(anclaje?.tx_hash ?? '').slice(0, 18)}...
+          </Text>
+          <PrimaryButton
+            label={`Ver en ${anclaje?.explorer_etiqueta}`}
+            onPress={() => Linking.openURL(anclaje?.explorer_url as string)}
+            style={styles.anchorButton}
+          />
+        </>
+      ) : null}
+    </View>
+  );
 }
 
 export default function VerificarCodigoScreen() {
@@ -127,6 +200,9 @@ export default function VerificarCodigoScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Anclaje on-chain (ADR-11) */}
+        <AnclajeCard anclaje={lote.anclaje_onchain} />
 
         {/* Commerce Justo donut */}
         <View style={[styles.sectionCard, { backgroundColor: surfaceContainerLow }]}>
@@ -281,6 +357,18 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     marginBottom: spacing.xs,
+  },
+  anchorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  anchorDetail: {
+    marginTop: spacing.xs,
+  },
+  anchorButton: {
+    marginTop: spacing.md,
   },
   sectionSubtitle: {
     marginBottom: spacing.md,

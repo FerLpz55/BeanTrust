@@ -18,6 +18,8 @@ from app.main import crear_app
 from app.models.dominio import Finca, Rol, Usuario
 from app.repositories.evidencia import InMemoryAlmacenEvidencia
 from app.repositories.in_memory import (
+    FakeGatewayTrazabilidad,
+    InMemoryAnclaRepo,
     InMemoryEvidenciaRepo,
     InMemoryFincaRepo,
     InMemoryLoteRepo,
@@ -106,7 +108,17 @@ def memoria(seed_usuarios: list[Usuario]) -> Memoria:
 
 
 @pytest.fixture
-def client(memoria: Memoria, seed_usuarios: list[Usuario]):
+def gateway_trazabilidad() -> FakeGatewayTrazabilidad:
+    """Gateway de anclaje compartido por test (el estado on-chain persiste)."""
+    return FakeGatewayTrazabilidad()
+
+
+@pytest.fixture
+def client(
+    memoria: Memoria,
+    seed_usuarios: list[Usuario],
+    gateway_trazabilidad: FakeGatewayTrazabilidad,
+):
     from app import dependencies as deps
 
     # Estado de proceso compartido entre requests: se aísla por test.
@@ -135,6 +147,8 @@ def client(memoria: Memoria, seed_usuarios: list[Usuario]):
     app.dependency_overrides[deps.get_repo_usuario_usuario] = lambda: repo_usuario
     app.dependency_overrides[deps.get_repo_evidencia] = lambda: InMemoryEvidenciaRepo(memoria)
     app.dependency_overrides[deps.get_almacen_evidencia] = lambda: almacen_evidencia
+    app.dependency_overrides[deps.get_repo_anclas] = lambda: InMemoryAnclaRepo(memoria)
+    app.dependency_overrides[deps.get_gateway_trazabilidad] = lambda: gateway_trazabilidad
     app.dependency_overrides[deps.get_repo_rate_limit] = lambda: rate_limit
     app.dependency_overrides[deps.get_auth_provider] = lambda: LocalAuthProvider(
         secret="secreto-de-test-de-32-bytes-al-menos-ok",

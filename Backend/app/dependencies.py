@@ -39,6 +39,8 @@ from app.repositories.evidencia import (
 )
 from app.repositories.in_memory import (
     FakeGatewayPagos,
+    FakeGatewayTrazabilidad,
+    InMemoryAnclaRepo,
     InMemoryEvidenciaRepo,
     InMemoryFincaRepo,
     InMemoryLoteRepo,
@@ -51,6 +53,8 @@ from app.repositories.in_memory import (
 )
 from app.repositories.interfaces import (
     GatewayPagos,
+    GatewayTrazabilidad,
+    RepositorioAnclas,
     RepositorioFinca,
     RepositorioLote,
     RepositorioPago,
@@ -64,6 +68,7 @@ from app.repositories.rate_limit import (
     SupabaseRateLimitRepo,
 )
 from app.repositories.supabase import (
+    SupabaseAnclaRepo,
     SupabaseEvidenciaRepo,
     SupabaseFincaRepo,
     SupabaseLoteRepo,
@@ -80,6 +85,7 @@ from app.services.mercado_service import MercadoService
 from app.services.pagos_service import PagoService
 from app.services.propina_service import PropinaService
 from app.services.qr_service import QrService
+from app.services.trazabilidad_service import TrazabilidadService
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -341,6 +347,59 @@ def get_gateway_pagos() -> GatewayPagos:
     return FakeGatewayPagos()
 
 
+def get_repo_anclas(settings: SettingsDep) -> RepositorioAnclas:
+    """Anclaje on-chain: tabla privada, siempre `service_role` (migración 011)."""
+    if settings.repo_backend == "supabase":
+        return SupabaseAnclaRepo(get_supabase_service_client(settings))
+    return InMemoryAnclaRepo(_memoria())
+
+
+def get_gateway_trazabilidad(settings: SettingsDep) -> GatewayTrazabilidad:
+    """Gateway real (Base Sepolia) solo con `BEAN_WEB3_MODE=anchor`."""
+    if settings.web3_mode == "anchor":
+        from app.repositories.web3_trazabilidad import construir_gateway_web3
+
+        return construir_gateway_web3(
+            rpc_url=settings.web3_rpc_url,
+            private_key=settings.web3_backend_private_key,
+            contract_address=settings.web3_contract_address,
+            contract_code_hash=settings.web3_contract_code_hash,
+            chain_id=settings.web3_chain_id,
+            confirmations=settings.web3_confirmations,
+            timeout_seconds=settings.web3_rpc_timeout_seconds,
+        )
+    return FakeGatewayTrazabilidad()
+
+
+def get_trazabilidad_service(
+    repo_anclas: Annotated[RepositorioAnclas, Depends(get_repo_anclas)],
+    gateway: Annotated[GatewayTrazabilidad, Depends(get_gateway_trazabilidad)],
+    settings: SettingsDep,
+) -> TrazabilidadService:
+    return TrazabilidadService(
+        repo_anclas=repo_anclas,
+        gateway=gateway,
+        habilitado=settings.web3_mode == "anchor",
+        contrato=settings.web3_contract_address,
+        code_hash=settings.web3_contract_code_hash,
+        chain_id=settings.web3_chain_id,
+        confirmaciones=settings.web3_confirmations,
+        explorer_base_url=settings.web3_explorer_base_url,
+        explorer_label=settings.web3_explorer_label,
+        red_nombre=settings.web3_network_name,
+        max_intentos=settings.web3_max_intentos,
+        lease_segundos=settings.web3_worker_lease_seconds,
+        max_batch_size=settings.web3_max_batch_size,
+        pending_ttl_segundos=settings.web3_pending_ttl_seconds,
+        deployment_block=settings.web3_deployment_block,
+        lock_nombre=f"chain-{settings.web3_chain_id}-anchorer",
+        cron_secret=settings.web3_cron_secret,
+    )
+
+
+TrazabilidadServiceDep = Annotated[TrazabilidadService, Depends(get_trazabilidad_service)]
+
+
 RepoLoteDep = Annotated[RepositorioLote, Depends(get_repo_lote_usuario)]
 RepoQRDep = Annotated[RepositorioQR, Depends(get_repo_qr_usuario)]
 RepoPagoDep = Annotated[RepositorioPago, Depends(get_repo_pago_usuario)]
@@ -541,6 +600,7 @@ def get_lote_service(
     repo_usuario: RepoUsuarioAutenticadoDep,
     qr_service: Annotated[QrService, Depends(get_qr_service)],
     repo_evidencia: RepoEvidenciaDep,
+    trazabilidad: TrazabilidadServiceDep,
 ) -> LoteService:
     return LoteService(
         repo_lote=repo_lote,
@@ -549,6 +609,7 @@ def get_lote_service(
         repo_usuario=repo_usuario,
         qr_service=qr_service,
         repo_evidencia=repo_evidencia,
+        trazabilidad=trazabilidad,
     )
 
 
@@ -558,6 +619,7 @@ def get_lote_service_publico(
     repo_finca: RepoFincaServicioDep,
     repo_usuario: RepoUsuarioServicioDep,
     qr_service: Annotated[QrService, Depends(get_qr_service)],
+    trazabilidad: TrazabilidadServiceDep,
 ) -> LoteService:
     """Verificación pública: service key, sin RLS (por diseño, §8)."""
     return LoteService(
@@ -566,6 +628,7 @@ def get_lote_service_publico(
         repo_finca=repo_finca,
         repo_usuario=repo_usuario,
         qr_service=qr_service,
+        trazabilidad=trazabilidad,
     )
 
 

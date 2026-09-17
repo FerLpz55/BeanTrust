@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Foundry (contracts/): dependencias y artefactos no se versionan.
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/dependencies/
+
 # C extensions
 *.so
 

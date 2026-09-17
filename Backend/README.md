@@ -129,7 +129,7 @@ el mismo cambio.
 | GET    | `/lotes/{lote_id}`            | productor/cooperativa/admin  | Detalle con historial (timeline hash por etapa) |
 | GET    | `/lotes/{lote_id}/evidencia`  | productor/cooperativa/admin  | URL firmada temporal de la evidencia adjunta (404 si no hay) |
 | POST   | `/lotes/{lote_id}/eventos`    | productor/cooperativa/admin  | Avanza estado/sub-etapa (idempotente, 11 tipos) |
-| GET    | `/verificar/{codigo}`         | público                      | Pasaporte de Café (200/404/409)          |
+| GET    | `/verificar/{codigo}`         | público                      | Pasaporte de Café (200/404/409) + `anclaje_onchain` opcional (ADR-11) |
 | GET    | `/mercado/{lote_id}`          | dueños del lote + admin      | Panel Comercio Justo: desglose 97/3 + propinas (ADR-9) |
 | POST   | `/pagos`                      | cooperativa                  | Venta + pago on-chain 3%/97% (202, idempotente) |
 | GET    | `/pagos`                      | cooperativa                  | Historial de pagos de la cooperativa (paginado por cursor) |
@@ -137,6 +137,8 @@ el mismo cambio.
 | POST   | `/propinas`                   | comprador                    | Propina al productor (201, idempotente, bivalente) |
 | GET    | `/propinas/lote/{lote_id}`    | dueños del lote: productor/cooperativa/comprador de la venta/admin | Lista propinas del lote (tenancy) |
 | POST   | `/sync`                       | productor/cooperativa/admin  | Batch offline (202/207)                  |
+| GET    | `/blockchain/reconciliar`     | cron (`Authorization: Bearer <CRON_SECRET>`) | Procesa la cola de anclaje (Vercel Cron) |
+| POST   | `/blockchain/anclas/{lote_id}/reintentar` | admin            | Reencola un ancla FALLIDA                |
 | GET    | `/health`                     | público                      | Health check                             |
 
 ## Estructura
@@ -145,12 +147,12 @@ el mismo cambio.
 app/
 ├── main.py            # crear_app + handler de errores de dominio
 ├── dependencies.py    # DI: repos, auth, servicios (Annotated + Depends)
-├── api/v1/endpoints/  # routers (lotes, eventos, verificacion, pagos, sync, auth, cooperativas)
+├── api/v1/endpoints/  # routers (lotes, eventos, verificacion, pagos, blockchain, sync, auth, cooperativas)
 ├── core/              # config, logger, seguridad (JWT HS256/JWKS, argon2)
 ├── models/dominio.py  # reglas de negocio (máquina de estados) — sin I/O
 ├── schemas/           # Pydantic de entrada/salida (fronteras)
-├── services/          # casos de uso (lote, qr, pagos, propinas)
-├── repositories/      # interfaces + in_memory + supabase + gateway pagos
+├── services/          # casos de uso (lote, qr, pagos, propinas, trazabilidad)
+├── repositories/      # interfaces + in_memory + supabase + gateways (pagos, web3)
 └── utils/cursor.py    # paginación por cursor base64url
 db/                    # migraciones SQL + seed (Supabase/PostgreSQL)
 ```
@@ -168,3 +170,4 @@ Resumen rápido; el detalle está en `docs/ARCHITECTURE.md`:
 - RLS por rol de negocio resuelto desde `usuarios` (no del claim JWT).
 - Hash por etapa: cada evento lleva `hash_etapa`; la raíz vive en `qr_certificado.hash_sha256`.
 - Pasaporte de Café: verificación pública con datos enriquecidos (variedad, método, humedad, SCA) + timeline con hash por etapa.
+- Anclaje on-chain (ADR-11): `CoffeeTraceability` en Base Sepolia (`contracts/`), cola `blockchain_anclas` (migraciones 011/012) y worker de reconciliación con lease global + fencing token (`GET /v1/blockchain/reconciliar`, `Authorization: Bearer`, Vercel Cron). El worker reserva nonce (`pending`), confirma por tx + recibo + evento + 2 confirmaciones y recupera por logs si el `tx_hash` no se persistió. El QR nunca depende de la cadena; `BEAN_WEB3_MODE=disabled` mantiene el comportamiento actual.

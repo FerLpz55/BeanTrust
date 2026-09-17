@@ -37,6 +37,8 @@ ENDPOINTS_DOCUMENTADOS: set[tuple[str, str]] = {
     ("POST", "/v1/propinas"),
     ("GET", "/v1/propinas/lote/{lote_id}"),
     ("POST", "/v1/sync"),
+    ("GET", "/v1/blockchain/reconciliar"),
+    ("POST", "/v1/blockchain/anclas/{lote_id}/reintentar"),
 }
 
 

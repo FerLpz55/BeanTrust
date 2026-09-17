@@ -189,6 +189,22 @@ export interface LoteEventoPublico extends EventoCampos {
   registrado_en: string;
 }
 
+export type EstadoAncla = 'PENDIENTE' | 'ENVIANDO' | 'ENVIADA' | 'CONFIRMADA' | 'FALLIDA';
+
+/** Anclaje on-chain del Pasaporte (ADR-11). Ausente si web3 está desactivado. */
+export interface AnclajeOnchain {
+  estado: EstadoAncla;
+  chain_id: number;
+  red_nombre: string;
+  contrato: string | null;
+  tx_hash: string | null;
+  bloque: number | null;
+  hash_raiz: string | null;
+  explorer_url: string | null;
+  explorer_etiqueta: string;
+  confirmada_en: string | null;
+}
+
 export interface VerificarRead {
   codigo: string;
   lote_id: string;
@@ -209,6 +225,7 @@ export interface VerificarRead {
   finca_nombre: string | null;
   municipio: string | null;
   organica: boolean | null;
+  anclaje_onchain: AnclajeOnchain | null;
 }
 
 /* ── Pagos y propinas (§9) ─────────────────────────────── */

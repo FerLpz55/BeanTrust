@@ -1,0 +1,12 @@
+# Gitleaks: las claves de Anvil son públicas y deterministas (nodo local sin
+# valor). Se permiten solo en el E2E para no romper el CI por un falso positivo.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Claves de prueba de Anvil usadas por el E2E local"
+paths = ['''Backend/tests/integration/test_anclaje_anvil\.py''']
+regexes = [
+  '''0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80''',
+  '''0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d''',
+]
