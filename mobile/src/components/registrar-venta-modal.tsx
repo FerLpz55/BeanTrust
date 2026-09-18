@@ -1,11 +1,11 @@
 /**
  * Modal "Registrar venta" — cooperativa/admin venden un lote TOSTADO.
  *
- * Dispara `POST /v1/pagos`: el backend simula el pago on-chain
- * (`FakeGatewayPagos`, patrón 97/3, `tx_hash` determinista) sin dinero real
- * ni blockchain real (web3 en pausa, B7). Esta pantalla es la que hace
- * visible esa simulación: muestra el `tx_hash` y el estado de confirmación
- * apenas el backend responde.
+ * Dispara `POST /v1/pagos`: el backend simula el pago (`FakeGatewayPagos`,
+ * patrón 97/3, `tx_hash` determinista) sin dinero real ni pasarela de pago.
+ * La trazabilidad sí está anclada en Base Sepolia, pero el pago NO. Esta
+ * pantalla hace visible la simulación: muestra el `tx_hash` y el estado de
+ * confirmación apenas el backend responde.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -129,7 +129,8 @@ export function RegistrarVentaModal({ visible, loteId, onClose, onVendido }: Reg
                 </>
               ) : null}
               <Text style={[typeScale.bodySmall, { color: onTertiaryContainer, marginTop: spacing.md }]}>
-                La confirmación llega en segundo plano (poller simulado, sin blockchain real).
+                La confirmación llega en segundo plano (pago simulado; no representa una
+                transferencia real).
               </Text>
             </View>
           ) : (

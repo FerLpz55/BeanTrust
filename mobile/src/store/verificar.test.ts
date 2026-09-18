@@ -5,11 +5,22 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@/src/api/client';
 import { verificarCodigo } from '@/src/api/verificar';
 import type { VerificarRead } from '@/src/api/types';
 import { useVerificarStore } from '@/src/store/verificar';
 
 vi.mock('@/src/api/verificar', () => ({ verificarCodigo: vi.fn() }));
+
+function diferido<T>() {
+  let resolve!: (valor: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 const PASAPORTE: VerificarRead = {
   codigo: 'BT-1',
@@ -66,5 +77,68 @@ describe('verificar store · anclaje_onchain', () => {
     await useVerificarStore.getState().buscarPorCodigo('BT-1');
 
     expect(useVerificarStore.getState().data?.pasaporte.anclaje_onchain).toBeNull();
+  });
+});
+
+describe('verificar store · concurrencia y errores', () => {
+  it('una respuesta vieja no reemplaza a un pasaporte nuevo', async () => {
+    const primero = diferido<VerificarRead>();
+    const segundo = diferido<VerificarRead>();
+    vi.mocked(verificarCodigo)
+      .mockReturnValueOnce(primero.promise)
+      .mockReturnValueOnce(segundo.promise);
+
+    const p1 = useVerificarStore.getState().buscarPorCodigo('BT-1');
+    const p2 = useVerificarStore.getState().buscarPorCodigo('BT-2');
+
+    segundo.resolve({ ...PASAPORTE, codigo: 'BT-2' });
+    await p2;
+    primero.resolve({ ...PASAPORTE, codigo: 'BT-1' });
+    await p1;
+
+    expect(useVerificarStore.getState().data?.pasaporte.codigo).toBe('BT-2');
+  });
+
+  it('reset invalida una petición en vuelo', async () => {
+    const pendiente = diferido<VerificarRead>();
+    vi.mocked(verificarCodigo).mockReturnValueOnce(pendiente.promise);
+
+    const p = useVerificarStore.getState().buscarPorCodigo('BT-1');
+    useVerificarStore.getState().reset();
+    pendiente.resolve(PASAPORTE);
+    await p;
+
+    expect(useVerificarStore.getState().data).toBeNull();
+  });
+
+  it('conserva el pasaporte visible durante una actualización', async () => {
+    vi.mocked(verificarCodigo).mockResolvedValueOnce(PASAPORTE);
+    await useVerificarStore.getState().buscarPorCodigo('BT-1');
+
+    const pendiente = diferido<VerificarRead>();
+    vi.mocked(verificarCodigo).mockReturnValueOnce(pendiente.promise);
+    const p = useVerificarStore.getState().buscarPorCodigo('BT-1');
+
+    expect(useVerificarStore.getState().data?.pasaporte.codigo).toBe('BT-1');
+    expect(useVerificarStore.getState().isLoading).toBe(true);
+    pendiente.resolve(PASAPORTE);
+    await p;
+  });
+
+  it('distingue 404, 409 y error de red en título y mensaje', async () => {
+    vi.mocked(verificarCodigo).mockRejectedValueOnce(new ApiError(404, 'no existe'));
+    await useVerificarStore.getState().buscarPorCodigo('BT-1');
+    expect(useVerificarStore.getState().tituloError).toBe('Lote no encontrado');
+    expect(useVerificarStore.getState().motivo).toBe('no_encontrado');
+
+    vi.mocked(verificarCodigo).mockRejectedValueOnce(new ApiError(409, 'manipulado'));
+    await useVerificarStore.getState().buscarPorCodigo('BT-1');
+    expect(useVerificarStore.getState().tituloError).toBe('Certificado no verificable');
+    expect(useVerificarStore.getState().motivo).toBe('manipulado');
+
+    vi.mocked(verificarCodigo).mockRejectedValueOnce(new ApiError(0, 'sin red'));
+    await useVerificarStore.getState().buscarPorCodigo('BT-1');
+    expect(useVerificarStore.getState().tituloError).toBe('Sin conexión');
+    expect(useVerificarStore.getState().motivo).toBe('red');
   });
 });
