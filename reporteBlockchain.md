@@ -625,3 +625,26 @@ smoke. Verificación final con la suite completa (Foundry, ruff+pytest, móvil) 
 | `contracts/scripts/post-deploy.sh` (C4) | ✅ hecho y probado en Anvil |
 | Fases C–F (deploy, Supabase, Vercel, smoke real) | ⏳ requieren tus claves/acceso |
 | Fase G (docs con datos reales) | ⏳ al cerrar el smoke |
+
+## Retomar después · 2026-09-18
+
+Producción quedó estabilizada en Vercel con `BEAN_WEB3_MODE=disabled` y
+`https://beantrust-api.vercel.app/health` responde `200`.
+
+El intento de activar `anchor` falló antes de `/health` porque
+`BEAN_WEB3_BACKEND_PRIVATE_KEY` tenía una address pública (`0x42cC...d656`) en
+lugar de una private key `0x` + 64 hex. Además apareció una frase de 12 palabras
+durante la operación; por seguridad no se debe usar esa wallet caliente vieja en
+Vercel.
+
+Para cerrar el anclaje real, retomar con este orden:
+
+1. Crear una wallet caliente nueva e independiente para Backend.
+2. Fondearla con ETH testnet de Base Sepolia.
+3. Darle `ANCHOR_ROLE` en `CoffeeTraceability` desde la admin.
+4. Revocar `ANCHOR_ROLE` a `0x42cC953Bd37cb100074ab9e20AD950D7c0add656`.
+5. Cargar en Vercel la private key nueva como `BEAN_WEB3_BACKEND_PRIVATE_KEY`
+   sensitive y la address nueva como `BEAN_WEB3_ANCHOR_ADDRESS`.
+6. Rotar `CRON_SECRET`.
+7. Cambiar `BEAN_WEB3_MODE=anchor`, redeploy, correr canario y auditar
+   `CONFIRMADA >= 1`, `FALLIDA = 0`.

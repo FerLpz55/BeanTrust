@@ -16,11 +16,9 @@ directas del comprador al productor).
 - `Backend/` — FastAPI (Python ≥3.12), capas: endpoints → services → repositories (interfaz + in_memory + supabase). BD Supabase/PostgreSQL, migraciones en `Backend/db/`.
 - `mobile/` — React Native / Expo Router (pnpm). Tokens de diseño "Copa de cata" en `src/theme/tokens.ts`.
 - `docs/` — `ARCHITECTURE.md` (diseño), `06-contratos.md` (web3).
-- `issues/` — backlog ejecutable (espejo local de las issues #26–#35 de GitHub) con orden y dependencias; `CLAUDE.md` en la raíz instruye su ejecución con buenas prácticas.
-- `.opencode/agent/` — agentes del proyecto (cada uno con sus skills a instalar/usar):
-  `login-flow.md` (auth flow), `backend.md`, `mobile.md`, `supabase.md`, `revisar.md`.
+- `contracts/` — Foundry: `CoffeeTraceability.sol` desplegado en Base Sepolia.
 
-No existe `contracts/` (web3 pausado — deuda B7) ni `db/` en la raíz.
+No existe `db/` en la raíz.
 
 ## Regla de oro: docs ↔ código nunca divergen
 
@@ -96,10 +94,19 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   Storage) y **registro público cerrado** (`enable_signup=false`); las cuentas
   piloto se crean por Auth Admin, no desde la app. Smoke test operativo en
   `Backend/scripts/smoke_production.py`.
-- Deudas clave: B7 web3 en pausa (contrato/wallet sin desplegar), B11 avanza
-  (RLS efectiva por usuario, rate limit compartido y refresh rotativo local) y
-  resta la wallet `public_address`; pendiente el smoke de producción/EAS.
-  El rate limit en memoria queda solo para dev/CI.
+- Blockchain (ADR-11): `CoffeeTraceability` está desplegado en Base Sepolia
+  (`0x083475298d32724d85E17Dd48f9a9Bd2550035C9`, bloque `46926492`) y las
+  migraciones `011/012/013` están aplicadas. Producción quedó estabilizada en
+  Vercel con `BEAN_WEB3_MODE=disabled` y `/health` 200 tras un intento fallido
+  de activar `anchor`: se había cargado una address pública como
+  `BEAN_WEB3_BACKEND_PRIVATE_KEY`, y además apareció una frase de 12 palabras.
+  No reutilizar esa wallet caliente vieja (`0x42cC...d656`) para Vercel. Para
+  retomar: crear hot wallet nueva, fondearla, otorgar `ANCHOR_ROLE`, revocar la
+  vieja, cargar la private key nueva en Vercel, rotar `CRON_SECRET`, activar
+  `anchor`, correr canario y auditar `CONFIRMADA >= 1`, `FALLIDA = 0`.
+- Deudas clave: pagos on-chain reales siguen en pausa; resta cerrar el canario
+  de anclaje con hot wallet nueva y el smoke de producción/EAS. El rate limit en
+  memoria queda solo para dev/CI.
 
 ## Skills útiles
 
