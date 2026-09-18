@@ -54,6 +54,83 @@ def test_produccion_insegura_se_rechaza(campos: dict[str, str], mensaje: str) ->
         Settings(**BASE, **valores)
 
 
+PROD_SUPABASE = {
+    "environment": "production",
+    "repo_backend": "supabase",
+    "auth_backend": "supabase",
+    "supabase_url": "https://x.supabase.co",
+    "supabase_service_key": "clave",
+    "supabase_anon_key": "anon",
+    "rate_limit_hmac_secret": "secreto-hmac",
+}
+
+WEB3_COMPLETO = {
+    "web3_mode": "anchor",
+    "web3_rpc_url": "https://sepolia.base.org",
+    "web3_contract_address": "0x" + "ab" * 20,
+    "web3_contract_code_hash": "0x" + "cd" * 32,
+    "web3_pauser_address": "0x" + "ef" * 20,
+    "web3_anchor_address": "0x" + "22" * 20,
+    "web3_backend_private_key": "0x" + "11" * 32,
+    "web3_cron_secret": "s" * 40,
+}
+
+
+def test_produccion_anchor_completo_arranca() -> None:
+    settings = Settings(**BASE, **PROD_SUPABASE, **WEB3_COMPLETO)
+    assert settings.web3_mode == "anchor"
+    assert settings.web3_chain_id == 84532
+
+
+@pytest.mark.parametrize(
+    ("faltante", "mensaje"),
+    [
+        ("web3_rpc_url", "BEAN_WEB3_RPC_URL"),
+        ("web3_contract_address", "BEAN_WEB3_CONTRACT_ADDRESS"),
+        ("web3_contract_code_hash", "BEAN_WEB3_CONTRACT_CODE_HASH"),
+        ("web3_pauser_address", "BEAN_WEB3_PAUSER_ADDRESS"),
+        ("web3_anchor_address", "BEAN_WEB3_ANCHOR_ADDRESS"),
+        ("web3_backend_private_key", "BEAN_WEB3_BACKEND_PRIVATE_KEY"),
+        ("web3_cron_secret", "BEAN_WEB3_CRON_SECRET"),
+    ],
+)
+def test_produccion_anchor_incompleto_se_rechaza(faltante: str, mensaje: str) -> None:
+    valores = {**WEB3_COMPLETO, faltante: ""}
+    with pytest.raises(ValidationError, match=mensaje):
+        Settings(**BASE, **PROD_SUPABASE, **valores)
+
+
+@pytest.mark.parametrize(
+    ("campo", "valor"),
+    [
+        ("web3_rpc_url", "ftp://x"),
+        ("web3_contract_address", "0x1234"),
+        ("web3_contract_code_hash", "0x" + "cd" * 20),
+        ("web3_pauser_address", "0x1234"),
+        ("web3_anchor_address", "0x1234"),
+        ("web3_backend_private_key", "0x" + "11" * 10),
+        ("web3_cron_secret", "corto"),
+    ],
+)
+def test_web3_formato_invalido_se_rechaza(campo: str, valor: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**BASE, **{**WEB3_COMPLETO, campo: valor})
+
+
+def test_cron_secret_acepta_alias_sin_prefijo(monkeypatch) -> None:
+    """Vercel inyecta `CRON_SECRET`; el backend lo acepta como alias."""
+    monkeypatch.setenv("CRON_SECRET", "z" * 40)
+    monkeypatch.delenv("BEAN_WEB3_CRON_SECRET", raising=False)
+    assert Settings(**BASE).web3_cron_secret == "z" * 40
+
+
+def test_confirmaciones_fuera_de_rango_se_rechaza() -> None:
+    with pytest.raises(ValidationError):
+        Settings(**BASE, **{**WEB3_COMPLETO, "web3_confirmations": 0})
+    with pytest.raises(ValidationError):
+        Settings(**BASE, **{**WEB3_COMPLETO, "web3_confirmations": 13})
+
+
 @pytest.mark.parametrize(
     ("valor", "esperado"),
     [

@@ -62,7 +62,7 @@ Modelo de negocio (B2B2C): el productor **no paga**. Pagan las cooperativas (sus
 
 - **FastAPI** es la única puerta que valida las reglas de negocio y la única que conoce la máquina de estados del café. **La app jamás escribe directo en la base de datos**.
 - **Supabase** es la fuente de verdad relacional (PostgreSQL) + Auth + Row Level Security (RLS) + Storage (bucket **privado** de evidencias; la app nunca habla con Storage, solo con FastAPI).
-- **Smart Contracts (Polygon)**: solo contienen el *flujo de dinero*, nunca la lógica de negocio completa. **Web3 está en pausa** (B7): el MVP usa `FakeGatewayPagos`.
+- **Smart Contracts (Polygon)**: solo contienen el *flujo de dinero*, nunca la lógica de negocio completa. El MVP actual usa `FakeGatewayPagos`; la integración real se retoma primero en testnet.
 
 | Componente | Rol | Quién lo consume |
 |---|---|---|
@@ -80,24 +80,26 @@ Modelo de negocio (B2B2C): el productor **no paga**. Pagan las cooperativas (sus
 BeanTrust/
 ├── docs/
 │   ├── ARCHITECTURE.md        # ← Este documento (fuente de verdad del diseño)
-│   ├── 06-contratos.md         # Contratos Solidity (diseño; web3 en pausa — B7)
+│   ├── 06-contratos.md         # Contratos Solidity (diseño web3)
+│   ├── guia-blockchain-testnet.md # Guía de despliegue (Base Sepolia)
 │   └── (los ADR viven inline en §11 de ARCHITECTURE.md)
 ├── Backend/                     # FastAPI (la carpeta va con mayúscula)
 │   ├── app/
 │   │   ├── main.py              # crear_app() + handler de errores de dominio
 │   │   ├── core/                 # config, seguridad (JWT + argon2), logger
 │   │   ├── api/v1/
-│   │   │   ├── router.py         # Monta TODOS los routers de /v1 (incluye propinas)
-│   │   │   └── endpoints/        # auth, cooperativas, lotes, eventos, verificacion, pagos, sync
+│   │   │   ├── router.py         # Monta TODOS los routers de /v1 (incluye propinas y blockchain)
+│   │   │   └── endpoints/        # auth, cooperativas, lotes, eventos, verificacion, pagos, sync, blockchain
 │   │   ├── models/dominio.py     # Reglas de negocio (máquina de estados) — sin I/O
 │   │   ├── schemas/              # Pydantic → validación entrada/salida
-│   │   ├── services/             # lotes, qr, pagos, propinas (casos de uso)
-│   │   ├── repositories/         # Interfaces + in_memory + supabase + gateway pagos
+│   │   ├── services/             # lotes, qr, pagos, propinas, trazabilidad (casos de uso)
+│   │   ├── repositories/         # Interfaces + in_memory + supabase + gateways (pagos, web3)
 │   │   ├── utils/                # helpers puros (cursor base64url, hashing)
 │   │   └── dependencies.py       # Inyección de dependencias compartidas (Annotated + Depends)
 │   ├── db/                       # Migraciones SQL + seed (Supabase/PostgreSQL)
 │   ├── tests/                    # unit/ + integration/ (incluye test_contrato_api.py)
 │   └── pyproject.toml
+├── contracts/                  # Foundry: CoffeeTraceability.sol (Base Sepolia) + tests + ABI
 ├── supabase/                   # Configuración local de Supabase
 │   ├── migrations -> ../Backend/db/migrations   # symlink a las migraciones
 │   ├── functions/purge-staged-evidence/         # Edge Function de purga diaria
@@ -106,21 +108,22 @@ BeanTrust/
 │   ├── app/                    # Pantallas (login, registro, dashboard, verificar, mercado...)
 │   ├── src/
 │   │   ├── components/         # Componentes UI reutilizables
-│   │   ├── api/                # Cliente HTTP (auth, lotes, sync, evidencias)
+│   │   ├── api/                # Cliente HTTP (auth, lotes, sync, evidencias, verificar)
 │   │   ├── offline/            # SQLite + NetInfo (caché, cola FIFO, attachments)
 │   │   ├── evidencia/          # Captura/normalización de foto (JPEG + SHA-256)
 │   │   ├── store/              # Estado de auth (zustand) + JWT util
 │   │   ├── storage/            # SecureStore (tokens)
 │   │   └── theme/              # Tokens del sistema de diseño "Copa de cata"
 │   └── package.json            # scripts: start, lint, typecheck
-├── .opencode/                  # Config de agentes (login-flow = memoria del proyecto)
 ├── AGENTS.md                   # ← Memoria persistente y reglas de alineación docs↔código
 └── README.md
 ```
 
-> **`contracts/` (Solidity) y `db/` en la raíz NO existen todavía.** El web3 está
-> en pausa (deuda B7): el diseño del contrato vive en `docs/06-contratos.md` y el
-> gateway fake lo simula en desarrollo. La BD real vive en `Backend/db/`.
+> **`contracts/` (Foundry) ya existe** con `CoffeeTraceability.sol` para el
+> anclaje del Pasaporte (ADR-11). `CoffeePayments.sol` y los pagos on-chain
+> siguen **en pausa** (B7): el MVP usa `FakeGatewayPagos`. La guía de despliegue
+> es `docs/guia-blockchain-testnet.md` (Base Sepolia; Polygon Amoy como
+> alternativa EVM futura) y la BD real vive en `Backend/db/`.
 > La fuente de verdad de la estructura real es este monorepo (no las secciones
 > antiguas de este documento ni el README de la raíz).
 
@@ -758,7 +761,7 @@ flowchart LR
 | `GET` | `/v1/lotes/{lote_id}` | Consultar lote + historial | Sí | `200` · `404` |
 | `GET` | `/v1/lotes/{lote_id}/evidencia` | URL firmada temporal de la evidencia adjunta | Sí | `200` · `403` · `404` |
 | `GET` | `/v1/lotes` | Listar lotes (paginado por cursor) | Sí | `200` · `400` |
-| `GET` | `/v1/verificar/{codigo}` | **Pasaporte de Café** público (sin auth) | Sí | `200` · `404` · `409` |
+| `GET` | `/v1/verificar/{codigo}` | **Pasaporte de Café** público (sin auth) + `anclaje_onchain` opcional (ADR-11) | Sí | `200` · `404` · `409` |
 | `GET` | `/v1/mercado/{lote_id}` | **Panel Comercio Justo**: proyección read-only 97/3 + propinas (ADR-9) | Sí | `200` · `403` · `404` |
 | `POST` | `/v1/pagos` | Venta + disparo de pago on-chain 3%/97% | `Idempotency-Key` | `202` · `409` · `422` |
 | `GET` | `/v1/pagos` | Historial de pagos de la cooperativa (cursor) | Sí | `200` · `403` |
@@ -766,6 +769,8 @@ flowchart LR
 | `POST` | `/v1/propinas` | Registrar propina del comprador (idempotente, bivalente) | `Idempotency-Key` | `201` · `409` · `422` |
 | `GET` | `/v1/propinas/lote/{lote_id}` | Listar propinas de un lote (lectura por tenant: dueños del lote + admin) | Sí | `200` · `403` · `404` |
 | `POST` | `/v1/sync` | Batch de operaciones offline (productor/cooperativa/admin) | Sí (reusa ids) | `202` · `207` |
+| `GET` | `/v1/blockchain/reconciliar` | Procesa la cola de anclaje; lo dispara Vercel Cron (`Authorization: Bearer`) | Sí | `200` · `401` |
+| `POST` | `/v1/blockchain/anclas/{lote_id}/reintentar` | Reencola un ancla FALLIDA (admin; no acepta hashes del cliente) | Sí | `200` · `403` · `404` · `409` |
 | `GET` | `/health` | Health check (fuera de `/v1`) | Sí | `200` |
 
 **Notas de alcance:**
@@ -1059,11 +1064,84 @@ sequenceDiagram
 
 ---
 
-## 9. Blockchain y pagos (Solidity / Polygon)
+## 9. Blockchain: anclaje del Pasaporte y pagos (Solidity / EVM)
 
-> **Estado v1 MVP**: el flujo on-chain está **diseñado** aquí y en `docs/06-contratos.md`, pero la integración web3 está **en pausa** (deuda B7: falta la wallet del backend y el contrato desplegado). El proyecto Supabase real ya está conectado (auth + datos + Storage) y el MVP ejecuta `FakeGatewayPagos` (tx determinista `0x<pago.id>` y confirmación simulada) que ya implementa el patrón 3%/97% y el poller `PENDIENTE → CONFIRMADO`. La wallet del productor (`public_address` en `USUARIOS`) se persistirá cuando se retome web3.
+> **Estado v1 MVP (2026-09-17)**: el **anclaje on-chain del Pasaporte (ADR-11)
+> está implementado y desplegado en Base Sepolia**. Contrato `CoffeeTraceability`
+> en `0x083475298d32724d85E17Dd48f9a9Bd2550035C9` (deploy tx
+> `0xd6f1990f6e25f7a493a38e246b2684b6dd0f5e633c1a03bf52f0c7af3d3d8110`, bloque
+> `46926492`, runtime `0x07746f4c…def3d8`); la cola `blockchain_anclas`
+> (migraciones 011/012/**013**, la 013 pendiente de `supabase db push`) y el
+> worker de reconciliación (`GET /v1/blockchain/reconciliar`, disparado por
+> Vercel Cron) la confirman. El gateway se endureció: normalización de hashes con
+> `Web3.to_hex`, preflight de contrato no pausado/dirección derivada/roles de
+> privilegio mínimo, private key como `SecretStr`, política EIP-1559 con techos,
+> separación `preparar_ancla`/`transmitir_ancla` (el `tx_hash` se persiste antes
+> del broadcast) y fencing real en `bean_reclamar_ancla` (013). `GET
+> /v1/verificar/{codigo}` expone `anclaje_onchain` cuando
+> `BEAN_WEB3_MODE=anchor`; hoy Production queda en `disabled` y la wallet
+> caliente **no** está cargada (sin anclas reales todavía; ver
+> `docs/guia-blockchain-testnet.md`). **El flujo de pagos
+> `CoffeePayments.sol` sigue en pausa** (B7: falta la wallet del productor): el
+> MVP ejecuta `FakeGatewayPagos` (tx determinista `0x<pago.id>` y confirmación
+> simulada) que ya implementa el patrón 3%/97% y el poller
+> `PENDIENTE → CONFIRMADO`. La wallet del productor (`public_address` en
+> `USUARIOS`) se persistirá cuando se retome ese frente. **Los pagos y propinas
+> son simulados y no representan transferencias reales**; lo único real on-chain
+> es el anclaje del Pasaporte.
 
-### Responsabilidad del Smart Contract `CoffeePayments.sol`
+### Contrato `CoffeeTraceability.sol` (anclaje, ADR-11)
+
+- No actualizable; hereda `AccessControlDefaultAdminRules` (retardo admin de
+  48 h) y `Pausable`. Roles: `DEFAULT_ADMIN_ROLE`, `PAUSER_ROLE` y `ANCHOR_ROLE`.
+- Interfaz: `anchorHash(bytes32 loteId, bytes32 hashRaiz)`, `isAnchored`,
+  `getAnchor`, `pause`/`unpause`. Un solo anclaje por lote; rechaza `bytes32(0)`;
+  sin funciones `payable` ni recepción de ETH.
+- Evento `HashAnchored(loteId, hashRaiz, actor, anchoredAt)`.
+- Conversión canónica: UUID de `lotes.id` → 16 bytes hex rellenados a la derecha
+  hasta `bytes32`; `qr_certificado.hash_sha256` → sus 64 caracteres hex como
+  `bytes32`. **No se aplica `keccak256`** (el hash ya es el SHA-256 canónico).
+- El QR nunca depende de la cadena: si el RPC falla, el trabajo se reprograma con
+  backoff exponencial y el Pasaporte sigue verificando off-chain.
+
+### Worker de anclaje (migraciones 011/012/013)
+
+- Cola durable `blockchain_anclas` (una fila por certificado, `UNIQUE` por
+  `qr_certificado` y por `lote`): estados `PENDIENTE → ENVIANDO → ENVIADA →
+  CONFIRMADA` (+ `FALLIDA`). `ENVIANDO` significa nonce reservado y transmisión
+  incierta; **nunca se reenvía a ciegas**.
+- **Lease global + fencing token** (`app_private.blockchain_worker_locks` y RPCs
+  `bean_adquirir/renovar/liberar_lock_anclaje`, `bean_reclamar_ancla`): solo un
+  worker firma; una lease vencida no puede sobrescribir al nuevo dueño. La 013
+  hace que `bean_reclamar_ancla` exija el nombre/token vigentes; si
+  `renovar_lock` devuelve `false` o un `UPDATE ... WHERE lock_token` no afecta
+  filas, el worker lanza `FencingPerdido` y detiene el lote (nunca lo oculta como
+  éxito).
+- Preflight antes de firmar: `chain_id`, bytecode, huella del runtime
+  (`BEAN_WEB3_CONTRACT_CODE_HASH`), contrato no pausado, dirección de anclaje
+  derivada de la private key y roles de privilegio mínimo (`ANCHOR_ROLE` sí;
+  `DEFAULT_ADMIN_ROLE`/`PAUSER_ROLE` no).
+- Nonce con `eth_getTransactionCount(..., "pending")`; EIP-1559 con gas estimado
+  y política de tarifas: `eth_maxPriorityFeePerGas` acotada por
+  `BEAN_WEB3_MAX_PRIORITY_FEE_GWEI`, `maxFeePerGas = min(2·baseFee + priority,
+  BEAN_WEB3_MAX_FEE_GWEI)`. Si el cap no cubre `baseFee + priorityFee` se
+  reprograma con `FEE_CAP_TOO_LOW` **sin firmar**; el saldo debe cubrir gas más
+  `BEAN_WEB3_MIN_BALANCE_WEI`.
+- Firma en memoria (`preparar_ancla` → `TransaccionPreparada`) y persistencia de
+  `ENVIANDO + nonce + tx_hash` **antes** de `transmitir_ancla`; si falla antes de
+  ese punto la fila conserva su estado previo.
+- Confirmación por `eth_getTransactionByHash` (remitente y contrato), recibo
+  `status == 1`, evento `HashAnchored` exacto y **dos confirmaciones**.
+- Recuperación: si el proceso cae tras transmitir, se consulta primero el
+  `tx_hash` persistido y, como respaldo, `getAnchor` + logs fragmentados
+  (`BEAN_WEB3_LOG_BLOCK_RANGE`) desde `BEAN_WEB3_DEPLOYMENT_BLOCK`; tras un TTL
+  pasa a `FALLIDA` para intervención. `isAnchored()` solo detecta un anclaje
+  previo.
+- Cron real: `GET /v1/blockchain/reconciliar` con `Authorization: Bearer`
+  (`CRON_SECRET`), configurado en `Backend/vercel.json`. En Vercel Hobby corre
+  **diario**; el reintento admin cubre demos.
+
+### Responsabilidad del Smart Contract `CoffeePayments.sol` (fase posterior)
 
 Responsabilidad exclusiva: el pago y la inmutabilidad de la transacción (*única responsabilidad*).
 - Recibe la venta (`lote_id`, `productor`, `cantidad` → `peso_kg` del evento `VENTA`, `precio` → `monto_total`) **firmada por el backend**.
@@ -1081,14 +1159,26 @@ Responsabilidad exclusiva: el pago y la inmutabilidad de la transacción (*únic
 
 ### Red y despliegue
 
-- **Testnet**: Polygon `Amoy` (testnet y compatibles actuales de Polygon).
-- Deploy desde `contracts/script/` con **Foundry** (`forge script ... --rpc-url ...`).
-- Fondos de prueba: faucet de Amoy (MATIC de prueba, gratis).
-- En producción se evalúa Mainnet; Polygon (L2) mantiene gas bajo porque hereda seguridad de Ethereum.
+- **Testnet primaria: Base Sepolia** (`chain_id` `84532`, RPC
+  `https://sepolia.base.org`, explorer `https://sepolia.basescan.org`). Se eligió
+  por disponibilidad de ETH de prueba para la cuenta administradora; el contrato
+  no tiene dependencias de Base y **conserva portabilidad EVM a Polygon Amoy**
+  (`80002`) como alternativa futura. Divergencia deliberada y documentada.
+- Deploy desde `contracts/script/` con **Foundry** (`forge script ... --rpc-url ...`),
+  firmando con `--account beanst-admin` (keystore cifrado; nunca una private key
+  en `.env`). La wallet de anclaje del backend solo aporta su **dirección pública**
+  a `contracts/.env`; su private key vive en `BEAN_WEB3_BACKEND_PRIVATE_KEY`.
+- **Desplegado el 2026-09-16**: `0x083475298d32724d85E17Dd48f9a9Bd2550035C9`
+  (bloque `46926492`, runtime `0x07746f4c…def3d8`). Roles verificados:
+  `DEFAULT_ADMIN_ROLE` + `PAUSER_ROLE` en `0x032c4f61…c532` y `ANCHOR_ROLE` en la
+  wallet caliente `0x42cC953B…d656` (sin privilegios cruzados, `paused=false`).
+- Verificación del contrato en BaseScan y comprobación post-deploy de cadena,
+  bytecode y roles (ver `contracts/README.md` y `docs/guia-blockchain-testnet.md`).
 
-> La especificación completa del contrato, el flujo y el estado de la
-> implementación viven en **`docs/06-contratos.md`**. La implementación web3
-> está **en pausa** (B7): el MVP corre con `FakeGatewayPagos`.
+> La especificación completa de contratos, el flujo y el estado de la
+> implementación viven en **`docs/06-contratos.md`**. El anclaje está
+> implementado; `CoffeePayments` (pagos 97/3 y propinas on-chain) sigue en pausa
+> y el MVP corre con `FakeGatewayPagos`.
 
 ### Flujo de pago por el backend (diagrama de secuencia)
 
@@ -1126,8 +1216,19 @@ sequenceDiagram
 
 ### Anclaje por etapa on-chain (ADR-11)
 
-- Cada `LOTE_EVENTOS.hash_etapa` se puede anclar on-chain **reusando `anclarHash(hash)`** (función de anclaje del contrato): se ancla la **raíz** (`QR_CERTIFICADO.hash_sha256`) y opcionalmente hitos intermedios (PERGAMINO, ORO) para prueba de no-manipulación por etapa.
-- Mismo mecanismo de la nota previa: **web3 en pausa** (B7) — se documenta y se retoma con la integración real.
+- La **raíz** (`QR_CERTIFICADO.hash_sha256`) se ancla en `CoffeeTraceability`
+  con `anchorHash(loteId, hashRaiz)`: el backend convierte el UUID del lote y el
+  SHA-256 a `bytes32` (conversión canónica, sin `keccak256`).
+- El anclaje es **asíncrono y no bloqueante**: al emitir el Pasaporte se encola
+  en `blockchain_anclas` (trigger de la migración 011) y el worker de
+  reconciliación transmite y confirma la tx. Un fallo de RPC se reintenta con
+  backoff exponencial; nunca impide emitir, verificar o escanear el QR.
+- `GET /v1/verificar/{codigo}` expone `anclaje_onchain` con
+  `PENDIENTE`/`ENVIANDO`/`ENVIADA`/`CONFIRMADA`/`FALLIDA`, `tx_hash`, `bloque`,
+  `hash_raiz`, `red_nombre`, `explorer_url`, `explorer_etiqueta` y
+  `confirmada_en`; el móvil solo abre el explorer para un ancla `CONFIRMADA` con
+  `tx_hash`, bloque y URL válidos. Nunca se exponen nonce, errores ni lock.
+- El anclaje de hitos intermedios por etapa queda como extensión opcional futura.
 
 ---
 
@@ -1215,6 +1316,7 @@ sequenceDiagram
 | `pago` | de sus lotes (lectura) | propias (escritura) | lectura (comercio justo del lote) | todo |
 | `propina` | de sus lotes (lectura) | de sus lotes (lectura) | propias (escritura) + lectura | todo |
 | `verificacion` | de sus lotes | de sus lotes | — | todo |
+| `blockchain_anclas` | — | — | — | — (solo backend con `service_role`; sin grants a `anon`/`authenticated`) |
 | `evidencias` | — | — | — | — (solo backend con `service_role`; sin grants a `anon`/`authenticated`) |
 | `storage.objects` | — | — | — | — (RLS habilitado **sin políticas** para `anon`/`authenticated`; solo `service_role` sube/firma/borra en el bucket privado `evidencias-lotes`) |
 
@@ -1256,9 +1358,9 @@ A continuación, los ADR 9–14 en el formato estándar **Contexto → Decisión
 ### ADR-11 — Hash por etapa (cadena lineal + ancla raíz on-chain)
 
 - **Contexto:** el pasaporte muestra el historial completo; un solo hash no demuestra que *cada etapa* no fue manipulada.
-- **Decisión:** cada `LOTE_EVENTOS` lleva `hash_etapa` en **cadena lineal** (`hash_i = HASH(hash_{i-1} ‖ datos)` orden `registrado_en, id`); la raíz es `QR_CERTIFICADO.hash_sha256`, verificable con el QR y anclable on-chain **reusando `anclarHash()`**.
+- **Decisión:** cada `LOTE_EVENTOS` lleva `hash_etapa` en **cadena lineal** (`hash_i = HASH(hash_{i-1} ‖ datos)` orden `registrado_en, id`); la raíz es `QR_CERTIFICADO.hash_sha256`, verificable con el QR y anclable on-chain con `anchorHash(loteId, hashRaiz)` en `CoffeeTraceability` (Base Sepolia).
 - **Opciones consideradas:** (a) hash único del lote — descartado: no aísla la etapa adulterada; (b) Merkle tree — descartado por complejidad en MVP; (c) **cadena lineal** — elegida por simplicidad y suficiente para el caso.
-- **Consecuencias:** la verificación corta por `emitido_en`; editar cualquier evento rompe la raíz → 409; anclaje por etapa opcional cuando web3 se retome (B7).
+- **Consecuencias:** la verificación corta por `emitido_en`; editar cualquier evento rompe la raíz → 409. La raíz se ancla en `CoffeeTraceability` (Base Sepolia) vía la cola `blockchain_anclas` (migración 011) y el worker de reconciliación; `GET /v1/verificar/{codigo}` expone `anclaje_onchain`. El anclaje por etapa intermedio queda como extensión opcional.
 
 ### ADR-12 — Proceso del café ampliado (cadena completa con autotransiciones)
 

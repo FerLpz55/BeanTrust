@@ -6,6 +6,7 @@ import uuid
 from datetime import date, datetime
 
 from app.models.dominio import Estado
+from app.schemas.anclaje import AnclajeOnchainRead
 from app.schemas.comunes import ORMModel
 from app.schemas.lote import LoteEventoPublico
 
@@ -37,3 +38,5 @@ class VerificarRead(ORMModel):
     finca_nombre: str | None = None
     municipio: str | None = None
     organica: bool | None = None
+    # Anclaje on-chain (ADR-11): ausente si web3 está desactivado o sin ancla.
+    anclaje_onchain: AnclajeOnchainRead | None = None

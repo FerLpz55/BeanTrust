@@ -95,13 +95,36 @@ export default function AjustesScreen() {
   const onTertiaryContainer = useThemeColor('onTertiaryContainer');
   const surfaceContainerHigh = useThemeColor('surfaceContainerHigh');
 
-  const handleLogout = useCallback(async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+  const cerrarSesion = useCallback(async () => {
     // Al salir se borran caché y cola del usuario: otro usuario no debe verlas.
     if (usuarioId) await limpiar(usuarioId);
     await logout();
     router.replace('/login');
   }, [logout, limpiar, usuarioId]);
+
+  const operacionesPendientes = pendientes.length + conflictos.length;
+
+  const handleLogout = useCallback(async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    if (operacionesPendientes > 0) {
+      // Nunca se descarta trabajo offline en silencio: se avisa cuánto se pierde.
+      Alert.alert(
+        'Operaciones sin sincronizar',
+        `Tienes ${operacionesPendientes} operación(es) pendiente(s). Si cierras sesión ahora se perderán.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Sincronizar ahora', onPress: () => void sincronizarAhora() },
+          {
+            text: `Salir y perder ${operacionesPendientes}`,
+            style: 'destructive',
+            onPress: () => void cerrarSesion(),
+          },
+        ],
+      );
+      return;
+    }
+    await cerrarSesion();
+  }, [operacionesPendientes, sincronizarAhora, cerrarSesion]);
 
   const confirmarDescarte = useCallback(
     (sequence: number) => {

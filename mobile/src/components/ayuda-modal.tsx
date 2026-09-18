@@ -15,7 +15,7 @@ const PREGUNTAS: { pregunta: string; respuesta: string }[] = [
   {
     pregunta: '¿Qué es el Pasaporte de Café?',
     respuesta:
-      'El código QR que se emite al llegar a TOSTADO. Cualquiera lo escanea (sin cuenta) en "Escáner" y ve el origen, la variedad, el método y el historial completo del lote con su hash por etapa.',
+      'El código QR que se emite al llegar a TOSTADO. Cualquiera lo escanea (sin cuenta) en "Escáner" y ve el origen, la variedad, el método y el historial completo del lote con su hash por etapa. La trazabilidad está anclada en Base Sepolia (testnet).',
   },
   {
     pregunta: '¿Qué diferencia hay entre roles?',
@@ -25,7 +25,7 @@ const PREGUNTAS: { pregunta: string; respuesta: string }[] = [
   {
     pregunta: '¿El dinero es real?',
     respuesta:
-      'No. BeanTrust es un entorno de demostración: los pagos y la confirmación en cadena están simulados (sin blockchain ni pasarela real).',
+      'No. Los pagos y las propinas son simulados: no representan transferencias reales ni hay pasarela de pago. Lo único real on-chain es el anclaje del Pasaporte en Base Sepolia.',
   },
   {
     pregunta: '¿Por qué no puedo editar un evento ya registrado?',

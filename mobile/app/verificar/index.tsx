@@ -1,6 +1,7 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import { router, type Href } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
@@ -15,8 +16,22 @@ export default function VerificarScreen() {
   const [codigo, setCodigo] = useState('');
   const [flashlightOn, setFlashlightOn] = useState(false);
   const [permiso, pedirPermiso] = useCameraPermissions();
+  const enfocado = useIsFocused();
   // Evita que un QR sostenido dispare N navegaciones seguidas.
   const yaEscaneado = useRef(false);
+  const timerRearme = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // La cámara solo vive con la pantalla enfocada y el bloqueo se rearma al
+  // volver; los timers pendientes se cancelan al salir o desmontar.
+  useEffect(() => {
+    if (enfocado) yaEscaneado.current = false;
+    return () => {
+      if (timerRearme.current) {
+        clearTimeout(timerRearme.current);
+        timerRearme.current = null;
+      }
+    };
+  }, [enfocado]);
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
@@ -33,16 +48,18 @@ export default function VerificarScreen() {
 
   const handleEscaneo = useCallback(
     ({ data }: BarcodeScanningResult) => {
-      if (yaEscaneado.current) return;
+      if (!enfocado || yaEscaneado.current) return;
       yaEscaneado.current = true;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       handleVerify(data);
-      // Se rearma al volver del pasaporte.
-      setTimeout(() => {
+      // Se rearma al volver del pasaporte (y se cancela al perder el foco).
+      if (timerRearme.current) clearTimeout(timerRearme.current);
+      timerRearme.current = setTimeout(() => {
         yaEscaneado.current = false;
+        timerRearme.current = null;
       }, 1500);
     },
-    [handleVerify]
+    [handleVerify, enfocado]
   );
 
   const handleClose = () => {
@@ -81,7 +98,7 @@ export default function VerificarScreen() {
 
       <View style={styles.scannerWrapper}>
         <View style={styles.scannerFrame}>
-          {permiso?.granted ? (
+          {permiso?.granted && enfocado ? (
             <CameraView
               style={StyleSheet.absoluteFill}
               facing="back"

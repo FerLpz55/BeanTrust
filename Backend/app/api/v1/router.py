@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     auth,
+    blockchain,
     compradores,
     cooperativas,
     eventos,
@@ -31,3 +32,4 @@ api_router.include_router(mercado.router)
 api_router.include_router(pagos.router)
 api_router.include_router(pagos.router_propinas)
 api_router.include_router(sync.router)
+api_router.include_router(blockchain.router)

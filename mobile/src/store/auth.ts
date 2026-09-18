@@ -4,6 +4,10 @@
  *
  * Además registra en `api/client` los hooks de sesión, para que cualquier
  * petición pueda renovar el token ante un 401 sin acoplar las capas.
+ *
+ * Sesión offline: un fallo de red al refrescar NO borra la sesión ni la
+ * identidad cacheada (`usuarioId`/`rol`). Solo se limpia ante un refresh
+ * inválido (401) o un logout explícito.
  */
 
 import { create } from 'zustand';
@@ -41,6 +45,10 @@ const SIN_SESION = {
   usuarioId: null,
 };
 
+function esFalloDeRed(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 0;
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   ...SIN_SESION,
   status: 'restoring',
@@ -50,7 +58,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   cargarPerfil: async () => {
     try {
       const perfil = await api.me();
-      set({ rol: perfil.rol, usuarioId: perfil.id, email: perfil.email ?? get().email });
+      const { accessToken, refreshToken, email } = get();
+      await saveSession({
+        accessToken,
+        refreshToken,
+        email: perfil.email ?? email,
+        usuarioId: perfil.id,
+        rol: perfil.rol,
+      });
+      set({ rol: perfil.rol, usuarioId: perfil.id, email: perfil.email ?? email });
     } catch {
       // Un fallo aquí no debe cerrar la sesión: la UI degrada sin rol.
     }
@@ -61,7 +77,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const tokens = await api.login(email, password);
       const cuenta = decodeJwt(tokens.access_token)?.email ?? email;
-      await saveSession(tokens.access_token, tokens.refresh_token, cuenta);
+      await saveSession({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        email: cuenta,
+        usuarioId: null,
+        rol: null,
+      });
       set({
         status: 'authenticated',
         accessToken: tokens.access_token,
@@ -82,7 +104,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const tokens = await api.register(email, password, nombre, rol);
       const cuenta = decodeJwt(tokens.access_token)?.email ?? email;
-      await saveSession(tokens.access_token, tokens.refresh_token, cuenta);
+      await saveSession({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        email: cuenta,
+        usuarioId: null,
+        rol: null,
+      });
       set({
         status: 'authenticated',
         accessToken: tokens.access_token,
@@ -110,27 +138,54 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   restore: async () => {
+    const { accessToken, refreshToken, email, usuarioId, rol } = await readSession();
+    if (!accessToken || !refreshToken) {
+      set(SIN_SESION);
+      return;
+    }
+    if (!isTokenExpired(accessToken)) {
+      set({
+        status: 'authenticated',
+        accessToken,
+        refreshToken,
+        email,
+        usuarioId,
+        rol: rol as Rol | null,
+      });
+      await get().cargarPerfil();
+      return;
+    }
     try {
-      const { accessToken, refreshToken, email } = await readSession();
-      if (!accessToken || !refreshToken) {
-        set(SIN_SESION);
-        return;
-      }
-      if (!isTokenExpired(accessToken)) {
-        set({ status: 'authenticated', accessToken, refreshToken, email });
-        await get().cargarPerfil();
-        return;
-      }
       const tokens = await api.refresh(refreshToken);
-      await saveSession(tokens.access_token, tokens.refresh_token, email ?? '');
+      await saveSession({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        email,
+        usuarioId,
+        rol,
+      });
       set({
         status: 'authenticated',
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         email: email ?? decodeJwt(tokens.access_token)?.email ?? null,
+        usuarioId,
+        rol: rol as Rol | null,
       });
       await get().cargarPerfil();
-    } catch {
+    } catch (err) {
+      if (esFalloDeRed(err)) {
+        // Sin red: se conserva la sesión y la identidad cacheadas.
+        set({
+          status: 'authenticated',
+          accessToken,
+          refreshToken,
+          email,
+          usuarioId,
+          rol: rol as Rol | null,
+        });
+        return;
+      }
       await clearSession();
       set(SIN_SESION);
     }
@@ -140,21 +195,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 /**
  * Puente con el cliente HTTP: permite renovar el access token ante un 401 en
  * cualquier pantalla, sin que `api/*` importe el store (evita el ciclo).
+ *
+ * Contrato: devuelve `null` si el refresh es inválido (la sesión debe
+ * cerrarse); lanza `ApiError(0)` si fue un fallo de red (la sesión se conserva).
  */
 configurarSesion({
   getAccessToken: () => useAuthStore.getState().accessToken,
   renovar: async () => {
-    const { refreshToken, email } = useAuthStore.getState();
+    const { refreshToken, email, usuarioId, rol } = useAuthStore.getState();
     if (!refreshToken) return null;
     try {
       const tokens = await api.refresh(refreshToken);
-      await saveSession(tokens.access_token, tokens.refresh_token, email ?? '');
+      await saveSession({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        email,
+        usuarioId,
+        rol,
+      });
       useAuthStore.setState({
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
       });
       return tokens.access_token;
-    } catch {
+    } catch (err) {
+      if (esFalloDeRed(err)) throw err;
       return null;
     }
   },

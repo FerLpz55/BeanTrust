@@ -11,8 +11,15 @@ from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+_HEX = set("0123456789abcdefABCDEF")
+
+
+def _es_hex(valor: str, longitud: int) -> bool:
+    limpio = valor[2:] if valor.startswith("0x") else valor
+    return len(limpio) == longitud and all(c in _HEX for c in limpio)
 
 
 class Settings(BaseSettings):
@@ -64,6 +71,50 @@ class Settings(BaseSettings):
     # pública siguen disponibles.
     maintenance_writes: bool = False
 
+    # --- Anclaje on-chain del Pasaporte (Base Sepolia, ADR-11) ---
+    # `disabled`: el QR funciona igual y no se habla con la cadena.
+    # `anchor`: cada certificado encola su raíz SHA-256 para anclarla.
+    web3_mode: Literal["disabled", "anchor"] = "disabled"
+    web3_chain_id: int = 84532
+    web3_network_name: str = "Base Sepolia"
+    web3_rpc_url: str = "https://sepolia.base.org"
+    web3_contract_address: str = ""
+    # keccak256 del runtime bytecode desplegado (huella del contrato esperado).
+    web3_contract_code_hash: str = ""
+    # Dirección con PAUSER_ROLE (en testnet coincide con la admin). Solo se usa
+    # para diagnóstico/smoke: el worker nunca pausa ni administra roles.
+    web3_pauser_address: str = ""
+    # Bloque del despliegue: desde ahí se buscan eventos para recuperar tx.
+    web3_deployment_block: int = 0
+    # Dirección pública de la wallet caliente (ANCHOR_ROLE). El preflight exige
+    # que coincida con la derivada de la private key y que tenga privilegio mínimo.
+    web3_anchor_address: str = ""
+    # Wallet caliente del backend (ANCHOR_ROLE). NUNCA se commitea ni se loguea:
+    # `SecretStr` evita que aparezca en `repr`, logs o trazas.
+    web3_backend_private_key: SecretStr = SecretStr("")
+    web3_confirmations: int = Field(default=2, ge=1, le=12)
+    # Política de tarifas EIP-1559: techo de prioridad y de `maxFeePerGas` (gwei),
+    # reserva operativa mínima de la wallet y tamaño de la ventana de logs.
+    web3_max_priority_fee_gwei: float = Field(default=0.01, gt=0)
+    web3_max_fee_gwei: float = Field(default=0.05, gt=0)
+    web3_min_balance_wei: int = Field(default=20_000_000_000_000, ge=0)
+    web3_log_block_range: int = Field(default=10_000, ge=1, le=100_000)
+    # Secreto del endpoint operativo que dispara Vercel Cron. Acepta `CRON_SECRET`.
+    web3_cron_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "BEAN_WEB3_CRON_SECRET", "CRON_SECRET", "web3_cron_secret"
+        ),
+    )
+    web3_explorer_base_url: str = "https://sepolia.basescan.org"
+    web3_explorer_label: str = "BaseScan"
+    # Lease global del worker, timeout RPC, TTL de tx enviada y tamaño de lote.
+    web3_worker_lease_seconds: int = Field(default=90, ge=30, le=900)
+    web3_rpc_timeout_seconds: int = Field(default=10, ge=3, le=60)
+    web3_pending_ttl_seconds: int = Field(default=1200, ge=60)
+    web3_max_batch_size: int = Field(default=5, ge=1, le=20)
+    web3_max_intentos: int = Field(default=8, ge=1, le=50)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _parsear_origins(cls, valor: object) -> object:
@@ -82,6 +133,57 @@ class Settings(BaseSettings):
     def _validar_jwt_secret(cls, valor: str) -> str:
         if len(valor.encode("utf-8")) < 32:
             raise ValueError("BEAN_JWT_SECRET debe tener al menos 32 bytes.")
+        return valor
+
+    @field_validator("web3_rpc_url")
+    @classmethod
+    def _validar_web3_rpc(cls, valor: str) -> str:
+        if valor and not valor.startswith(("http://", "https://")):
+            raise ValueError("BEAN_WEB3_RPC_URL debe ser una URL http(s).")
+        return valor
+
+    @field_validator("web3_contract_address")
+    @classmethod
+    def _validar_web3_address(cls, valor: str) -> str:
+        if valor and not _es_hex(valor, 40):
+            raise ValueError("BEAN_WEB3_CONTRACT_ADDRESS debe ser 0x + 40 hex.")
+        return valor
+
+    @field_validator("web3_contract_code_hash")
+    @classmethod
+    def _validar_web3_code_hash(cls, valor: str) -> str:
+        if valor and not _es_hex(valor, 64):
+            raise ValueError("BEAN_WEB3_CONTRACT_CODE_HASH debe ser 0x + 64 hex.")
+        return valor
+
+    @field_validator("web3_pauser_address")
+    @classmethod
+    def _validar_web3_pauser(cls, valor: str) -> str:
+        if valor and not _es_hex(valor, 40):
+            raise ValueError("BEAN_WEB3_PAUSER_ADDRESS debe ser 0x + 40 hex.")
+        return valor
+
+    @field_validator("web3_anchor_address")
+    @classmethod
+    def _validar_web3_anchor(cls, valor: str) -> str:
+        if valor and not _es_hex(valor, 40):
+            raise ValueError("BEAN_WEB3_ANCHOR_ADDRESS debe ser 0x + 40 hex.")
+        return valor
+
+    @field_validator("web3_backend_private_key", mode="before")
+    @classmethod
+    def _validar_web3_private_key(cls, valor: object) -> object:
+        if isinstance(valor, SecretStr):
+            valor = valor.get_secret_value()
+        if isinstance(valor, str) and valor and not _es_hex(valor, 64):
+            raise ValueError("BEAN_WEB3_BACKEND_PRIVATE_KEY debe ser 0x + 64 hex.")
+        return valor
+
+    @field_validator("web3_cron_secret")
+    @classmethod
+    def _validar_web3_cron_secret(cls, valor: str) -> str:
+        if valor and len(valor.encode("utf-8")) < 32:
+            raise ValueError("El secreto de cron debe tener al menos 32 bytes.")
         return valor
 
     # Va sobre el modelo completo, no sobre `environment`: al ser el primer
@@ -106,6 +208,34 @@ class Settings(BaseSettings):
                 raise ValueError("En producción se requiere BEAN_SUPABASE_ANON_KEY.")
             if not self.rate_limit_hmac_secret:
                 raise ValueError("En producción se requiere BEAN_RATE_LIMIT_HMAC_SECRET.")
+            if self.web3_mode == "anchor":
+                if not self.web3_rpc_url:
+                    raise ValueError("Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_RPC_URL.")
+                if not self.web3_contract_address:
+                    raise ValueError(
+                        "Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_CONTRACT_ADDRESS."
+                    )
+                if not self.web3_contract_code_hash:
+                    raise ValueError(
+                        "Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_CONTRACT_CODE_HASH."
+                    )
+                if not self.web3_pauser_address:
+                    raise ValueError(
+                        "Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_PAUSER_ADDRESS."
+                    )
+                if not self.web3_anchor_address:
+                    raise ValueError(
+                        "Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_ANCHOR_ADDRESS."
+                    )
+                if not self.web3_backend_private_key.get_secret_value():
+                    raise ValueError(
+                        "Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_BACKEND_PRIVATE_KEY."
+                    )
+                if not self.web3_cron_secret:
+                    raise ValueError(
+                        "Con BEAN_WEB3_MODE=anchor se requiere "
+                        "BEAN_WEB3_CRON_SECRET (o CRON_SECRET)."
+                    )
         return self
 
 

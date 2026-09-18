@@ -1,8 +1,8 @@
 # BeanTrust · Backend (API)
 
 API de trazabilidad y comercio justo del café: gestión de lotes, Pasaporte de
-Café con hash por etapa, sincronización offline, pagos con división 97/3 y
-propinas directas al productor. FastAPI + Supabase (PostgreSQL). El front
+Café con hash por etapa, sincronización offline, pagos simulados con división
+97/3 y propinas directas al productor. FastAPI + Supabase (PostgreSQL). El front
 (móvil Expo) consume este contrato (§6 de `docs/ARCHITECTURE.md`).
 
 ## Requisitos
@@ -129,14 +129,16 @@ el mismo cambio.
 | GET    | `/lotes/{lote_id}`            | productor/cooperativa/admin  | Detalle con historial (timeline hash por etapa) |
 | GET    | `/lotes/{lote_id}/evidencia`  | productor/cooperativa/admin  | URL firmada temporal de la evidencia adjunta (404 si no hay) |
 | POST   | `/lotes/{lote_id}/eventos`    | productor/cooperativa/admin  | Avanza estado/sub-etapa (idempotente, 11 tipos) |
-| GET    | `/verificar/{codigo}`         | público                      | Pasaporte de Café (200/404/409)          |
+| GET    | `/verificar/{codigo}`         | público                      | Pasaporte de Café (200/404/409) + `anclaje_onchain` opcional (ADR-11) |
 | GET    | `/mercado/{lote_id}`          | dueños del lote + admin      | Panel Comercio Justo: desglose 97/3 + propinas (ADR-9) |
-| POST   | `/pagos`                      | cooperativa                  | Venta + pago on-chain 3%/97% (202, idempotente) |
+| POST   | `/pagos`                      | cooperativa                  | Venta + pago **simulado** 3%/97% (202, idempotente) |
 | GET    | `/pagos`                      | cooperativa                  | Historial de pagos de la cooperativa (paginado por cursor) |
 | GET    | `/pagos/saldo`                | productor/admin              | Saldo del productor (97% ventas confirmadas + propinas) |
 | POST   | `/propinas`                   | comprador                    | Propina al productor (201, idempotente, bivalente) |
 | GET    | `/propinas/lote/{lote_id}`    | dueños del lote: productor/cooperativa/comprador de la venta/admin | Lista propinas del lote (tenancy) |
 | POST   | `/sync`                       | productor/cooperativa/admin  | Batch offline (202/207)                  |
+| GET    | `/blockchain/reconciliar`     | cron (`Authorization: Bearer <CRON_SECRET>`) | Procesa la cola de anclaje (Vercel Cron) |
+| POST   | `/blockchain/anclas/{lote_id}/reintentar` | admin            | Reencola un ancla FALLIDA                |
 | GET    | `/health`                     | público                      | Health check                             |
 
 ## Estructura
@@ -145,12 +147,12 @@ el mismo cambio.
 app/
 ├── main.py            # crear_app + handler de errores de dominio
 ├── dependencies.py    # DI: repos, auth, servicios (Annotated + Depends)
-├── api/v1/endpoints/  # routers (lotes, eventos, verificacion, pagos, sync, auth, cooperativas)
+├── api/v1/endpoints/  # routers (lotes, eventos, verificacion, pagos, blockchain, sync, auth, cooperativas)
 ├── core/              # config, logger, seguridad (JWT HS256/JWKS, argon2)
 ├── models/dominio.py  # reglas de negocio (máquina de estados) — sin I/O
 ├── schemas/           # Pydantic de entrada/salida (fronteras)
-├── services/          # casos de uso (lote, qr, pagos, propinas)
-├── repositories/      # interfaces + in_memory + supabase + gateway pagos
+├── services/          # casos de uso (lote, qr, pagos, propinas, trazabilidad)
+├── repositories/      # interfaces + in_memory + supabase + gateways (pagos, web3)
 └── utils/cursor.py    # paginación por cursor base64url
 db/                    # migraciones SQL + seed (Supabase/PostgreSQL)
 ```
@@ -162,9 +164,11 @@ Resumen rápido; el detalle está en `docs/ARCHITECTURE.md`:
 - El dominio NO conoce FastAPI/Supabase/web3 (inversión de dependencias).
 - `lote_eventos` es append-only: eventos inmutables, deduplicados por el
   `Idempotency-Key` (que es su PK) y anclados por el hash por etapa (cadena lineal).
-- Los pagos se disparan on-chain (Polygon) con retención 3%/97%; la
-  implementación web3 real está documentada en `docs/06-contratos.md` y en
-  pausa (gateway fake en desarrollo). Las propinas son bivalentes off-chain/on-chain.
+- **Pagos y propinas simulados**: `FakeGatewayPagos` (patrón 3%/97% y poller
+  `PENDIENTE → CONFIRMADO`) no mueve dinero real ni hay pasarela; `CoffeePayments`
+  sigue en pausa (falta la wallet del productor). El detalle está en
+  `docs/06-contratos.md`.
 - RLS por rol de negocio resuelto desde `usuarios` (no del claim JWT).
 - Hash por etapa: cada evento lleva `hash_etapa`; la raíz vive en `qr_certificado.hash_sha256`.
 - Pasaporte de Café: verificación pública con datos enriquecidos (variedad, método, humedad, SCA) + timeline con hash por etapa.
+- **Anclaje on-chain real (ADR-11)**: `CoffeeTraceability` en Base Sepolia (`contracts/`), cola `blockchain_anclas` (migraciones 011/012/013) y worker de reconciliación con lease global + fencing (`GET /v1/blockchain/reconciliar`, `Authorization: Bearer`, Vercel Cron). El gateway normaliza hashes con `Web3.to_hex`, hace preflight (cadena, bytecode, huella, contrato no pausado, dirección derivada y roles de privilegio mínimo), firma en memoria (`preparar_ancla`), persiste `ENVIANDO + nonce + tx_hash` antes del broadcast, aplica techos EIP-1559 (`BEAN_WEB3_MAX_PRIORITY_FEE_GWEI`/`BEAN_WEB3_MAX_FEE_GWEI`) y confirma por tx + recibo + evento + 2 confirmaciones. La 013 exige el lease vigente al reclamar. El QR nunca depende de la cadena; `BEAN_WEB3_MODE=disabled` mantiene el comportamiento actual.

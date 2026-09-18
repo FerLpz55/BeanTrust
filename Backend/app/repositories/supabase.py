@@ -9,21 +9,24 @@ cliente simulado. `lote_eventos` es append-only: solo `insert` y `select`
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from postgrest import APIError
 
 from app.models.dominio import (
+    AnclaBlockchain,
     CertificadoQR,
     Cooperativa,
     Estado,
+    EstadoAncla,
     EstadoEvidencia,
     EstadoPago,
     EstadoPropina,
     Evidencia,
     EvidenciaNoEncontrada,
     EvidenciaYaAdjunta,
+    FencingPerdido,
     Finca,
     Lote,
     LoteEvento,
@@ -884,3 +887,283 @@ class SupabaseUsuarioRepo:
         except APIError as exc:
             raise RepoError("No se pudo listar los compradores.") from exc
         return [fila_a_usuario(fila) for fila in (resp.data or [])]
+
+
+# ---------------------------------------------------------------- Anclas (ADR-11)
+
+
+def ancla_a_fila(ancla: AnclaBlockchain) -> dict[str, Any]:
+    return {
+        "id": str(ancla.id),
+        "qr_certificado_id": str(ancla.qr_certificado_id),
+        "lote_id": str(ancla.lote_id),
+        "lote_id_bytes32": ancla.lote_id_bytes32,
+        "hash_raiz": ancla.hash_raiz,
+        "chain_id": ancla.chain_id,
+        "contrato": ancla.contrato,
+        "runtime_code_hash": ancla.runtime_code_hash,
+        "estado": ancla.estado.value,
+        "tx_hash": ancla.tx_hash,
+        "bloque": ancla.bloque,
+        "nonce": ancla.nonce,
+        "intentos": ancla.intentos,
+        "codigo_error": ancla.codigo_error,
+        "error": ancla.error,
+        "proximo_intento": ancla.proximo_intento.isoformat(),
+    }
+
+
+def fila_a_ancla(fila: dict[str, Any]) -> AnclaBlockchain:
+    return AnclaBlockchain(
+        id=_uuid(fila["id"]),
+        qr_certificado_id=_uuid(fila["qr_certificado_id"]),
+        lote_id=_uuid(fila["lote_id"]),
+        lote_id_bytes32=fila["lote_id_bytes32"],
+        hash_raiz=fila["hash_raiz"],
+        chain_id=int(fila["chain_id"]),
+        estado=EstadoAncla(fila["estado"]),
+        contrato=fila.get("contrato"),
+        runtime_code_hash=fila.get("runtime_code_hash"),
+        tx_hash=fila.get("tx_hash"),
+        bloque=fila.get("bloque"),
+        nonce=fila.get("nonce"),
+        intentos=int(fila.get("intentos", 0)),
+        codigo_error=fila.get("codigo_error"),
+        error=fila.get("error"),
+        enviada_en=_dt(fila["enviada_en"]) if fila.get("enviada_en") else None,
+        confirmada_en=_dt(fila["confirmada_en"]) if fila.get("confirmada_en") else None,
+        ultimo_chequeo_en=(
+            _dt(fila["ultimo_chequeo_en"]) if fila.get("ultimo_chequeo_en") else None
+        ),
+        lock_token=_uuid(fila["lock_token"]) if fila.get("lock_token") else None,
+        lock_hasta=_dt(fila["lock_hasta"]) if fila.get("lock_hasta") else None,
+        proximo_intento=_dt(fila["proximo_intento"]),
+        creado_en=_dt(fila["creado_en"]),
+        actualizado_en=_dt(fila["actualizado_en"]),
+    )
+
+
+class SupabaseAnclaRepo:
+    """Anclaje con lease global y fencing (tabla privada, migración 012)."""
+
+    def __init__(self, cliente) -> None:
+        self._cliente = cliente
+
+    def encolar(self, ancla: AnclaBlockchain) -> AnclaBlockchain:
+        try:
+            self._cliente.table("blockchain_anclas").insert(ancla_a_fila(ancla)).execute()
+        except APIError as exc:
+            # El trigger pudo crear la fila en el mismo INSERT del certificado:
+            # la unicidad por certificado es la que manda.
+            if getattr(exc, "code", None) == "23505":
+                existente = self.buscar_por_certificado(ancla.qr_certificado_id)
+                if existente is not None:
+                    return existente
+            raise RepoError("No se pudo encolar el anclaje.") from exc
+        return ancla
+
+    def buscar_por_certificado(self, qr_id: uuid.UUID) -> AnclaBlockchain | None:
+        return self._buscar("qr_certificado_id", str(qr_id))
+
+    def buscar_por_lote(self, lote_id: uuid.UUID) -> AnclaBlockchain | None:
+        return self._buscar("lote_id", str(lote_id))
+
+    def _buscar(self, columna: str, valor: str) -> AnclaBlockchain | None:
+        try:
+            resp = (
+                self._cliente.table("blockchain_anclas")
+                .select("*")
+                .eq(columna, valor)
+                .maybe_single()
+                .execute()
+            )
+        except APIError as exc:
+            raise RepoError("No se pudo consultar el anclaje.") from exc
+        fila = _dato_unico(resp)
+        return fila_a_ancla(fila) if fila else None
+
+    # ------------------------------------------------------------ lock global
+
+    def adquirir_lock(self, nombre: str, lease_segundos: int) -> uuid.UUID | None:
+        resp = self._rpc(
+            "bean_adquirir_lock_anclaje",
+            {"p_nombre": nombre, "p_lease_segundos": lease_segundos},
+        )
+        return _uuid(resp) if resp else None
+
+    def renovar_lock(self, nombre: str, token: uuid.UUID, lease_segundos: int) -> bool:
+        return bool(
+            self._rpc(
+                "bean_renovar_lock_anclaje",
+                {
+                    "p_nombre": nombre,
+                    "p_lock_token": str(token),
+                    "p_lease_segundos": lease_segundos,
+                },
+            )
+        )
+
+    def liberar_lock(self, nombre: str, token: uuid.UUID) -> bool:
+        return bool(
+            self._rpc(
+                "bean_liberar_lock_anclaje",
+                {"p_nombre": nombre, "p_lock_token": str(token)},
+            )
+        )
+
+    def reclamar_siguiente(
+        self, nombre: str, lock_token: uuid.UUID, lease_segundos: int
+    ) -> AnclaBlockchain | None:
+        resp = self._rpc(
+            "bean_reclamar_ancla",
+            {
+                "p_lock_nombre": nombre,
+                "p_lock_token": str(lock_token),
+                "p_lease_segundos": lease_segundos,
+            },
+        )
+        filas = resp or []
+        return fila_a_ancla(filas[0]) if filas else None
+
+    # ------------------------------------------------------------- transiciones
+
+    def marcar_enviando(
+        self, ancla_id: uuid.UUID, lock_token: uuid.UUID, nonce: int, tx_hash: str
+    ) -> None:
+        self._actualizar(
+            ancla_id,
+            {
+                "estado": EstadoAncla.ENVIANDO.value,
+                "nonce": nonce,
+                "tx_hash": tx_hash,
+            },
+            lock_token,
+        )
+
+    def marcar_enviada(
+        self,
+        ancla_id: uuid.UUID,
+        lock_token: uuid.UUID,
+        tx_hash: str,
+        enviada_en: datetime,
+    ) -> None:
+        self._actualizar(
+            ancla_id,
+            {
+                "estado": EstadoAncla.ENVIADA.value,
+                "tx_hash": tx_hash,
+                "enviada_en": enviada_en.isoformat(),
+                "ultimo_chequeo_en": enviada_en.isoformat(),
+            },
+            lock_token,
+        )
+
+    def marcar_confirmada(
+        self,
+        ancla_id: uuid.UUID,
+        lock_token: uuid.UUID,
+        bloque: int,
+        tx_hash: str,
+        confirmada_en: datetime,
+    ) -> None:
+        self._actualizar(
+            ancla_id,
+            {
+                "estado": EstadoAncla.CONFIRMADA.value,
+                "bloque": bloque,
+                "tx_hash": tx_hash,
+                "confirmada_en": confirmada_en.isoformat(),
+                "ultimo_chequeo_en": confirmada_en.isoformat(),
+                "codigo_error": None,
+                "error": None,
+                "lock_token": None,
+                "lock_hasta": None,
+            },
+            lock_token,
+        )
+
+    def marcar_fallida(
+        self,
+        ancla_id: uuid.UUID,
+        lock_token: uuid.UUID,
+        codigo: str,
+        error: str,
+        proximo_intento: datetime,
+    ) -> None:
+        self._actualizar(
+            ancla_id,
+            {
+                "estado": EstadoAncla.FALLIDA.value,
+                "codigo_error": codigo,
+                "error": error,
+                "proximo_intento": proximo_intento.isoformat(),
+                "lock_token": None,
+                "lock_hasta": None,
+            },
+            lock_token,
+        )
+
+    def reprogramar(
+        self,
+        ancla_id: uuid.UUID,
+        lock_token: uuid.UUID,
+        proximo_intento: datetime,
+        codigo: str,
+        error: str,
+        contar_intento: bool = True,
+    ) -> None:
+        actual = self._buscar("id", str(ancla_id))
+        cambios: dict[str, Any] = {
+            "intentos": (actual.intentos if actual else 0) + (1 if contar_intento else 0),
+            "proximo_intento": proximo_intento.isoformat(),
+            "codigo_error": codigo,
+            "error": error,
+            "ultimo_chequeo_en": datetime.now(UTC).isoformat(),
+        }
+        self._actualizar(ancla_id, cambios, lock_token)
+
+    def marcar_reintento_manual(self, ancla_id: uuid.UUID, proximo_intento: datetime) -> None:
+        self._actualizar(
+            ancla_id,
+            {
+                "estado": EstadoAncla.PENDIENTE.value,
+                "tx_hash": None,
+                "nonce": None,
+                "bloque": None,
+                "enviada_en": None,
+                "confirmada_en": None,
+                "codigo_error": None,
+                "error": None,
+                "proximo_intento": proximo_intento.isoformat(),
+                "lock_token": None,
+                "lock_hasta": None,
+            },
+        )
+
+    # ------------------------------------------------------------------ helpers
+
+    def _rpc(self, nombre: str, parametros: dict[str, Any]) -> Any:
+        try:
+            return self._cliente.rpc(nombre, parametros).execute().data
+        except APIError as exc:
+            raise RepoError("No se pudo operar sobre el lock de anclaje.") from exc
+
+    def _actualizar(
+        self,
+        ancla_id: uuid.UUID,
+        cambios: dict[str, Any],
+        lock_token: uuid.UUID | None = None,
+    ) -> None:
+        try:
+            consulta = self._cliente.table("blockchain_anclas").update(cambios).eq(
+                "id", str(ancla_id)
+            )
+            if lock_token is not None:
+                # Fencing: un worker con lease vencido no sobrescribe al dueño.
+                consulta = consulta.eq("lock_token", str(lock_token))
+            respuesta = consulta.execute()
+        except APIError as exc:
+            raise RepoError("No se pudo actualizar el anclaje.") from exc
+        if lock_token is not None and not (respuesta.data or []):
+            # Cero filas con ese token: el lease se perdió; nunca se oculta.
+            raise FencingPerdido("El lease venció: la fila ya no es de este worker.")

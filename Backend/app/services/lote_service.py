@@ -6,6 +6,7 @@ repositorios. Los routers jamás tocan la BD ni la máquina de estados.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from app.models.dominio import (
@@ -30,6 +31,8 @@ from app.services.autorizacion import autorizar_finca
 from app.services.qr_service import QrService
 from app.utils.cursor import Cursor
 
+logger = logging.getLogger(__name__)
+
 
 class LoteService:
     def __init__(
@@ -40,6 +43,7 @@ class LoteService:
         repo_usuario,
         qr_service: QrService,
         repo_evidencia=None,
+        trazabilidad=None,
     ) -> None:
         self._repo_lote = repo_lote
         self._repo_qr = repo_qr
@@ -49,6 +53,8 @@ class LoteService:
         # Opcional para no romper la verificación pública (nunca adjunta
         # evidencia); el alta sí lo inyecta desde dependencies.
         self._repo_evidencia = repo_evidencia
+        # Opcional: encola el anclaje on-chain al emitir el Pasaporte (ADR-11).
+        self._trazabilidad = trazabilidad
 
     # ------------------------------------------------------------------ autorización
 
@@ -233,6 +239,13 @@ class LoteService:
         qr = self._qr_service.crear_certificado(lote)
         lote.generar_certificado(qr)
         self._repo_qr.guardar_certificado(qr)
+        # El anclaje on-chain es una cola aparte: una falla al encolar NUNCA
+        # impide emitir el certificado ni verificar el QR (ADR-11).
+        if self._trazabilidad is not None:
+            try:
+                self._trazabilidad.encolar_certificado(qr, lote)
+            except Exception:
+                logger.exception("No se pudo encolar el anclaje del certificado %s", qr.codigo)
 
     def obtener(self, usuario: CurrentUser, lote_id: uuid.UUID) -> Lote:
         lote = self._repo_lote.buscar_por_id(lote_id)

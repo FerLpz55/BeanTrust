@@ -6,18 +6,52 @@ Respuestas: 200 lote válido (Pasaporte enriquecido), 404 código inexistente,
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Request
 
-from app.dependencies import PublicLoteServiceDep
+from app.dependencies import PublicLoteServiceDep, TrazabilidadServiceDep
+from app.schemas.anclaje import AnclajeOnchainRead
 from app.schemas.verificacion import VerificarRead
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/verificar", tags=["verificacion"])
 
 
 @router.get("/{codigo}")
-def verificar(codigo: str, request: Request, servicio: PublicLoteServiceDep) -> VerificarRead:
+def verificar(
+    codigo: str,
+    request: Request,
+    servicio: PublicLoteServiceDep,
+    trazabilidad: TrazabilidadServiceDep,
+) -> VerificarRead:
     dispositivo = request.client.host if request.client else None
     lote, qr, finca, productor = servicio.verificar(codigo, dispositivo=dispositivo)
+
+    # El anclaje on-chain es informativo: si la BD/cadena falla, el Pasaporte
+    # sigue verificando igual (la integridad se recalcula off-chain).
+    anclaje: AnclajeOnchainRead | None = None
+    try:
+        ancla = trazabilidad.estado_publico(lote.id)
+        if ancla is not None:
+            anclaje = AnclajeOnchainRead(
+                estado=ancla.estado,
+                chain_id=ancla.chain_id,
+                red_nombre=trazabilidad.red_nombre,
+                contrato=ancla.contrato,
+                tx_hash=ancla.tx_hash,
+                bloque=ancla.bloque,
+                hash_raiz=ancla.hash_raiz,
+                explorer_url=(
+                    trazabilidad.explorer_url(ancla.tx_hash) if ancla.tx_hash else None
+                ),
+                explorer_etiqueta=trazabilidad.explorer_label,
+                confirmada_en=ancla.confirmada_en,
+            )
+    except Exception:
+        logger.exception("No se pudo leer el anclaje on-chain del lote %s", lote.id)
+
     return VerificarRead(
         codigo=qr.codigo,
         lote_id=lote.id,
@@ -45,4 +79,5 @@ def verificar(codigo: str, request: Request, servicio: PublicLoteServiceDep) -> 
         finca_nombre=finca.nombre if finca else None,
         municipio=finca.municipio if finca else None,
         organica=finca.organica if finca else None,
+        anclaje_onchain=anclaje,
     )

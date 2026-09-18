@@ -87,6 +87,22 @@ class EstadoEvidencia(StrEnum):
     ELIMINADA = "ELIMINADA"
 
 
+class EstadoAncla(StrEnum):
+    """Ciclo de vida del anclaje on-chain de un Pasaporte (ADR-11).
+
+    `PENDIENTE`: encolado, aún sin tx; `ENVIANDO`: nonce reservado, transmisión
+    incierta (nunca se reenvía a ciegas); `ENVIADA`: tx transmitida con `tx_hash`,
+    solo se consulta; `CONFIRMADA`: recibo, evento y confirmaciones validados;
+    `FALLIDA`: error definitivo o reintentos agotados, requiere reintento admin.
+    """
+
+    PENDIENTE = "PENDIENTE"
+    ENVIANDO = "ENVIANDO"
+    ENVIADA = "ENVIADA"
+    CONFIRMADA = "CONFIRMADA"
+    FALLIDA = "FALLIDA"
+
+
 class ErrorDeDominio(Exception):
     """Base de errores de negocio. Se traduce a HTTP en el handler global."""
 
@@ -141,6 +157,65 @@ class EvidenciaNoEncontrada(ErrorDeDominio):
 
 class EvidenciaYaAdjunta(ErrorDeDominio):
     status_code = 409
+
+
+class AnclaNoEncontrada(ErrorDeDominio):
+    status_code = 404
+
+
+class AnclaNoReintentable(ErrorDeDominio):
+    """El ancla no se puede reencolar (estado, causa definitiva o ya anclada)."""
+
+    status_code = 409
+
+
+class Web3Deshabilitado(ErrorDeDominio):
+    """El anclaje on-chain está desactivado por configuración (BEAN_WEB3_MODE)."""
+
+    status_code = 409
+
+
+class ErrorAnclaje(ErrorDeDominio):
+    """Fallo al hablar con la cadena. Nunca bloquea el QR (ADR-11).
+
+    `codigo` es un identificador estable y seguro para persistir (nunca incluye
+    secretos ni URLs); `reintentable` decide si el admin puede reencolarlo.
+    """
+
+    status_code = 502
+    codigo = "ERROR_ANCLAJE"
+    reintentable = True
+
+    def __init__(
+        self,
+        mensaje: str,
+        *,
+        codigo: str | None = None,
+        reintentable: bool | None = None,
+    ) -> None:
+        super().__init__(mensaje)
+        if codigo is not None:
+            self.codigo = codigo
+        if reintentable is not None:
+            self.reintentable = reintentable
+
+
+class ErrorAnclajeTransitorio(ErrorAnclaje):
+    """Falla de RPC/red o fencing perdido: se reintenta con backoff exponencial."""
+
+    codigo = "RPC_TRANSITORIO"
+
+
+class ErrorAnclajePermanente(ErrorAnclaje):
+    """Revert, cadena/contrato equivocado o hash distinto: pasa a FALLIDA."""
+
+    codigo = "ERROR_PERMANENTE"
+
+
+class FencingPerdido(ErrorAnclajeTransitorio):
+    """El worker perdió el lease: otro dueño tomó el trabajo."""
+
+    codigo = "FENCING_PERDIDO"
 
 
 class ArchivoInvalido(ErrorDeDominio):
@@ -252,6 +327,73 @@ class Evidencia:
     estado: EstadoEvidencia = EstadoEvidencia.PENDIENTE
     creado_en: datetime = field(default_factory=ahora_utc)
     adjuntada_en: datetime | None = None
+
+
+@dataclass
+class AnclaBlockchain:
+    """Trabajo de anclaje on-chain de un certificado (migraciones 011/012, ADR-11).
+
+    Un ancla por `qr_certificado`. El worker la reclama con un lease global y un
+    token de fencing, reserva nonce, transmite y confirma por recibo + evento +
+    confirmaciones; una falla de RPC nunca bloquea el QR.
+    """
+
+    id: uuid.UUID
+    qr_certificado_id: uuid.UUID
+    lote_id: uuid.UUID
+    lote_id_bytes32: str
+    hash_raiz: str
+    chain_id: int
+    estado: EstadoAncla = EstadoAncla.PENDIENTE
+    contrato: str | None = None
+    runtime_code_hash: str | None = None
+    tx_hash: str | None = None
+    bloque: int | None = None
+    nonce: int | None = None
+    intentos: int = 0
+    codigo_error: str | None = None
+    error: str | None = None
+    enviada_en: datetime | None = None
+    confirmada_en: datetime | None = None
+    ultimo_chequeo_en: datetime | None = None
+    lock_token: uuid.UUID | None = None
+    lock_hasta: datetime | None = None
+    proximo_intento: datetime = field(default_factory=ahora_utc)
+    creado_en: datetime = field(default_factory=ahora_utc)
+    actualizado_en: datetime = field(default_factory=ahora_utc)
+
+
+@dataclass(frozen=True)
+class AnclaOnchain:
+    """Lectura de `getAnchor(loteId)` del contrato."""
+
+    hash_raiz: str
+    actor: str
+    anchored_at: int
+
+
+@dataclass(frozen=True)
+class ReciboAncla:
+    """Recibo validado de una transacción de anclaje."""
+
+    tx_hash: str
+    bloque: int
+    lote_id_bytes32: str
+    hash_raiz: str
+    actor: str
+
+
+@dataclass(frozen=True)
+class TransaccionPreparada:
+    """Transacción de anclaje firmada en memoria, aún no transmitida.
+
+    `tx_hash` se calcula antes del broadcast para poder persistirlo como
+    `ENVIANDO + nonce + tx_hash` y recuperar por hash si la transmisión es
+    incierta (timeout). `raw_transaction` nunca se persiste ni se loguea.
+    """
+
+    tx_hash: str
+    raw_transaction: bytes
 
 
 @dataclass
