@@ -63,8 +63,9 @@ def main() -> int:
     requeridos = {
         "BEAN_WEB3_CONTRACT_ADDRESS": settings.web3_contract_address,
         "BEAN_WEB3_CONTRACT_CODE_HASH": settings.web3_contract_code_hash,
-        "BEAN_WEB3_BACKEND_PRIVATE_KEY": settings.web3_backend_private_key,
+        "BEAN_WEB3_BACKEND_PRIVATE_KEY": settings.web3_backend_private_key.get_secret_value(),
         "BEAN_WEB3_PAUSER_ADDRESS": settings.web3_pauser_address,
+        "BEAN_WEB3_ANCHOR_ADDRESS": settings.web3_anchor_address,
     }
     faltan = [nombre for nombre, valor in requeridos.items() if not valor]
     if faltan:
@@ -72,12 +73,17 @@ def main() -> int:
 
     gateway = construir_gateway_web3(
         rpc_url=settings.web3_rpc_url,
-        private_key=settings.web3_backend_private_key,
+        private_key=settings.web3_backend_private_key.get_secret_value(),
         contract_address=settings.web3_contract_address,
         contract_code_hash=settings.web3_contract_code_hash,
+        anchor_address=settings.web3_anchor_address,
         chain_id=settings.web3_chain_id,
         confirmations=settings.web3_confirmations,
         timeout_seconds=settings.web3_rpc_timeout_seconds,
+        max_priority_fee_gwei=settings.web3_max_priority_fee_gwei,
+        max_fee_gwei=settings.web3_max_fee_gwei,
+        min_balance_wei=settings.web3_min_balance_wei,
+        log_block_range=settings.web3_log_block_range,
     )
 
     gateway.preflight()
@@ -107,7 +113,8 @@ def main() -> int:
         print("[ok] el lote canario ya estaba anclado (reconciliación)")
     else:
         nonce = gateway.reservar_nonce()
-        tx_hash = gateway.enviar_ancla(lote_bytes32, hash_bytes32, nonce)
+        transaccion = gateway.preparar_ancla(lote_bytes32, hash_bytes32, nonce)
+        tx_hash = gateway.transmitir_ancla(transaccion)
         print(f"[ok] ancla transmitida (nonce pending {nonce}) {tx_hash}")
 
         recibo = None

@@ -124,7 +124,7 @@ def test_fencing_rechaza_token_vencido() -> None:
     servicio = _servicio(repo, FakeGatewayTrazabilidad())
     _encolar(servicio)
     token = repo.adquirir_lock(LOCK, 60)
-    ancla = repo.reclamar_siguiente(token, 60)
+    ancla = repo.reclamar_siguiente(LOCK, token, 60)
     with pytest.raises(FencingPerdido):
         repo.marcar_confirmada(
             ancla.id, uuid.uuid4(), 1, "0x" + "aa" * 32, datetime.now(UTC)
@@ -241,7 +241,8 @@ def test_preflight_permanente_no_firma() -> None:
 
 def test_confirmacion_insuficiente_devuelve_none() -> None:
     gateway = FakeGatewayTrazabilidad(confirmaciones_requeridas=2)
-    tx = gateway.enviar_ancla("0x" + "aa" * 32, "0x" + HASH, 0)
+    transaccion = gateway.preparar_ancla("0x" + "aa" * 32, "0x" + HASH, 0)
+    tx = gateway.transmitir_ancla(transaccion)
     gateway.confirmaciones = 1
     assert gateway.confirmar_ancla(tx, "0x" + "aa" * 32, "0x" + HASH) is None
     gateway.confirmaciones = 2
@@ -260,3 +261,88 @@ def test_ancla_blockchain_por_defecto_pendiente() -> None:
     assert ancla.estado is EstadoAncla.PENDIENTE
     assert ancla.intentos == 0
     assert ancla.nonce is None
+
+
+def test_reclamar_exige_lease_vigente() -> None:
+    repo = InMemoryAnclaRepo(Memoria())
+    servicio = _servicio(repo, FakeGatewayTrazabilidad())
+    _encolar(servicio)
+    token = repo.adquirir_lock(LOCK, 60)
+    # Token ajeno: no reclama aunque haya trabajo listo.
+    assert repo.reclamar_siguiente(LOCK, uuid.uuid4(), 60) is None
+    assert repo.reclamar_siguiente(LOCK, token, 60) is not None
+
+
+def test_lease_perdido_detiene_el_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = InMemoryAnclaRepo(Memoria())
+    servicio = _servicio(repo, FakeGatewayTrazabilidad())
+    _encolar(servicio)
+    monkeypatch.setattr(repo, "renovar_lock", lambda *a, **k: False)
+
+    resumen = servicio.reconciliar()
+    assert resumen.worker_adquirido is True
+    assert resumen.procesadas == 0
+    assert repo.buscar_por_lote(LOTE_ID).estado is EstadoAncla.PENDIENTE
+
+
+def test_saldo_insuficiente_no_deja_enviando() -> None:
+    repo = InMemoryAnclaRepo(Memoria())
+    gateway = FakeGatewayTrazabilidad()
+    gateway.fallar_saldo = True
+    servicio = _servicio(repo, gateway, max_intentos=1)
+    _encolar(servicio)
+
+    assert servicio.reconciliar().fallidas == 1
+    ancla = repo.buscar_por_lote(LOTE_ID)
+    assert ancla.estado is EstadoAncla.FALLIDA
+    assert ancla.codigo_error == "REINTENTOS_AGOTADOS"
+    assert ancla.nonce is None
+    assert ancla.tx_hash is None
+
+
+def test_fee_cap_bajo_reprograma_sin_firmar() -> None:
+    repo = InMemoryAnclaRepo(Memoria())
+    gateway = FakeGatewayTrazabilidad()
+    gateway.fallar_fee_cap = True
+    servicio = _servicio(repo, gateway)
+    _encolar(servicio)
+
+    assert servicio.reconciliar().reprogramadas == 1
+    ancla = repo.buscar_por_lote(LOTE_ID)
+    assert ancla.estado is EstadoAncla.PENDIENTE
+    assert ancla.tx_hash is None
+
+
+def test_tx_hash_persistido_antes_del_broadcast() -> None:
+    repo = InMemoryAnclaRepo(Memoria())
+    gateway = FakeGatewayTrazabilidad()
+    gateway.perder_respuesta = True
+    servicio = _servicio(repo, gateway)
+    _encolar(servicio)
+
+    assert servicio.reconciliar().reprogramadas == 1
+    ancla = repo.buscar_por_lote(LOTE_ID)
+    assert ancla.estado is EstadoAncla.ENVIANDO
+    assert ancla.tx_hash is not None
+    assert ancla.nonce is not None
+
+
+def test_timeout_se_reconcilia_por_el_mismo_hash() -> None:
+    repo = InMemoryAnclaRepo(Memoria())
+    gateway = FakeGatewayTrazabilidad()
+    gateway.perder_respuesta = True
+    servicio = _servicio(repo, gateway)
+    _encolar(servicio)
+
+    servicio.reconciliar()
+    hash_persistido = repo.buscar_por_lote(LOTE_ID).tx_hash
+    assert hash_persistido
+    assert len(gateway._txs) == 1
+
+    _desbloquear(repo)
+    assert servicio.reconciliar().reconciliadas == 1
+    ancla = repo.buscar_por_lote(LOTE_ID)
+    assert ancla.estado is EstadoAncla.CONFIRMADA
+    assert ancla.tx_hash == hash_persistido
+    # No se envió una segunda transacción para el mismo lote.
+    assert len(gateway._txs) == 1

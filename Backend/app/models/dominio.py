@@ -383,6 +383,19 @@ class ReciboAncla:
     actor: str
 
 
+@dataclass(frozen=True)
+class TransaccionPreparada:
+    """Transacción de anclaje firmada en memoria, aún no transmitida.
+
+    `tx_hash` se calcula antes del broadcast para poder persistirlo como
+    `ENVIANDO + nonce + tx_hash` y recuperar por hash si la transmisión es
+    incierta (timeout). `raw_transaction` nunca se persiste ni se loguea.
+    """
+
+    tx_hash: str
+    raw_transaction: bytes
+
+
 @dataclass
 class Finca:
     """Contexto de origen del lote (ERD §5)."""

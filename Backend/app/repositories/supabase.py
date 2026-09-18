@@ -26,6 +26,7 @@ from app.models.dominio import (
     Evidencia,
     EvidenciaNoEncontrada,
     EvidenciaYaAdjunta,
+    FencingPerdido,
     Finca,
     Lote,
     LoteEvento,
@@ -1011,11 +1012,15 @@ class SupabaseAnclaRepo:
         )
 
     def reclamar_siguiente(
-        self, lock_token: uuid.UUID, lease_segundos: int
+        self, nombre: str, lock_token: uuid.UUID, lease_segundos: int
     ) -> AnclaBlockchain | None:
         resp = self._rpc(
             "bean_reclamar_ancla",
-            {"p_lock_token": str(lock_token), "p_lease_segundos": lease_segundos},
+            {
+                "p_lock_nombre": nombre,
+                "p_lock_token": str(lock_token),
+                "p_lease_segundos": lease_segundos,
+            },
         )
         filas = resp or []
         return fila_a_ancla(filas[0]) if filas else None
@@ -1023,11 +1028,15 @@ class SupabaseAnclaRepo:
     # ------------------------------------------------------------- transiciones
 
     def marcar_enviando(
-        self, ancla_id: uuid.UUID, lock_token: uuid.UUID, nonce: int
+        self, ancla_id: uuid.UUID, lock_token: uuid.UUID, nonce: int, tx_hash: str
     ) -> None:
         self._actualizar(
             ancla_id,
-            {"estado": EstadoAncla.ENVIANDO.value, "nonce": nonce},
+            {
+                "estado": EstadoAncla.ENVIANDO.value,
+                "nonce": nonce,
+                "tx_hash": tx_hash,
+            },
             lock_token,
         )
 
@@ -1152,6 +1161,9 @@ class SupabaseAnclaRepo:
             if lock_token is not None:
                 # Fencing: un worker con lease vencido no sobrescribe al dueño.
                 consulta = consulta.eq("lock_token", str(lock_token))
-            consulta.execute()
+            respuesta = consulta.execute()
         except APIError as exc:
             raise RepoError("No se pudo actualizar el anclaje.") from exc
+        if lock_token is not None and not (respuesta.data or []):
+            # Cero filas con ese token: el lease se perdió; nunca se oculta.
+            raise FencingPerdido("El lease venció: la fila ya no es de este worker.")

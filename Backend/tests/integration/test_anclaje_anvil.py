@@ -105,9 +105,14 @@ def test_anvil_ancla_confirmada_y_cron_sin_trabajo(anvil: str) -> None:
         private_key=ANCHOR_KEY,
         contract_address=direccion,
         contract_code_hash=huella,
+        anchor_address=anchor.address,
         chain_id=w3.eth.chain_id,
         confirmations=1,
         timeout_seconds=10,
+        # Anvil arranca con baseFee ~1 gwei: el techo por defecto (0.05 gwei)
+        # es para Base Sepolia, no para el nodo local.
+        max_priority_fee_gwei=2.0,
+        max_fee_gwei=10.0,
     )
     gateway.preflight()
 

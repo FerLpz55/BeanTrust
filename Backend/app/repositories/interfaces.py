@@ -23,6 +23,7 @@ from app.models.dominio import (
     Pago,
     Propina,
     ReciboAncla,
+    TransaccionPreparada,
     Usuario,
 )
 from app.utils.cursor import Cursor
@@ -158,13 +159,18 @@ class RepositorioAnclas(Protocol):
     def liberar_lock(self, nombre: str, token: uuid.UUID) -> bool: ...
 
     def reclamar_siguiente(
-        self, lock_token: uuid.UUID, lease_segundos: int
+        self, nombre: str, lock_token: uuid.UUID, lease_segundos: int
     ) -> AnclaBlockchain | None:
-        """Toma atómicamente el siguiente trabajo listo y lo marca con el token."""
+        """Toma atómicamente el siguiente trabajo listo y lo marca con el token.
+
+        Solo reclama si el lease global sigue vivo con el mismo nombre y token
+        (fencing): un worker vencido no puede reclamar trabajo.
+        """
 
     def marcar_enviando(
-        self, ancla_id: uuid.UUID, lock_token: uuid.UUID, nonce: int
-    ) -> None: ...
+        self, ancla_id: uuid.UUID, lock_token: uuid.UUID, nonce: int, tx_hash: str
+    ) -> None:
+        """Persiste `ENVIANDO + nonce + tx_hash` ANTES del broadcast."""
 
     def marcar_enviada(
         self,
@@ -253,10 +259,18 @@ class GatewayTrazabilidad(ABC):
         """`eth_getTransactionCount(account, "pending")` de la wallet caliente."""
 
     @abstractmethod
-    def enviar_ancla(
+    def preparar_ancla(
         self, lote_id_bytes32: str, hash_raiz_bytes32: str, nonce: int
-    ) -> str:
-        """Firma y transmite `anchorHash` con el nonce reservado; devuelve tx_hash."""
+    ) -> TransaccionPreparada:
+        """Estima gas, aplica la política de tarifas y firma en memoria.
+
+        No transmite: un fallo aquí (saldo, tarifa, estimación) deja la fila en
+        su estado previo, nunca en `ENVIANDO` con transmisión incierta.
+        """
+
+    @abstractmethod
+    def transmitir_ancla(self, transaccion: TransaccionPreparada) -> str:
+        """Difunde la transacción firmada; devuelve el `tx_hash` normalizado."""
 
     @abstractmethod
     def confirmar_ancla(

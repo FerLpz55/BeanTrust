@@ -36,6 +36,7 @@ from app.models.dominio import (
     Propina,
     ReciboAncla,
     TipoEvento,
+    TransaccionPreparada,
     Usuario,
 )
 from app.repositories.sesiones import SesionRefresh
@@ -448,10 +449,18 @@ class InMemoryAnclaRepo:
     # ------------------------------------------------------------- trabajos
 
     def reclamar_siguiente(
-        self, lock_token: uuid.UUID, lease_segundos: int
+        self, nombre: str, lock_token: uuid.UUID, lease_segundos: int
     ) -> AnclaBlockchain | None:
         with self._lock:
             ahora = datetime.now(UTC)
+            actual = self._memoria.anclas_locks.get(nombre)
+            if (
+                actual is None
+                or actual["token"] != lock_token
+                or actual["hasta"] <= ahora
+            ):
+                # Fencing: un worker vencido o con token ajeno no reclama nada.
+                return None
             candidatas = sorted(
                 (
                     a
@@ -471,11 +480,12 @@ class InMemoryAnclaRepo:
             return ancla
 
     def marcar_enviando(
-        self, ancla_id: uuid.UUID, lock_token: uuid.UUID, nonce: int
+        self, ancla_id: uuid.UUID, lock_token: uuid.UUID, nonce: int, tx_hash: str
     ) -> None:
         ancla = self._exigir_fencing(ancla_id, lock_token)
         ancla.estado = EstadoAncla.ENVIANDO
         ancla.nonce = nonce
+        ancla.tx_hash = tx_hash
         ancla.actualizado_en = datetime.now(UTC)
 
     def marcar_enviada(
@@ -606,10 +616,14 @@ class FakeGatewayTrazabilidad:
         self._bloque = 1000
         self._nonce = 0
         self.confirmar_al_enviar = confirmar_al_enviar
-        # Simula una RPC caída: `enviar_ancla` lanza un error transitorio.
+        # Simula una RPC caída: `preparar_ancla`/`transmitir_ancla` lanzan error.
         self.fallar_transitorio = False
         # Simula una RPC caída antes de reservar nonce (fallo contabilizable).
         self.fallar_nonce = False
+        # Simula el techo de tarifa insuficiente (antes de firmar).
+        self.fallar_fee_cap = False
+        # Simula saldo insuficiente para gas + reserva (antes de firmar).
+        self.fallar_saldo = False
         # Simula un crash tras transmitir: mina la tx pero no devuelve el hash.
         self.perder_respuesta = False
         # Fuerza un fallo de preflight con ese código (p.ej. "CADENA_INCORRECTA").
@@ -663,13 +677,31 @@ class FakeGatewayTrazabilidad:
         self._nonce += 1
         return nonce
 
-    def enviar_ancla(
+    def preparar_ancla(
         self, lote_id_bytes32: str, hash_raiz_bytes32: str, nonce: int
-    ) -> str:
+    ) -> TransaccionPreparada:
         if self.fallar_transitorio:
             raise ErrorAnclajeTransitorio("RPC caído (fake).")
+        if self.fallar_fee_cap:
+            raise ErrorAnclajeTransitorio(
+                "Techo de tarifa insuficiente (fake).", codigo="FEE_CAP_TOO_LOW"
+            )
+        if self.fallar_saldo:
+            raise ErrorAnclajeTransitorio(
+                "Saldo insuficiente (fake).", codigo="SALDO_INSUFICIENTE"
+            )
         tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex
         self._txs[tx_hash] = [lote_id_bytes32, hash_raiz_bytes32, nonce, None]
+        return TransaccionPreparada(tx_hash=tx_hash, raw_transaction=b"fake-raw-tx")
+
+    def transmitir_ancla(self, transaccion: TransaccionPreparada) -> str:
+        if self.fallar_transitorio:
+            raise ErrorAnclajeTransitorio("RPC caído (fake).")
+        tx_hash = transaccion.tx_hash
+        if tx_hash not in self._txs:
+            raise ErrorAnclajeTransitorio(
+                "Transacción desconocida para el gateway fake.", codigo="TX_DESCONOCIDA"
+            )
         if self.confirmar_al_enviar:
             self._minar(tx_hash)
         if self.perder_respuesta:

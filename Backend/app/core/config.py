@@ -11,7 +11,7 @@ from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _HEX = set("0123456789abcdefABCDEF")
@@ -86,9 +86,19 @@ class Settings(BaseSettings):
     web3_pauser_address: str = ""
     # Bloque del despliegue: desde ahí se buscan eventos para recuperar tx.
     web3_deployment_block: int = 0
-    # Wallet caliente del backend (ANCHOR_ROLE). NUNCA se commitea ni se loguea.
-    web3_backend_private_key: str = ""
+    # Dirección pública de la wallet caliente (ANCHOR_ROLE). El preflight exige
+    # que coincida con la derivada de la private key y que tenga privilegio mínimo.
+    web3_anchor_address: str = ""
+    # Wallet caliente del backend (ANCHOR_ROLE). NUNCA se commitea ni se loguea:
+    # `SecretStr` evita que aparezca en `repr`, logs o trazas.
+    web3_backend_private_key: SecretStr = SecretStr("")
     web3_confirmations: int = Field(default=2, ge=1, le=12)
+    # Política de tarifas EIP-1559: techo de prioridad y de `maxFeePerGas` (gwei),
+    # reserva operativa mínima de la wallet y tamaño de la ventana de logs.
+    web3_max_priority_fee_gwei: float = Field(default=0.01, gt=0)
+    web3_max_fee_gwei: float = Field(default=0.05, gt=0)
+    web3_min_balance_wei: int = Field(default=20_000_000_000_000, ge=0)
+    web3_log_block_range: int = Field(default=10_000, ge=1, le=100_000)
     # Secreto del endpoint operativo que dispara Vercel Cron. Acepta `CRON_SECRET`.
     web3_cron_secret: str = Field(
         default="",
@@ -153,10 +163,19 @@ class Settings(BaseSettings):
             raise ValueError("BEAN_WEB3_PAUSER_ADDRESS debe ser 0x + 40 hex.")
         return valor
 
-    @field_validator("web3_backend_private_key")
+    @field_validator("web3_anchor_address")
     @classmethod
-    def _validar_web3_private_key(cls, valor: str) -> str:
-        if valor and not _es_hex(valor, 64):
+    def _validar_web3_anchor(cls, valor: str) -> str:
+        if valor and not _es_hex(valor, 40):
+            raise ValueError("BEAN_WEB3_ANCHOR_ADDRESS debe ser 0x + 40 hex.")
+        return valor
+
+    @field_validator("web3_backend_private_key", mode="before")
+    @classmethod
+    def _validar_web3_private_key(cls, valor: object) -> object:
+        if isinstance(valor, SecretStr):
+            valor = valor.get_secret_value()
+        if isinstance(valor, str) and valor and not _es_hex(valor, 64):
             raise ValueError("BEAN_WEB3_BACKEND_PRIVATE_KEY debe ser 0x + 64 hex.")
         return valor
 
@@ -204,7 +223,11 @@ class Settings(BaseSettings):
                     raise ValueError(
                         "Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_PAUSER_ADDRESS."
                     )
-                if not self.web3_backend_private_key:
+                if not self.web3_anchor_address:
+                    raise ValueError(
+                        "Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_ANCHOR_ADDRESS."
+                    )
+                if not self.web3_backend_private_key.get_secret_value():
                     raise ValueError(
                         "Con BEAN_WEB3_MODE=anchor se requiere BEAN_WEB3_BACKEND_PRIVATE_KEY."
                     )

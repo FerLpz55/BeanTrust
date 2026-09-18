@@ -5,11 +5,15 @@ Frontera de infraestructura: el servicio habla con `GatewayTrazabilidad`, no con
 dependencia no esté instalada cuando el anclaje está desactivado.
 
 Endurecimiento (fase de hardening):
-- preflight de cadena, bytecode, huella del runtime y `ANCHOR_ROLE` antes de firmar;
+- normalización de hashes con `Web3.to_hex` (nunca `HexBytes.hex()`, que omite
+  el prefijo `0x` en la versión instalada);
+- preflight de cadena, bytecode, huella del runtime, contrato no pausado,
+  dirección de anclaje derivada y roles de privilegio mínimo antes de firmar;
 - nonce reservado con `eth_getTransactionCount(..., "pending")`;
-- EIP-1559 con estimación de gas y `maxFeePerGas >= maxPriorityFeePerGas`;
+- EIP-1559 con sugerencia `eth_maxPriorityFeePerGas` y techos configurables;
+- separación `preparar_ancla` (firma en memoria) / `transmitir_ancla` (broadcast);
 - confirmación por tx (remitente/contrato) + recibo + evento + confirmaciones;
-- recuperación por logs `HashAnchored` si el `tx_hash` no se persistió.
+- recuperación por `getAnchor` y, solo como respaldo, por logs fragmentados.
 
 La ABI versionada vive en `contracts/abi/CoffeeTraceability.json`; si el backend
 se despliega sin ese archivo se usa una ABI mínima embebida.
@@ -18,13 +22,16 @@ se despliega sin ese archivo se usa una ABI mínima embebida.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.models.dominio import (
     AnclaOnchain,
+    ErrorAnclaje,
     ErrorAnclajePermanente,
     ErrorAnclajeTransitorio,
     ReciboAncla,
+    TransaccionPreparada,
 )
 
 # Solo lo que el worker usa (misma firma que `contracts/src/CoffeeTraceability.sol`).
@@ -56,6 +63,13 @@ _ABI_MINIMA = [
             {"name": "actor", "type": "address"},
             {"name": "anchoredAt", "type": "uint256"},
         ],
+    },
+    {
+        "type": "function",
+        "name": "paused",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "bool"}],
     },
     {
         "type": "function",
@@ -91,6 +105,10 @@ _ABI_VERSIONADA = (
     Path(__file__).resolve().parents[3] / "contracts" / "abi" / "CoffeeTraceability.json"
 )
 
+_ROLE_ANCHOR = "ANCHOR_ROLE"
+_ROLE_PAUSER = "PAUSER_ROLE"
+_DEFAULT_ADMIN_ROLE = "0x" + "00" * 32
+
 
 def _cargar_abi() -> list:
     try:
@@ -108,6 +126,15 @@ def _de_bytes32(valor: bytes) -> str:
     return "0x" + valor.hex()
 
 
+@dataclass(frozen=True)
+class _PoliticaTarifas:
+    """Techo de prioridad y de `maxFeePerGas` (wei) más la reserva mínima."""
+
+    max_priority_fee_wei: int
+    max_fee_wei: int
+    min_balance_wei: int
+
+
 class Web3GatewayTrazabilidad:
     """Implementación real: EIP-1559 desde la wallet caliente del backend."""
 
@@ -118,9 +145,14 @@ class Web3GatewayTrazabilidad:
         private_key: str,
         contract_address: str,
         contract_code_hash: str,
+        anchor_address: str = "",
         chain_id: int,
         confirmations: int,
         timeout_seconds: int = 10,
+        max_priority_fee_gwei: float = 0.01,
+        max_fee_gwei: float = 0.05,
+        min_balance_wei: int = 20_000_000_000_000,
+        log_block_range: int = 10_000,
     ) -> None:
         from web3 import Web3
 
@@ -135,8 +167,18 @@ class Web3GatewayTrazabilidad:
         if huella and not huella.startswith("0x"):
             huella = "0x" + huella
         self._code_hash = huella
+        self._anchor_address = (
+            Web3.to_checksum_address(anchor_address) if anchor_address else ""
+        )
         self._confirmaciones = confirmations
+        self._tarifas = _PoliticaTarifas(
+            max_priority_fee_wei=self._w3.to_wei(max_priority_fee_gwei, "gwei"),
+            max_fee_wei=self._w3.to_wei(max_fee_gwei, "gwei"),
+            min_balance_wei=min_balance_wei,
+        )
+        self._log_block_range = log_block_range
         self._preflight_ok = False
+        self._to_hex = Web3.to_hex
 
     @property
     def chain_id(self) -> int:
@@ -161,34 +203,91 @@ class Web3GatewayTrazabilidad:
         if self._preflight_ok:
             return
         self._verificar_red()
-        try:
-            codigo = self._w3.eth.get_code(self._direccion)
-        except Exception as exc:
-            raise ErrorAnclajeTransitorio(f"RPC inalcanzable: {exc}") from exc
+
+        codigo = self._rpc(
+            lambda: self._w3.eth.get_code(self._direccion), "RPC inalcanzable"
+        )
         if not codigo:
             raise ErrorAnclajePermanente(
                 "El contrato no tiene bytecode en la cadena.",
                 codigo="BYTECODE_INCORRECTO",
             )
-        huella = self._w3.keccak(bytes(codigo)).hex().lower()
-        if not huella.startswith("0x"):
-            huella = "0x" + huella
+        huella = self._to_hex(self._w3.keccak(bytes(codigo))).lower()
         if self._code_hash and huella != self._code_hash:
             raise ErrorAnclajePermanente(
                 "La huella del runtime no coincide con BEAN_WEB3_CONTRACT_CODE_HASH.",
                 codigo="BYTECODE_INCORRECTO",
             )
-        try:
-            rol = self._w3.keccak(text="ANCHOR_ROLE")
-            tiene_rol = self._contrato.functions.hasRole(rol, self._cuenta.address).call()
-        except Exception as exc:
-            raise ErrorAnclajeTransitorio(f"RPC inalcanzable: {exc}") from exc
-        if not tiene_rol:
+
+        if self._anchor_address and self._anchor_address != self._cuenta.address:
+            raise ErrorAnclajePermanente(
+                "BEAN_WEB3_ANCHOR_ADDRESS no coincide con la private key.",
+                codigo="ANCHOR_ADDRESS_INCORRECTA",
+            )
+
+        pausado = self._rpc(
+            lambda: bool(self._contrato.functions.paused().call()),
+            "RPC inalcanzable",
+        )
+        if pausado:
+            raise ErrorAnclajePermanente(
+                "El contrato de anclaje está pausado.",
+                codigo="CONTRATO_PAUSADO",
+            )
+
+        roles = self._leer_roles()
+        if not roles["anchor"]:
             raise ErrorAnclajePermanente(
                 "La wallet caliente no tiene ANCHOR_ROLE.",
                 codigo="ROL_FALTANTE",
             )
+        if roles["admin"] or roles["pauser"]:
+            raise ErrorAnclajePermanente(
+                "La wallet caliente tiene roles de administración o pausa.",
+                codigo="ROL_EXCESIVO",
+            )
+
+        saldo = self._rpc(
+            lambda: int(self._w3.eth.get_balance(self._cuenta.address)),
+            "RPC inalcanzable",
+        )
+        if saldo < self._tarifas.min_balance_wei:
+            raise ErrorAnclajePermanente(
+                "La wallet caliente no alcanza la reserva operativa mínima.",
+                codigo="SALDO_INSUFICIENTE",
+            )
         self._preflight_ok = True
+
+    def _leer_roles(self) -> dict[str, bool]:
+        def consultar() -> dict[str, bool]:
+            return {
+                "anchor": bool(
+                    self._contrato.functions.hasRole(
+                        self._w3.keccak(text=_ROLE_ANCHOR), self._cuenta.address
+                    ).call()
+                ),
+                "admin": bool(
+                    self._contrato.functions.hasRole(
+                        _a_bytes32(_DEFAULT_ADMIN_ROLE), self._cuenta.address
+                    ).call()
+                ),
+                "pauser": bool(
+                    self._contrato.functions.hasRole(
+                        self._w3.keccak(text=_ROLE_PAUSER), self._cuenta.address
+                    ).call()
+                ),
+            }
+
+        return self._rpc(consultar, "RPC inalcanzable")
+
+    def _rpc(self, funcion, mensaje: str):
+        """Ejecuta una lectura RPC: los errores de dominio pasan, el resto es transitorio."""
+        try:
+            return funcion()
+        except ErrorAnclaje:
+            raise
+        except Exception as exc:
+            raise ErrorAnclajeTransitorio(f"{mensaje}: {exc}") from exc
 
     # -------------------------------------------------- diagnóstico (smoke)
 
@@ -197,28 +296,30 @@ class Web3GatewayTrazabilidad:
         from web3 import Web3
 
         self._verificar_red()
-        try:
+
+        def consultar() -> bool:
             return bool(
                 self._contrato.functions.hasRole(
                     self._w3.keccak(text=rol), Web3.to_checksum_address(direccion)
                 ).call()
             )
-        except Exception as exc:
-            raise ErrorAnclajeTransitorio(f"No se pudo consultar el rol: {exc}") from exc
+
+        return self._rpc(consultar, "No se pudo consultar el rol")
 
     def retardo_admin_segundos(self) -> int:
         """`defaultAdminDelay()` (48 h = 172800 s) para el smoke."""
         self._verificar_red()
-        try:
-            return int(self._contrato.functions.defaultAdminDelay().call())
-        except Exception as exc:
-            raise ErrorAnclajeTransitorio(f"No se pudo leer el retardo admin: {exc}") from exc
+        return self._rpc(
+            lambda: int(self._contrato.functions.defaultAdminDelay().call()),
+            "No se pudo leer el retardo admin",
+        )
 
     # ----------------------------------------------------------------- lecturas
 
     def leer_ancla(self, lote_id_bytes32: str) -> AnclaOnchain | None:
         self._verificar_red()
-        try:
+
+        def leer():
             anclado = self._contrato.functions.isAnchored(
                 _a_bytes32(lote_id_bytes32)
             ).call()
@@ -227,64 +328,112 @@ class Web3GatewayTrazabilidad:
             hash_raiz, actor, anchored_at = self._contrato.functions.getAnchor(
                 _a_bytes32(lote_id_bytes32)
             ).call()
-        except Exception as exc:
-            raise ErrorAnclajeTransitorio(f"No se pudo leer el anclaje: {exc}") from exc
-        return AnclaOnchain(
-            hash_raiz=_de_bytes32(hash_raiz), actor=actor, anchored_at=int(anchored_at)
-        )
+            return AnclaOnchain(
+                hash_raiz=_de_bytes32(hash_raiz), actor=actor, anchored_at=int(anchored_at)
+            )
+
+        return self._rpc(leer, "No se pudo leer el anclaje")
 
     def buscar_ancla_por_evento(
         self, lote_id_bytes32: str, hash_raiz_bytes32: str, desde_bloque: int
     ) -> ReciboAncla | None:
+        """Recupera el recibo de un anclaje cuyo `tx_hash` no se persistió.
+
+        Primero consulta `getAnchor`; si el anclaje exacto existe, recorre los
+        logs hacia atrás en ventanas de `log_block_range` y solo acepta eventos
+        del contrato. Se detiene al hallar el evento exacto confirmado.
+        """
         self._verificar_red()
-        try:
-            logs = self._contrato.events.HashAnchored().get_logs(
-                from_block=desde_bloque,
-                argument_filters={
-                    "loteId": _a_bytes32(lote_id_bytes32),
-                    "hashRaiz": _a_bytes32(hash_raiz_bytes32),
-                },
+        onchain = self.leer_ancla(lote_id_bytes32)
+        if onchain is None or onchain.hash_raiz.lower() != hash_raiz_bytes32.lower():
+            return None
+
+        ultimo = self._rpc(lambda: int(self._w3.eth.block_number), "RPC inalcanzable")
+        objetivo = _a_bytes32(hash_raiz_bytes32)
+        lote = _a_bytes32(lote_id_bytes32)
+        desde = max(int(desde_bloque), 0)
+        fin = ultimo
+        while fin >= desde:
+            inicio = max(desde, fin - self._log_block_range + 1)
+            logs = self._rpc(
+                lambda inicio=inicio, fin=fin: self._contrato.events.HashAnchored().get_logs(
+                    from_block=inicio,
+                    to_block=fin,
+                    argument_filters={"loteId": lote, "hashRaiz": objetivo},
+                ),
+                "No se pudo buscar el evento",
             )
-        except Exception as exc:
-            raise ErrorAnclajeTransitorio(f"No se pudo buscar el evento: {exc}") from exc
-        for log in logs:
-            recibo = self._validar_recibo(
-                log["transactionHash"].hex(), lote_id_bytes32, hash_raiz_bytes32
-            )
-            if recibo is not None:
-                return recibo
+            for log in reversed(logs):
+                if (log.get("address") or "").lower() != self._direccion.lower():
+                    continue
+                recibo = self._validar_recibo(
+                    self._to_hex(log["transactionHash"]),
+                    lote_id_bytes32,
+                    hash_raiz_bytes32,
+                )
+                if recibo is not None:
+                    return recibo
+            if inicio == desde:
+                break
+            fin = inicio - 1
         return None
 
     # ---------------------------------------------------------------- nonce
 
     def reservar_nonce(self) -> int:
         self._verificar_red()
-        try:
-            return int(
-                self._w3.eth.get_transaction_count(self._cuenta.address, "pending")
-            )
-        except Exception as exc:
-            raise ErrorAnclajeTransitorio(f"No se pudo reservar nonce: {exc}") from exc
+        return self._rpc(
+            lambda: int(self._w3.eth.get_transaction_count(self._cuenta.address, "pending")),
+            "No se pudo reservar nonce",
+        )
 
-    # ------------------------------------------------------------ transmisión
+    # ------------------------------------------------------------ preparación
 
-    def enviar_ancla(
+    def preparar_ancla(
         self, lote_id_bytes32: str, hash_raiz_bytes32: str, nonce: int
-    ) -> str:
+    ) -> TransaccionPreparada:
+        """Estima gas, aplica la política de tarifas y firma en memoria.
+
+        No transmite: cualquier fallo aquí (saldo, tarifa, estimación) deja la
+        fila en su estado previo, nunca en `ENVIANDO` con transmisión incierta.
+        """
         from web3.exceptions import ContractLogicError
 
         self._verificar_red()
+        funcion = self._contrato.functions.anchorHash(
+            _a_bytes32(lote_id_bytes32), _a_bytes32(hash_raiz_bytes32)
+        )
         try:
-            funcion = self._contrato.functions.anchorHash(
-                _a_bytes32(lote_id_bytes32), _a_bytes32(hash_raiz_bytes32)
-            )
             gas = int(funcion.estimate_gas({"from": self._cuenta.address}) * 1.2)
-            base_fee = int(
-                self._w3.eth.get_block("latest").get("baseFeePerGas")
-                or self._w3.eth.gas_price
+        except ContractLogicError as exc:
+            raise ErrorAnclajePermanente(
+                f"Revert del contrato: {exc}", codigo="REVERT"
+            ) from exc
+        except ErrorAnclaje:
+            raise
+        except Exception as exc:
+            raise ErrorAnclajeTransitorio(
+                f"No se pudo estimar el gas: {exc}", codigo="GAS_ESTIMACION"
+            ) from exc
+
+        base_fee, prioridad, max_fee = self._calcular_tarifas()
+        if max_fee < base_fee + prioridad:
+            raise ErrorAnclajeTransitorio(
+                "El techo de tarifa no cubre baseFee + priorityFee.",
+                codigo="FEE_CAP_TOO_LOW",
             )
-            prioridad = self._w3.to_wei(1, "gwei")
-            max_fee = base_fee * 2 + prioridad
+
+        saldo = self._rpc(
+            lambda: int(self._w3.eth.get_balance(self._cuenta.address)),
+            "RPC inalcanzable",
+        )
+        if saldo < gas * max_fee + self._tarifas.min_balance_wei:
+            raise ErrorAnclajeTransitorio(
+                "Saldo insuficiente para cubrir gas y reserva operativa.",
+                codigo="SALDO_INSUFICIENTE",
+            )
+
+        try:
             tx = funcion.build_transaction(
                 {
                     "from": self._cuenta.address,
@@ -296,18 +445,49 @@ class Web3GatewayTrazabilidad:
                 }
             )
             firmada = self._cuenta.sign_transaction(tx)
-            enviada = self._w3.eth.send_raw_transaction(firmada.raw_transaction)
-            return enviada.hex()
-        except ContractLogicError as exc:
-            raise ErrorAnclajePermanente(
-                f"Revert del contrato: {exc}", codigo="REVERT"
+        except ErrorAnclaje:
+            raise
+        except Exception as exc:
+            raise ErrorAnclajeTransitorio(
+                f"No se pudo firmar el anclaje: {exc}", codigo="FIRMA_FALLIDA"
             ) from exc
-        except ErrorAnclajePermanente:
+        raw = firmada.raw_transaction
+        return TransaccionPreparada(
+            tx_hash=self._to_hex(self._w3.keccak(raw)),
+            raw_transaction=raw,
+        )
+
+    def _calcular_tarifas(self) -> tuple[int, int, int]:
+        """Devuelve `(base_fee, priority_fee, max_fee)` en wei con los techos."""
+        base_fee = self._rpc(
+            lambda: int(
+                self._w3.eth.get_block("latest").get("baseFeePerGas")
+                or self._w3.eth.gas_price
+            ),
+            "No se pudo leer la tarifa base",
+        )
+        try:
+            sugerida = int(self._w3.eth.max_priority_fee)
+        except Exception:
+            sugerida = self._w3.to_wei(1, "gwei")
+        prioridad = max(1, min(sugerida, self._tarifas.max_priority_fee_wei))
+        max_fee = min(base_fee * 2 + prioridad, self._tarifas.max_fee_wei)
+        return base_fee, prioridad, max_fee
+
+    # ------------------------------------------------------------ transmisión
+
+    def transmitir_ancla(self, transaccion: TransaccionPreparada) -> str:
+        """Difunde la transacción ya firmada y devuelve su `tx_hash` normalizado."""
+        self._verificar_red()
+        try:
+            self._w3.eth.send_raw_transaction(transaccion.raw_transaction)
+        except ErrorAnclaje:
             raise
         except Exception as exc:
             raise ErrorAnclajeTransitorio(
                 f"No se pudo transmitir el anclaje: {exc}", codigo="BROADCAST_INCIERTO"
             ) from exc
+        return transaccion.tx_hash
 
     # ------------------------------------------------------------ confirmación
 

@@ -361,12 +361,17 @@ def get_gateway_trazabilidad(settings: SettingsDep) -> GatewayTrazabilidad:
 
         return construir_gateway_web3(
             rpc_url=settings.web3_rpc_url,
-            private_key=settings.web3_backend_private_key,
+            private_key=settings.web3_backend_private_key.get_secret_value(),
             contract_address=settings.web3_contract_address,
             contract_code_hash=settings.web3_contract_code_hash,
+            anchor_address=settings.web3_anchor_address,
             chain_id=settings.web3_chain_id,
             confirmations=settings.web3_confirmations,
             timeout_seconds=settings.web3_rpc_timeout_seconds,
+            max_priority_fee_gwei=settings.web3_max_priority_fee_gwei,
+            max_fee_gwei=settings.web3_max_fee_gwei,
+            min_balance_wei=settings.web3_min_balance_wei,
+            log_block_range=settings.web3_log_block_range,
         )
     return FakeGatewayTrazabilidad()
 

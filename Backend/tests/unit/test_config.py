@@ -70,6 +70,7 @@ WEB3_COMPLETO = {
     "web3_contract_address": "0x" + "ab" * 20,
     "web3_contract_code_hash": "0x" + "cd" * 32,
     "web3_pauser_address": "0x" + "ef" * 20,
+    "web3_anchor_address": "0x" + "22" * 20,
     "web3_backend_private_key": "0x" + "11" * 32,
     "web3_cron_secret": "s" * 40,
 }
@@ -88,6 +89,7 @@ def test_produccion_anchor_completo_arranca() -> None:
         ("web3_contract_address", "BEAN_WEB3_CONTRACT_ADDRESS"),
         ("web3_contract_code_hash", "BEAN_WEB3_CONTRACT_CODE_HASH"),
         ("web3_pauser_address", "BEAN_WEB3_PAUSER_ADDRESS"),
+        ("web3_anchor_address", "BEAN_WEB3_ANCHOR_ADDRESS"),
         ("web3_backend_private_key", "BEAN_WEB3_BACKEND_PRIVATE_KEY"),
         ("web3_cron_secret", "BEAN_WEB3_CRON_SECRET"),
     ],
@@ -105,6 +107,7 @@ def test_produccion_anchor_incompleto_se_rechaza(faltante: str, mensaje: str) ->
         ("web3_contract_address", "0x1234"),
         ("web3_contract_code_hash", "0x" + "cd" * 20),
         ("web3_pauser_address", "0x1234"),
+        ("web3_anchor_address", "0x1234"),
         ("web3_backend_private_key", "0x" + "11" * 10),
         ("web3_cron_secret", "corto"),
     ],

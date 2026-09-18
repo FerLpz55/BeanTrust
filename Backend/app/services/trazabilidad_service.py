@@ -221,32 +221,42 @@ class TrazabilidadService:
                 # Configuración/cadena mal: no se firma nada y se devuelve resumen.
                 logger.warning("Preflight de anclaje falló: %s", error_sanitizado(exc))
                 return resumen
-            for _ in range(self._max_batch):
-                self._repo.renovar_lock(self._lock_nombre, token, self._lease)
-                ancla = self._repo.reclamar_siguiente(token, self._lease)
-                if ancla is None:
-                    break
-                resumen.procesadas += 1
-                try:
-                    resultado = self._procesar(ancla, token)
-                except FencingPerdido:
-                    # Otro dueño tomó el trabajo: se abandona el lote.
-                    break
-                except ErrorAnclajePermanente as exc:
-                    self._repo.marcar_fallida(
-                        ancla.id,
-                        token,
-                        exc.codigo,
-                        error_sanitizado(exc),
-                        self._siguiente_intento(ancla),
+            try:
+                for _ in range(self._max_batch):
+                    if not self._repo.renovar_lock(
+                        self._lock_nombre, token, self._lease
+                    ):
+                        # El lease se perdió: otro worker tomó el trabajo. No se
+                        # continúa el lote ni se oculta la pérdida como éxito.
+                        raise FencingPerdido("El lease global venció durante el lote.")
+                    ancla = self._repo.reclamar_siguiente(
+                        self._lock_nombre, token, self._lease
                     )
-                    resumen.fallidas += 1
-                except ErrorAnclajeTransitorio as exc:
-                    self._reprogramar_o_fallar(ancla, token, exc, resumen)
-                except Exception as exc:
-                    self._reprogramar_o_fallar(ancla, token, exc, resumen)
-                else:
-                    self._contabilizar(resultado, resumen)
+                    if ancla is None:
+                        break
+                    resumen.procesadas += 1
+                    try:
+                        resultado = self._procesar(ancla, token)
+                    except FencingPerdido:
+                        # Otro dueño tomó el trabajo: se abandona el lote.
+                        raise
+                    except ErrorAnclajePermanente as exc:
+                        self._repo.marcar_fallida(
+                            ancla.id,
+                            token,
+                            exc.codigo,
+                            error_sanitizado(exc),
+                            self._siguiente_intento(ancla),
+                        )
+                        resumen.fallidas += 1
+                    except ErrorAnclajeTransitorio as exc:
+                        self._reprogramar_o_fallar(ancla, token, exc, resumen)
+                    except Exception as exc:
+                        self._reprogramar_o_fallar(ancla, token, exc, resumen)
+                    else:
+                        self._contabilizar(resultado, resumen)
+            except FencingPerdido as exc:
+                logger.warning("Fencing perdido en el worker: %s", exc)
         finally:
             self._repo.liberar_lock(self._lock_nombre, token)
         return resumen
@@ -272,10 +282,20 @@ class TrazabilidadService:
         return self._transmitir(ancla, token)
 
     def _recuperar_enviando(self, ancla: AnclaBlockchain, token: uuid.UUID) -> str:
-        """`ENVIANDO`: nonce reservado y transmisión incierta. Nunca se reenvía."""
-        recibo = self._gateway.buscar_ancla_por_evento(
-            ancla.lote_id_bytes32, ancla.hash_raiz, self._deployment_block
-        )
+        """`ENVIANDO`: nonce reservado y transmisión incierta. Nunca se reenvía.
+
+        Se recupera primero por el `tx_hash` ya persistido (paso previo al
+        broadcast); los logs son solo el respaldo si el hash no quedó guardado.
+        """
+        recibo = None
+        if ancla.tx_hash:
+            recibo = self._gateway.confirmar_ancla(
+                ancla.tx_hash, ancla.lote_id_bytes32, ancla.hash_raiz
+            )
+        if recibo is None:
+            recibo = self._gateway.buscar_ancla_por_evento(
+                ancla.lote_id_bytes32, ancla.hash_raiz, self._deployment_block
+            )
         if recibo is not None:
             self._repo.marcar_confirmada(
                 ancla.id, token, recibo.bloque, recibo.tx_hash, ahora_utc()
@@ -361,15 +381,18 @@ class TrazabilidadService:
                 )
             return "fallida"
 
-        # 3. Transmitir con nonce reservado y persistir antes de continuar.
+        # 3. Preparar (estimar gas, aplicar tarifas, firmar) sin transmitir.
         nonce = self._gateway.reservar_nonce()
-        self._repo.marcar_enviando(ancla.id, token, nonce)
+        transaccion = self._gateway.preparar_ancla(
+            ancla.lote_id_bytes32, ancla.hash_raiz, nonce
+        )
+        # 4-5. Persistir `ENVIANDO + nonce + tx_hash` ANTES del broadcast: si la
+        # transmisión es incierta, el hash ya permite recuperar sin reenviar.
+        self._repo.marcar_enviando(ancla.id, token, nonce, transaccion.tx_hash)
         try:
-            tx_hash = self._gateway.enviar_ancla(
-                ancla.lote_id_bytes32, ancla.hash_raiz, nonce
-            )
+            tx_hash = self._gateway.transmitir_ancla(transaccion)
         except ErrorAnclajeTransitorio as exc:
-            # No se sabe si la tx salió: queda ENVIANDO para recuperación.
+            # No se sabe si la tx salió: queda ENVIANDO (con tx_hash) para recuperación.
             self._repo.reprogramar(
                 ancla.id,
                 token,
@@ -379,6 +402,7 @@ class TrazabilidadService:
                 contar_intento=False,
             )
             return "reprogramada"
+        # 6-7. Broadcast aceptado: se registra ENVIADA y se confirma.
         self._repo.marcar_enviada(ancla.id, token, tx_hash, ahora_utc())
         recibo = self._gateway.confirmar_ancla(
             tx_hash, ancla.lote_id_bytes32, ancla.hash_raiz
