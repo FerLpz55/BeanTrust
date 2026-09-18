@@ -35,7 +35,14 @@ Contrato de **única responsabilidad**: dejar constancia inmutable de
 `DEFAULT_ADMIN_ROLE`/`PAUSER_ROLE` en `0x032c4f61…c532` y `ANCHOR_ROLE` en la
 wallet caliente `0x42cC953B…d656` (sin privilegios cruzados). El backend queda
 en `BEAN_WEB3_MODE=disabled`; **la wallet caliente aún no está cargada y no hay
-anclas reales**.
+anclas reales**. El gateway endurecido exige ese privilegio mínimo en el
+preflight, normaliza hashes con `Web3.to_hex` y persiste `ENVIANDO + tx_hash`
+antes del broadcast. La migración **013** (fencing del worker) está lista,
+pendiente de `supabase db push --linked`.
+
+> **Pagos y propinas siguen simulados** (`FakeGatewayPagos`): no hay
+> transferencias reales ni custodia de dinero. Lo único real on-chain es el
+> anclaje del Pasaporte.
 
 ## CoffeePayments (fase posterior)
 
@@ -174,7 +181,8 @@ El anclaje de hitos intermedios por etapa queda como extensión opcional futura.
 | `CoffeeTraceability.sol` (anclaje ADR-11) | ✅ implementado y desplegado | `contracts/src/CoffeeTraceability.sol` |
 | `blockchain_anclas` + trigger + backfill | ✅ aplicado (011) | `Backend/db/migrations/011_blockchain_anchors.sql` |
 | Hardening (unicidad QR/lote, `ENVIANDO`, nonce, fencing) | ✅ aplicado (012) | `Backend/db/migrations/012_blockchain_anchor_hardening.sql` |
-| `GatewayTrazabilidad` + worker de reconciliación (preflight, nonce `pending`, tx+recibo+evento+2 confirmaciones) | ✅ listo | `Backend/app/services/trazabilidad_service.py`, `Backend/app/repositories/web3_trazabilidad.py` |
+| Fencing real del worker (lease vigente al reclamar, formato `tx_hash`) | 🟡 lista (013, pendiente `db push`) | `Backend/db/migrations/013_blockchain_worker_fencing.sql` |
+| `GatewayTrazabilidad` + worker (preflight de roles/pausa/dirección, `Web3.to_hex`, techos EIP-1559, `preparar_ancla`→`ENVIANDO+tx_hash`→`transmitir_ancla`, tx+recibo+evento+2 confirmaciones, recuperación por hash y logs) | ✅ listo | `Backend/app/services/trazabilidad_service.py`, `Backend/app/repositories/web3_trazabilidad.py` |
 | `CoffeePayments.sol` | ⏸️ pausado | `contracts/` (fase posterior) |
 | Poller de confirmación de pagos | ⏸️ pausado | servicio futuro (listener `PaymentPaid`) |
 | Wallet de la cooperativa | ⏸️ pausado | registro del productor (futuro) |

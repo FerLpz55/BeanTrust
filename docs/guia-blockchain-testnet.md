@@ -161,12 +161,17 @@ despliegue, ABI (`contracts/abi/CoffeeTraceability.json`) y URL del explorer.
 
 ## Migración y worker
 
-Aplica `Backend/db/migrations/011_blockchain_anchors.sql` y luego
-`012_blockchain_anchor_hardening.sql` en Supabase. La 012 añade la unicidad de
-`qr_certificado.lote_id` (aborta si hay duplicados, sin borrar trazabilidad),
-las columnas de hardening, el estado `ENVIANDO` y el **lease global con fencing
-token** (`app_private.blockchain_worker_locks` + RPCs `bean_*_lock_anclaje` y
-`bean_reclamar_ancla`).
+Aplica `Backend/db/migrations/011_blockchain_anchors.sql`,
+`012_blockchain_anchor_hardening.sql` y `013_blockchain_worker_fencing.sql` en
+Supabase. La 012 añade la unicidad de `qr_certificado.lote_id` (aborta si hay
+duplicados, sin borrar trazabilidad), las columnas de hardening, el estado
+`ENVIANDO` y el **lease global con fencing token**
+(`app_private.blockchain_worker_locks` + RPCs `bean_*_lock_anclaje` y
+`bean_reclamar_ancla`). La **013** exige el lease vigente en `bean_reclamar_ancla`
+(`p_lock_nombre`, `p_lock_token`, `p_lease_segundos`), añade el formato
+`tx_hash ~ '^0x[0-9a-f]{64}$'` y consolida el índice de cola; **no toca las filas
+existentes**. Antes de mutar Supabase: `supabase db push --linked --dry-run`
+debe mostrar solo la 013.
 
 El worker se dispara por Vercel Cron contra el endpoint protegido (Vercel envía
 `Authorization: Bearer $CRON_SECRET`):
@@ -178,12 +183,59 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 
 `Backend/vercel.json` define el cron. En **Vercel Hobby** corre **diario**
 (`0 3 * * *`); en Pro se puede cambiar a `*/5 * * * *`. El endpoint reclama
-trabajos con el lease global, valida cadena/bytecode/rol, reserva nonce
-(`pending`), transmite una tx EIP-1559, confirma por tx + recibo + evento +
-confirmaciones y recupera por logs `HashAnchored` si el `tx_hash` no se
-persistió. Un revert, cadena/contrato equivocado o hash distinto marca `FALLIDA`;
-el admin puede reintentar (solo causas reintentables) con
+trabajos con el lease global, valida cadena/bytecode/huella/contrato no pausado,
+dirección de anclaje derivada y roles de privilegio mínimo (`ANCHOR_ROLE` sí,
+`DEFAULT_ADMIN_ROLE`/`PAUSER_ROLE` no), reserva nonce (`pending`), **prepara y
+firma en memoria** (`preparar_ancla`), persiste `ENVIANDO + nonce + tx_hash`,
+transmite (`transmitir_ancla`) y confirma por tx + recibo + evento +
+confirmaciones. La política EIP-1559 usa `eth_maxPriorityFeePerGas` con techo
+(`BEAN_WEB3_MAX_PRIORITY_FEE_GWEI`, `BEAN_WEB3_MAX_FEE_GWEI`); si el cap no cubre
+`baseFee + priorityFee` reprograma con `FEE_CAP_TOO_LOW` sin firmar. Un timeout
+tras el broadcast se recupera **primero por el `tx_hash` persistido** y solo como
+respaldo por logs `HashAnchored` fragmentados (`BEAN_WEB3_LOG_BLOCK_RANGE`). Un
+revert, cadena/contrato equivocado o hash distinto marca `FALLIDA`; el admin
+puede reintentar (solo causas reintentables) con
 `POST /v1/blockchain/anclas/{lote_id}/reintentar`.
+
+## Activación, canario y drenado
+
+1. **Verifica el contrato ya desplegado** (no redesplegar):
+
+   ```bash
+   CONSTRUCTOR_ARGS=$(cast abi-encode "constructor(address,address,address)" \
+     0x032c4f6186c394e2eC3671Fe786047C957Edc532 \
+     0x032c4f6186c394e2eC3671Fe786047C957Edc532 \
+     0x42cC953Bd37cb100074ab9e20AD950D7c0add656)
+   forge verify-contract --chain 84532 --verifier etherscan --watch \
+     --constructor-args "$CONSTRUCTOR_ARGS" \
+     0x083475298d32724d85E17Dd48f9a9Bd2550035C9 \
+     src/CoffeeTraceability.sol:CoffeeTraceability
+   ```
+
+2. **Audita la cola** (read-only): `Backend/scripts/auditar_blockchain.py`.
+   Estado previo esperado: 9 filas `PENDIENTE`, cero duplicados y cero formatos
+   inválidos.
+3. **Despliega con blockchain apagado** (`BEAN_WEB3_MODE=disabled`), corre
+   `Backend/scripts/smoke_production.py` y confirma `/health`, QR público y cron
+   `200` no-op.
+4. **Carga la wallet caliente** en Vercel Production (solo la private key de
+   `0x42cC…d656` y `CRON_SECRET`; nunca la admin `0x032c…c532`) y pon
+   `BEAN_WEB3_MODE=anchor`, `BEAN_WEB3_ANCHOR_ADDRESS=0x42cC…d656`,
+   `BEAN_WEB3_MAX_BATCH_SIZE=1`. Redespliega.
+5. **Canario**: confirma por RPC el saldo mínimo (`BEAN_WEB3_MIN_BALANCE_WEI`),
+   dispara **una** llamada autorizada al cron, comprueba que se procesó una fila
+   y, ≥ 35 s después, otra llamada que la confirma. Verifica `CONFIRMADA`,
+   `tx_hash` con `0x`, `status=1`, `to`/`from` correctos, evento `HashAnchored`,
+   dos confirmaciones y el enlace a BaseScan. **No debe existir una segunda tx**
+   para ese lote.
+6. **Drenado**: con `BEAN_WEB3_MAX_BATCH_SIZE=5`, invoca el cron esperando ≥ 35 s
+   entre rondas y corre `auditar_blockchain.py` tras cada una. Detente ante
+   `FALLIDA`, `HASH_ONCHAIN_DISTINTO`, rol o huella incorrectos. Meta: cero
+   `PENDIENTE`/`ENVIANDO`/`ENVIADA`/`FALLIDA`.
+
+Variables nuevas: `BEAN_WEB3_ANCHOR_ADDRESS`, `BEAN_WEB3_MAX_PRIORITY_FEE_GWEI`,
+`BEAN_WEB3_MAX_FEE_GWEI`, `BEAN_WEB3_MIN_BALANCE_WEI`,
+`BEAN_WEB3_LOG_BLOCK_RANGE`.
 
 ## Fases
 

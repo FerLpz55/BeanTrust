@@ -139,7 +139,62 @@ privilegios cruzados). **No se volvió a ejecutar el script de deploy.**
    `BEAN_WEB3_MODE=anchor`.
 4. Ejecutar un lote canario y comprobar `PENDIENTE → CONFIRMADA` con `tx_hash`,
    bloque y ≥ 2 confirmaciones en BaseScan.
-5. (Opcional) Migración `013` para eliminar el índice duplicado.
+5. Aplicar la migración `013_blockchain_worker_fencing.sql` (fencing real del
+   worker + formato de `tx_hash` + consolidación del índice de cola).
+
+---
+
+## 1.c Cierre 2026-09-17 · endurecimiento del gateway y fencing
+
+Trabajo de código completado en la rama `feat/mvp-pilot-release` (worktree
+limpio desde `origin/feat/blockchain-base-sepolia`). **No se ejecutaron pasos
+operativos con credenciales** (Supabase/Vercel/EAS/BaseScan); quedan pendientes
+en la lista de esta misma sección.
+
+### Cambios verificados en local
+
+- **Gateway** (`Backend/app/repositories/web3_trazabilidad.py`): normalización
+  con `Web3.to_hex` (la versión instalada de `HexBytes.hex()` omite `0x`);
+  preflight de contrato no pausado, dirección `BEAN_WEB3_ANCHOR_ADDRESS`
+  derivada de la private key y roles de privilegio mínimo (`ANCHOR_ROLE` sí,
+  `DEFAULT_ADMIN_ROLE`/`PAUSER_ROLE` no); private key como `SecretStr`; política
+  EIP-1559 (`eth_maxPriorityFeePerGas` + techos) con `FEE_CAP_TOO_LOW` sin
+  firmar; `preparar_ancla`/`transmitir_ancla` con `TransaccionPreparada`;
+  recuperación por `tx_hash` persistido y logs fragmentados.
+- **Servicio** (`trazabilidad_service.py`): persiste `ENVIANDO + nonce +
+  tx_hash` antes del broadcast; si `renovar_lock` falla o un `UPDATE` no afecta
+  filas, lanza `FencingPerdido` y detiene el lote.
+- **Repos**: `reclamar_siguiente(nombre, token, lease)` con fencing en memoria y
+  Supabase; `_actualizar` lanza `FencingPerdido` si actualiza cero filas.
+- **Migración `013_blockchain_worker_fencing.sql`**: `bean_reclamar_ancla`
+  exige el lease vigente, constraint `tx_hash ~ '^0x[0-9a-f]{64}$'` y elimina el
+  índice duplicado solo si coincide con el de 011. No toca las 9 filas.
+- **Auditoría read-only**: `Backend/scripts/auditar_blockchain.py`.
+- **Móvil**: URL de API estricta (localhost solo en `__DEV__`), escáner ligado al
+  foco, store de verificación con id monotónico (respuestas viejas descartadas),
+  polling del anclaje cada 10 s solo en estados en curso, pull-to-refresh,
+  enlace a BaseScan validado por host HTTPS, sesión offline que conserva
+  `usuarioId`/`rol`, logout con cola pendiente que exige confirmación, alta
+  pública cerrada y textos que separan trazabilidad real de pagos simulados.
+
+### Pruebas locales (2026-09-17)
+
+| Suite | Resultado |
+|---|---|
+| `ruff check app tests scripts` | ✅ |
+| `pytest` (Backend) | ✅ 228 pasan (incluye Anvil E2E) |
+| `forge fmt --check` / `build` / `test` / `coverage` | ✅ 21 pasan; `CoffeeTraceability.sol` 100% líneas |
+| `tsc --noEmit` / `eslint` / `vitest` | ✅ 70 pruebas |
+| `expo-doctor` | ⏳ pendiente (requiere `pnpm install` real; en esta sesión se usó el store existente) |
+
+### Pendiente operativo (requiere credenciales, sin ejecutar)
+
+1. Verificar `CoffeeTraceability` en BaseScan (no redeployar).
+2. `supabase db push --linked --dry-run` → solo `013`; luego `db push`.
+3. Desplegar con `BEAN_WEB3_MODE=disabled`, correr `smoke_production.py`.
+4. Cargar la wallet caliente y `CRON_SECRET` en Vercel Production; pasar a
+   `anchor`; canario (`MAX_BATCH_SIZE=1`) y drenado de las 9 anclas.
+5. Construir el APK `preview` con EAS y ejecutar la matriz manual en Android.
 
 ---
 
