@@ -623,28 +623,52 @@ smoke. Verificación final con la suite completa (Foundry, ruff+pytest, móvil) 
 |---|---|
 | Corrección §0 del smoke + `BEAN_WEB3_PAUSER_ADDRESS` | ✅ hecho y probado |
 | `contracts/scripts/post-deploy.sh` (C4) | ✅ hecho y probado en Anvil |
-| Fases C–F (deploy, Supabase, Vercel, smoke real) | ⏳ requieren tus claves/acceso |
-| Fase G (docs con datos reales) | ⏳ al cerrar el smoke |
+| Fases C–F (deploy, Supabase, Vercel, smoke real) | ✅ cerrado en Production |
+| Fase G (docs con datos reales) | ✅ actualizado en este reporte |
 
-## Retomar después · 2026-09-18
+## Cierre Production · 2026-09-20
 
-Producción quedó estabilizada en Vercel con `BEAN_WEB3_MODE=disabled` y
+Producción quedó activa con `BEAN_WEB3_MODE=anchor` y
 `https://beantrust-api.vercel.app/health` responde `200`.
 
-El intento de activar `anchor` falló antes de `/health` porque
-`BEAN_WEB3_BACKEND_PRIVATE_KEY` tenía una address pública (`0x42cC...d656`) en
-lugar de una private key `0x` + 64 hex. Además apareció una frase de 12 palabras
-durante la operación; por seguridad no se debe usar esa wallet caliente vieja en
-Vercel.
+Contrato:
 
-Para cerrar el anclaje real, retomar con este orden:
+- Red: Base Sepolia (`chain_id=84532`).
+- `CoffeeTraceability`: `0x083475298d32724d85E17Dd48f9a9Bd2550035C9`.
+- Bloque de despliegue: `46926492`.
+- Runtime code hash:
+  `0x07746f4c5c883f10bc2904690dd2a4969f1945f91e5be55689a5676e01def3d8`.
+- Admin/pauser: `0x032c4f6186c394e2eC3671Fe786047C957Edc532`.
+- Hot wallet final de backend:
+  `0x44bA43a9CB64E75B3fb7fAcCf271052f4E6b347B`.
 
-1. Crear una wallet caliente nueva e independiente para Backend.
-2. Fondearla con ETH testnet de Base Sepolia.
-3. Darle `ANCHOR_ROLE` en `CoffeeTraceability` desde la admin.
-4. Revocar `ANCHOR_ROLE` a `0x42cC953Bd37cb100074ab9e20AD950D7c0add656`.
-5. Cargar en Vercel la private key nueva como `BEAN_WEB3_BACKEND_PRIVATE_KEY`
-   sensitive y la address nueva como `BEAN_WEB3_ANCHOR_ADDRESS`.
-6. Rotar `CRON_SECRET`.
-7. Cambiar `BEAN_WEB3_MODE=anchor`, redeploy, correr canario y auditar
-   `CONFIRMADA >= 1`, `FALLIDA = 0`.
+Seguridad:
+
+- La hot wallet final tiene `ANCHOR_ROLE`.
+- La hot wallet final **no** tiene `DEFAULT_ADMIN_ROLE`.
+- La hot wallet final **no** tiene `PAUSER_ROLE`.
+- No usar para Vercel la wallet vieja `0x42cC953Bd37cb100074ab9e20AD950D7c0add656`.
+- No usar wallets cuyas frases/private keys hayan aparecido en chat.
+
+Resultado del drenado remoto:
+
+- `CONFIRMADA`: 9.
+- `ENVIADA`: 0.
+- `PENDIENTE`: 0.
+- `FALLIDA`: 0.
+
+El worker de Vercel procesó la cola real:
+
+1. Primera reconciliación: 5 enviadas.
+2. Segunda reconciliación: 1 confirmada + 4 enviadas.
+3. Tercera reconciliación: 4 confirmadas.
+4. Cuarta reconciliación: 4 confirmadas.
+
+Comprobación final por Supabase CLI:
+
+```text
+confirmadas=9
+enviadas=0
+pendientes=0
+fallidas=0
+```

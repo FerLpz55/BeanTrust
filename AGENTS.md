@@ -95,18 +95,18 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   piloto se crean por Auth Admin, no desde la app. Smoke test operativo en
   `Backend/scripts/smoke_production.py`.
 - Blockchain (ADR-11): `CoffeeTraceability` está desplegado en Base Sepolia
-  (`0x083475298d32724d85E17Dd48f9a9Bd2550035C9`, bloque `46926492`) y las
-  migraciones `011/012/013` están aplicadas. Producción quedó estabilizada en
-  Vercel con `BEAN_WEB3_MODE=disabled` y `/health` 200 tras un intento fallido
-  de activar `anchor`: se había cargado una address pública como
-  `BEAN_WEB3_BACKEND_PRIVATE_KEY`, y además apareció una frase de 12 palabras.
-  No reutilizar esa wallet caliente vieja (`0x42cC...d656`) para Vercel. Para
-  retomar: crear hot wallet nueva, fondearla, otorgar `ANCHOR_ROLE`, revocar la
-  vieja, cargar la private key nueva en Vercel, rotar `CRON_SECRET`, activar
-  `anchor`, correr canario y auditar `CONFIRMADA >= 1`, `FALLIDA = 0`.
-- Deudas clave: pagos on-chain reales siguen en pausa; resta cerrar el canario
-  de anclaje con hot wallet nueva y el smoke de producción/EAS. El rate limit en
-  memoria queda solo para dev/CI.
+  (`0x083475298d32724d85E17Dd48f9a9Bd2550035C9`, bloque `46926492`, runtime hash
+  `0x07746f4c5c883f10bc2904690dd2a4969f1945f91e5be55689a5676e01def3d8`) y las
+  migraciones `011/012/013` están aplicadas. Producción está activa con
+  `BEAN_WEB3_MODE=anchor`, `/health` 200 y hot wallet final
+  `0x44bA43a9CB64E75B3fb7fAcCf271052f4E6b347B` (tiene `ANCHOR_ROLE`, no admin,
+  no pauser). Drenado real cerrado: `CONFIRMADA=9`, `ENVIADA=0`, `PENDIENTE=0`,
+  `FALLIDA=0`. No reutilizar para Vercel la wallet vieja
+  `0x42cC953Bd37cb100074ab9e20AD950D7c0add656` ni wallets cuyas frases/private
+  keys hayan aparecido en chat.
+- Deudas clave: pagos on-chain reales siguen en pausa; resta smoke/manual final
+  de Expo Go/EAS si se quiere validar el piloto Android. El rate limit en memoria
+  queda solo para dev/CI.
 
 ## Skills útiles
 
