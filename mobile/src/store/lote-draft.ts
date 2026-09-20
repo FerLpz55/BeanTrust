@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 
 import type { AdjuntoLocal } from '@/src/evidencia/types';
+import { registrarLimpiezaSesion } from '@/src/store/sesion';
 import { nuevaClaveIdempotencia } from '@/src/utils/idempotencia';
 
 interface LoteDraftState {
@@ -108,3 +109,7 @@ export const useLoteDraft = create<LoteDraftState>((set, get) => ({
     return false;
   },
 }));
+
+registrarLimpiezaSesion(() => {
+  useLoteDraft.getState().reset();
+});

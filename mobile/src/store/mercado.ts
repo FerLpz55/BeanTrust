@@ -11,11 +11,12 @@
 
 import { create } from 'zustand';
 
-import { ApiError } from '@/src/api/client';
+import { ApiError, SesionCambiadaError } from '@/src/api/client';
 import { obtenerPanelLote } from '@/src/api/mercado';
 import { obtenerSaldo } from '@/src/api/pagos';
 import { enviarPropina as enviarPropinaApi } from '@/src/api/propinas';
 import type { MercadoLoteRead, SaldoRead } from '@/src/api/types';
+import { registrarLimpiezaSesion } from '@/src/store/sesion';
 
 interface MercadoState {
   saldo: SaldoRead | null;
@@ -26,6 +27,7 @@ interface MercadoState {
   cargarSaldo: () => Promise<void>;
   cargarPanel: (loteId: string) => Promise<void>;
   enviarPropina: (loteId: string, monto: number, clave: string) => Promise<void>;
+  reset: () => void;
 }
 
 function mensajeDe(err: unknown, porDefecto: string): string {
@@ -44,6 +46,7 @@ export const useMercadoStore = create<MercadoState>((set, get) => ({
     try {
       set({ saldo: await obtenerSaldo(), isLoading: false });
     } catch (err) {
+      if (err instanceof SesionCambiadaError) return;
       // 403 es esperado para quien no es productor (el saldo es suyo, §10).
       const sinAcceso = err instanceof ApiError && err.status === 403;
       set({
@@ -60,6 +63,7 @@ export const useMercadoStore = create<MercadoState>((set, get) => ({
       const panel = await obtenerPanelLote(loteId);
       set((s) => ({ paneles: { ...s.paneles, [loteId]: panel }, isLoading: false }));
     } catch (err) {
+      if (err instanceof SesionCambiadaError) return;
       set({ isLoading: false, error: mensajeDe(err, 'No se pudo cargar el comercio justo.') });
     }
   },
@@ -77,4 +81,10 @@ export const useMercadoStore = create<MercadoState>((set, get) => ({
       set({ enviando: false });
     }
   },
+
+  reset: () => set({ saldo: null, paneles: {}, isLoading: false, error: null, enviando: false }),
 }));
+
+registrarLimpiezaSesion(() => {
+  useMercadoStore.getState().reset();
+});

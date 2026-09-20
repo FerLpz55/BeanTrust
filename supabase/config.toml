@@ -7,11 +7,11 @@ project_id = "yvczofwzfljuubxnmakj"
 
 [auth]
 enabled = true
-# El alta pública queda cerrada a propósito: las únicas cuentas válidas son las
-# cuatro de demo creadas por Admin API (db/seed/seed_supabase.sql documenta el
-# resto del seed). Un productor que se registrara solo se quedaría sin finca
-# asociada y no podría crear lotes.
-enable_signup = false
+# Alta pública de productores habilitada: la 014 fuerza `productor` para toda
+# alta (aunque la metadata pida otro rol) y el onboarding crea la primera finca
+# con la cooperativa del piloto. Los roles privilegiados se siguen creando por
+# procedimiento administrativo (Auth Admin), nunca desde la app.
+enable_signup = true
 enable_anonymous_sign_ins = false
 
 [auth.email]

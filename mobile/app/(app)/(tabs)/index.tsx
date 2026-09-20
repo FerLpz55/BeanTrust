@@ -20,6 +20,7 @@ import { useThemeColor } from '@/src/hooks/use-theme-color';
 import { useLotes } from '@/src/hooks/use-lotes';
 import { useAuthStore } from '@/src/store/auth';
 import { type LoteEstado } from '@/src/store/lotes';
+import { usePerfilStore } from '@/src/store/perfil';
 import { useSyncStore } from '@/src/store/sync';
 import { radii, spacing, typeScale } from '@/src/theme/tokens';
 import { Redirect, router, type Href } from 'expo-router';
@@ -36,6 +37,8 @@ export default function DashboardScreen() {
   const rol = useAuthStore((s) => s.rol);
   const { lotes, isLoading, error: errorLotes, refrescar, refrescando } = useLotes();
   const { pendingCount, sincronizando, sincronizarAhora } = useSyncStore();
+  const perfilError = usePerfilStore((s) => s.error);
+  const cargarFincas = usePerfilStore((s) => s.cargarFincas);
 
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
@@ -145,6 +148,21 @@ export default function DashboardScreen() {
             {errorLotes}
           </Text>
         ) : null}
+        {/* Un fallo al consultar fincas se reintenta; nunca se confunde con
+            "cuenta sin finca" (el onboarding no se abre en ese caso). */}
+        {perfilError ? (
+          <View style={[styles.retryBanner, { backgroundColor: surfaceContainerLow }]}>
+            <Text
+              style={[typeScale.bodyMedium, styles.retryText, { color: onSurfaceVariant }]}
+              accessibilityLiveRegion="polite"
+            >
+              {perfilError}
+            </Text>
+            <Pressable onPress={() => void cargarFincas()} accessibilityRole="button">
+              <Text style={[typeScale.labelLarge, { color: primary }]}>Reintentar</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {/* Header */}
         <View style={styles.header}>
           <BrandMark size={40} />
@@ -234,6 +252,11 @@ export default function DashboardScreen() {
             <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }, styles.emptySubtitle]}>
               Tu primera cosecha está a un toque
             </Text>
+            <PrimaryButton
+              label="Registrar mi primera cosecha"
+              onPress={() => router.push('/lotes/nuevo' as Href)}
+              testID="dashboard-primera-cosecha"
+            />
           </View>
         ) : (
           <View style={styles.lotesList}>
@@ -288,6 +311,17 @@ const styles = StyleSheet.create({
   errorTexto: {
     textAlign: 'center',
     marginBottom: spacing.md,
+  },
+  retryBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radii.medium,
+  },
+  retryText: {
+    flex: 1,
   },
   root: {
     flex: 1,

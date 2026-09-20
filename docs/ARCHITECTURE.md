@@ -747,7 +747,7 @@ flowchart LR
 | Método | Ruta | Qué hace | Idempotencia | Códigos |
 |---|---|---|---|---|
 | `POST` | `/v1/auth/login` | Login (JWT de Supabase) | No | `200` · `401` |
-| `POST` | `/v1/auth/register` | Registrar usuario | No | `200` · `409` · `422` |
+| `POST` | `/v1/auth/register` | Alta pública: siempre crea `productor` (rechaza roles privilegiados) | No | `200` · `422` |
 | `POST` | `/v1/auth/refresh` | Renovar token | No | `200` · `401` |
 | `POST` | `/v1/auth/recover` | Solicita recuperación de contraseña (respuesta uniforme, no enumera cuentas) | No | `200` |
 | `POST` | `/v1/auth/recover/confirm` | Fija la nueva contraseña con un token de un solo uso | No | `200` · `401` · `422` |
@@ -755,6 +755,7 @@ flowchart LR
 | `GET` | `/v1/cooperativas` | Listar cooperativas (admin) | Sí | `200` · `403` |
 | `GET` | `/v1/compradores` | Directorio de compradores (cooperativa/admin, para elegir `comprador_id` al vender) | Sí | `200` · `403` |
 | `GET` | `/v1/fincas` | Fincas del usuario autenticado (resuelve `finca_id` para el alta de lote) | Sí | `200` · `403` |
+| `POST` | `/v1/fincas` | Alta inicial de finca del productor (onboarding, `id` del móvil = idempotencia) | `id` del cuerpo | `201` · `403` · `409` · `422` |
 | `POST` | `/v1/evidencias` | Subir foto privada al bucket (multipart: `finca_id`, `lote_id`, `archivo`) | `Idempotency-Key` | `201` · `403` · `422` |
 | `POST` | `/v1/lotes` | Crear lote en estado CEREZA (variedad, método, peso, `evidencia_id`) | No (da id) | `201` · `400` · `403` · `422` |
 | `POST` | `/v1/lotes/{lote_id}/eventos` | Registrar transición/sub-etapa (11 tipos) | `Idempotency-Key` | `201` · `409` · `422` |
@@ -1311,7 +1312,7 @@ sequenceDiagram
 |---|---|---|---|---|
 | `usuarios` | propia (lectura) | propia (lectura) | propia (lectura) | todo |
 | `cooperativa` | — | — | — | lectura |
-| `finca` | propias (lectura) | propias + de sus productores (lectura) | — | todo |
+| `finca` | propias (lectura + alta inicial) | propias + de sus productores (lectura) | — | todo |
 | `lotes` | de sus fincas | de sus fincas | — (solo `/verificar`) | todo |
 | `lote_eventos` | de sus lotes (append-only) | de sus lotes (append-only) | — | todo |
 | `qr_certificado` | de sus lotes | de sus lotes | — | todo |
@@ -1324,7 +1325,7 @@ sequenceDiagram
 
 **Aislamiento de tenant:** toda política RLS se resuelve **siempre** desde `auth.uid()` → `USUARIOS.id` del JWT (nunca desde un ID enviado por el cliente), mediante `app_private.bean_rol()` (security definer). La política de `PROPINA` es **propia** de su tabla: insertar solo si el JWT corresponde a `comprador_id`, y leer solo si el usuario es `comprador_id`, `productor_id`, cooperativa del lote o admin.
 
-La matriz está implementada en `Backend/db/migrations/002_rls.sql` y **recreada** por `006_hardening_storage_rls_rate_limit.sql` (que además mueve el helper a `app_private`, ajusta los grants y protege `storage.objects`); es la misma regla que replica la capa de servicio en FastAPI (doble control, §12).
+La matriz está implementada en `Backend/db/migrations/002_rls.sql` y **recreada** por `006_hardening_storage_rls_rate_limit.sql` (que además mueve el helper a `app_private`, ajusta los grants y protege `storage.objects`); la `014_registro_productor_y_finca.sql` endurece el alta pública (siempre `productor`), restringe `finca_insert` a la cooperativa del piloto y bloquea por trigger el cambio de `productor_id`/`cooperativa_id`; es la misma regla que replica la capa de servicio en FastAPI (doble control, §12).
 
 ---
 

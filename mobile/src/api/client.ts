@@ -20,6 +20,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Respuesta descartada porque la sesión cambió (login/logout) mientras la
+ * petición estaba en vuelo. Los stores la ignoran para no pintar datos de una
+ * cuenta anterior sobre la nueva.
+ */
+export class SesionCambiadaError extends Error {
+  constructor() {
+    super('La sesión cambió durante la petición.');
+    this.name = 'SesionCambiadaError';
+  }
+}
+
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
@@ -42,6 +54,8 @@ interface SesionHooks {
   getAccessToken: () => string | null;
   renovar: () => Promise<string | null>;
   cerrarSesion: () => Promise<void>;
+  /** Generación de sesión: si cambia en vuelo, la respuesta se descarta. */
+  getGeneracion?: () => number;
 }
 
 let hooks: SesionHooks | null = null;
@@ -101,6 +115,7 @@ async function solicitar<T>(
   // fuerza petición anónima (grupo público `verificar/`).
   const token =
     opciones.token !== undefined ? opciones.token : (hooks?.getAccessToken() ?? null);
+  const generacion = hooks?.getGeneracion?.() ?? 0;
 
   let response: Response;
   try {
@@ -110,6 +125,11 @@ async function solicitar<T>(
       throw new ApiError(0, 'No se pudo contactar el servidor. Revisa tu conexión.');
     }
     throw new ApiError(0, 'No se pudo contactar el servidor.');
+  }
+
+  // La sesión cambió mientras la petición estaba en vuelo: se descarta.
+  if (hooks?.getGeneracion && hooks.getGeneracion() !== generacion) {
+    throw new SesionCambiadaError();
   }
 
   // Access expirado con la app abierta: renovar una vez y repetir.

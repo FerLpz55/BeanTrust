@@ -7,6 +7,7 @@ arranque temprano cuando falta un valor obligatorio.
 from __future__ import annotations
 
 import json
+import uuid
 from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated, Literal
@@ -70,6 +71,12 @@ class Settings(BaseSettings):
     # 503 con `Retry-After`. Los GET, login/refresh/recover y la verificación
     # pública siguen disponibles.
     maintenance_writes: bool = False
+
+    # Cooperativa del piloto: destino server-side de la finca que registra un
+    # productor nuevo en el onboarding. UUID real de `cooperativa@beantrust.dev`
+    # (usuario operativo y fila de `cooperativa` comparten id). Si falta, el
+    # alta de finca falla cerrada; no se inventa ni se toma del cliente.
+    pilot_cooperativa_id: uuid.UUID | None = None
 
     # --- Anclaje on-chain del Pasaporte (Base Sepolia, ADR-11) ---
     # `disabled`: el QR funciona igual y no se habla con la cadena.

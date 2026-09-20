@@ -23,6 +23,7 @@ ENDPOINTS_DOCUMENTADOS: set[tuple[str, str]] = {
     ("GET", "/v1/cooperativas"),
     ("GET", "/v1/compradores"),
     ("GET", "/v1/fincas"),
+    ("POST", "/v1/fincas"),
     ("POST", "/v1/evidencias"),
     ("POST", "/v1/lotes"),
     ("GET", "/v1/lotes"),

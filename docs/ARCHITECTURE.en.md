@@ -745,7 +745,7 @@ flowchart LR
 | Method | Route | What it does | Idempotency | Codes |
 |---|---|---|---|---|
 | `POST` | `/v1/auth/login` | Login (Supabase JWT) | No | `200` · `401` |
-| `POST` | `/v1/auth/register` | Register a user | No | `200` · `409` · `422` |
+| `POST` | `/v1/auth/register` | Public sign-up: always creates a `productor` (rejects privileged roles) | No | `200` · `422` |
 | `POST` | `/v1/auth/refresh` | Refresh token | No | `200` · `401` |
 | `POST` | `/v1/auth/recover` | Request password recovery (uniform response, no account enumeration) | No | `200` |
 | `POST` | `/v1/auth/recover/confirm` | Set the new password with a one-time token | No | `200` · `401` · `422` |
@@ -753,6 +753,7 @@ flowchart LR
 | `GET` | `/v1/cooperativas` | List cooperatives (admin) | Yes | `200` · `403` |
 | `GET` | `/v1/compradores` | Buyer directory (cooperative/admin, to choose `comprador_id` on sale) | Yes | `200` · `403` |
 | `GET` | `/v1/fincas` | Authenticated user's farms (resolves `finca_id` for lot creation) | Yes | `200` · `403` |
+| `POST` | `/v1/fincas` | Producer's first farm (onboarding, mobile `id` = idempotency) | body `id` | `201` · `403` · `409` · `422` |
 | `POST` | `/v1/evidencias` | Upload private photo to the bucket (multipart: `finca_id`, `lote_id`, `archivo`) | `Idempotency-Key` | `201` · `403` · `422` |
 | `POST` | `/v1/lotes` | Create a lot in CEREZA state (variety, method, weight, `evidencia_id`) | No (returns id) | `201` · `400` · `403` · `422` |
 | `POST` | `/v1/lotes/{lote_id}/eventos` | Register a transition/sub-stage (11 types) | `Idempotency-Key` | `201` · `409` · `422` |
@@ -1117,7 +1118,7 @@ Roles are modeled in the **`USERS.role`** table (`producer | cooperative | buyer
 |---|---|---|---|---|
 | `usuarios` | own (read) | own (read) | own (read) | all |
 | `cooperativa` | — | — | — | read |
-| `finca` | own (read) | own + their producers' (read) | — | all |
+| `finca` | own (read + initial create) | own + their producers' (read) | — | all |
 | `lotes` | their farms' | their farms' | — (only `/verificar`) | all |
 | `lote_eventos` | their lots' (append-only) | their lots' (append-only) | — | all |
 | `qr_certificado` | their lots' | their lots' | — | all |
@@ -1129,7 +1130,7 @@ Roles are modeled in the **`USERS.role`** table (`producer | cooperative | buyer
 
 **Tenant isolation:** every RLS policy is resolved **always** from `auth.uid()` → `USERS.id` of the JWT (never from a client-supplied ID), through `app_private.bean_rol()` (security definer). The `PROPINA` policy is **its own**: insert only if the JWT matches `comprador_id`, and read only if the user is `comprador_id`, `productor_id`, the lot's cooperative, or admin.
 
-The matrix is implemented in `Backend/db/migrations/002_rls.sql` and **recreated** by `006_hardening_storage_rls_rate_limit.sql` (which also moves the helper to `app_private`, adjusts grants and protects `storage.objects`); it is the same rule the service layer replicates in FastAPI (double control, §12).
+The matrix is implemented in `Backend/db/migrations/002_rls.sql` and **recreated** by `006_hardening_storage_rls_rate_limit.sql` (which also moves the helper to `app_private`, adjusts grants and protects `storage.objects`); `014_registro_productor_y_finca.sql` hardens public sign-up (always `productor`), restricts `finca_insert` to the pilot cooperative, and blocks changes to `productor_id`/`cooperativa_id` via trigger; it is the same rule the service layer replicates in FastAPI (double control, §12).
 
 ---
 

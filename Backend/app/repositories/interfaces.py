@@ -111,6 +111,8 @@ class RepositorioFinca(Protocol):
 
     def listar_todas(self) -> list[Finca]: ...
 
+    def guardar(self, finca: Finca) -> Finca: ...
+
 
 @runtime_checkable
 class RepositorioUsuario(Protocol):

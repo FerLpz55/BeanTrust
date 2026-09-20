@@ -115,7 +115,7 @@ el mismo cambio.
 | Método | Ruta                          | Acceso                       | Descripción                              |
 | ------ | ----------------------------- | ---------------------------- | ---------------------------------------- |
 | POST   | `/auth/login`                 | público                      | Emite token JWT                          |
-| POST   | `/auth/register`              | público                      | Registra usuario                         |
+| POST   | `/auth/register`              | público                      | Alta pública: siempre crea `productor` (rechaza roles privilegiados) |
 | POST   | `/auth/refresh`               | público                      | Renueva access token con refresh token   |
 | POST   | `/auth/recover`               | público                      | Solicita recuperación (respuesta uniforme) |
 | POST   | `/auth/recover/confirm`       | público                      | Fija nueva contraseña con token de un solo uso |
@@ -123,6 +123,7 @@ el mismo cambio.
 | GET    | `/cooperativas`               | admin                        | Directorio de cooperativas               |
 | GET    | `/compradores`                | cooperativa/admin            | Directorio de compradores (elegir `comprador_id` al vender) |
 | GET    | `/fincas`                     | productor/cooperativa/admin  | Fincas del usuario (resuelve `finca_id` para crear lotes) |
+| POST   | `/fincas`                     | productor                    | Alta inicial de finca (onboarding, 201, idempotente por `id`) |
 | POST   | `/evidencias`                 | productor/cooperativa/admin  | Sube foto privada al bucket (multipart, 201, idempotente por `Idempotency-Key`) |
 | POST   | `/lotes`                      | productor/cooperativa/admin  | Registra cosecha (crea lote: variedad, método, peso, `evidencia_id`) |
 | GET    | `/lotes`                      | productor/cooperativa/admin  | Lista paginada por cursor                |

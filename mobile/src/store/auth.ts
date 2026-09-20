@@ -16,6 +16,7 @@ import * as api from '@/src/api/auth';
 import { ApiError, configurarSesion } from '@/src/api/client';
 import type { Rol } from '@/src/api/types';
 import { clearSession, readSession, saveSession } from '@/src/storage/secure';
+import { ejecutarLimpiezasSesion } from '@/src/store/sesion';
 import { decodeJwt, isTokenExpired } from '@/src/utils/jwt';
 
 export type AuthStatus = 'restoring' | 'authenticated' | 'unauthenticated';
@@ -28,9 +29,11 @@ interface AuthState {
   /** Rol real resuelto por `GET /v1/auth/me` (nunca del claim del JWT). */
   rol: Rol | null;
   usuarioId: string | null;
+  /** Generación de sesión: cambia en login/logout para descartar respuestas viejas. */
+  generacion: number;
   error: string | null;
   login: (email: string, password: string) => Promise<boolean>;
-  register: (email: string, password: string, nombre: string, rol: Rol) => Promise<boolean>;
+  register: (email: string, password: string, nombre: string) => Promise<boolean>;
   logout: () => Promise<void>;
   restore: () => Promise<void>;
   cargarPerfil: () => Promise<void>;
@@ -45,6 +48,11 @@ const SIN_SESION = {
   usuarioId: null,
 };
 
+/**
+ * Las limpiezas de sesión (lotes, perfil, mercado, offline...) viven en
+ * `store/sesion` y las ejecuta `logout` para que ninguna cuenta vea datos de la
+ * anterior.
+ */
 function esFalloDeRed(err: unknown): boolean {
   return err instanceof ApiError && err.status === 0;
 }
@@ -52,6 +60,7 @@ function esFalloDeRed(err: unknown): boolean {
 export const useAuthStore = create<AuthState>((set, get) => ({
   ...SIN_SESION,
   status: 'restoring',
+  generacion: 0,
   error: null,
 
   /** Resuelve el rol real en el backend; sin él la UI no puede filtrar por rol. */
@@ -89,6 +98,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         email: cuenta,
+        generacion: get().generacion + 1,
         error: null,
       });
       await get().cargarPerfil();
@@ -99,10 +109,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  register: async (email, password, nombre, rol) => {
+  register: async (email, password, nombre) => {
     set({ error: null });
     try {
-      const tokens = await api.register(email, password, nombre, rol);
+      const tokens = await api.register(email, password, nombre);
       const cuenta = decodeJwt(tokens.access_token)?.email ?? email;
       await saveSession({
         accessToken: tokens.access_token,
@@ -116,6 +126,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         email: cuenta,
+        generacion: get().generacion + 1,
         error: null,
       });
       await get().cargarPerfil();
@@ -133,6 +144,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    const usuarioId = get().usuarioId;
+    // Se invalida la sesión ANTES de limpiar: cualquier petición en vuelo de la
+    // cuenta anterior se descarta al volver (generación distinta).
+    set((s) => ({ generacion: s.generacion + 1 }));
+    await ejecutarLimpiezasSesion(usuarioId);
     await clearSession();
     set({ ...SIN_SESION, error: null });
   },
@@ -143,6 +159,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set(SIN_SESION);
       return;
     }
+    // Sesión establecida: nueva generación para descartar respuestas de la
+    // ejecución anterior que pudieran llegar tarde.
+    set((s) => ({ generacion: s.generacion + 1 }));
     if (!isTokenExpired(accessToken)) {
       set({
         status: 'authenticated',
@@ -201,6 +220,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
  */
 configurarSesion({
   getAccessToken: () => useAuthStore.getState().accessToken,
+  getGeneracion: () => useAuthStore.getState().generacion,
   renovar: async () => {
     const { refreshToken, email, usuarioId, rol } = useAuthStore.getState();
     if (!refreshToken) return null;

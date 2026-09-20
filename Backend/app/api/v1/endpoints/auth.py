@@ -26,7 +26,8 @@ def login(body: LoginRequest, provider: AuthProviderDep) -> TokenResponse:
 
 @router.post("/register", dependencies=[Depends(limitar_login)])
 def register(body: RegisterRequest, provider: AuthProviderDep) -> TokenResponse:
-    return provider.register(body.email, body.password, body.nombre, body.rol)
+    """Alta pública: siempre crea un productor (nunca roles privilegiados)."""
+    return provider.register(body.email, body.password, body.nombre)
 
 
 @router.post("/refresh", dependencies=[Depends(limitar_login)])

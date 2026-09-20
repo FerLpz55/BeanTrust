@@ -74,7 +74,13 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   `search_path = ''`), el evento persiste el mismo `registrado_en` que entró al hash
   (`p_registrado_en`), y la reparación histórica queda auditada en
   `app_private.reparacion_cadena_evento` (`scripts/auditar_integridad_historica.py`,
-  solo lectura por defecto).
+  solo lectura por defecto). **Registro propio (014)**: el alta pública solo crea
+  `productor` (el trigger de Auth lo fuerza aunque la metadata pida otro rol) y
+  `POST /v1/fincas` (exclusivo de productor) crea la finca inicial con la
+  cooperativa del piloto desde `BEAN_PILOT_COOPERATIVA_ID`
+  (`9d652468-418b-443c-b4be-a652124927c2`), idempotente por el `id` del móvil; la
+  RLS de `finca` valida la cooperativa permitida y un trigger bloquea cambiar
+  `productor_id`/`cooperativa_id`.
 - Mobile: **todos los flujos consumen el backend real** (no quedan stores mock).
   `src/api/` cubre auth, fincas, lotes, verificar, pagos, propinas, mercado y evidencias;
   `client.ts` renueva el token ante un 401 y manda `Idempotency-Key`. El adaptador
@@ -87,13 +93,16 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   encolado optimista y UI de pendientes/conflictos; `POST /v1/sync` es la única ruta.
   **Evidencia (ADR-14)** capturada con `expo-image-picker`/`expo-image-manipulator`
   (JPEG + SHA-256) y encolada antes del lote; **FlashList** en trazabilidad, detalle,
-  mercado y propinas.
+  mercado y propinas. **Registro y onboarding**: `app/(auth)/register.tsx` crea la
+  cuenta (sin selector de roles) y `app/(app)/onboarding-finca.tsx` configura la
+  primera finca; el `logout` limpia el estado de todos los stores
+  (`src/store/sesion.ts`) y pausa el motor offline conservando la cola del dueño.
 - Producción (piloto Android): Supabase real conectado (proyecto
   `yvczofwzfljuubxnmakj`; endpoints autenticados con JWT por request y RLS
   efectiva; `service_role` solo para auth interna, verificación pública y
-  Storage) y **registro público cerrado** (`enable_signup=false`); las cuentas
-  piloto se crean por Auth Admin, no desde la app. Smoke test operativo en
-  `Backend/scripts/smoke_production.py`.
+  Storage) y **registro público de productores habilitado** (`enable_signup=true`,
+  endurecido por la migración 014; los roles privilegiados se crean por Auth
+  Admin). Smoke test operativo en `Backend/scripts/smoke_production.py`.
 - Blockchain (ADR-11): `CoffeeTraceability` está desplegado en Base Sepolia
   (`0x083475298d32724d85E17Dd48f9a9Bd2550035C9`, bloque `46926492`, runtime hash
   `0x07746f4c5c883f10bc2904690dd2a4969f1945f91e5be55689a5676e01def3d8`) y las

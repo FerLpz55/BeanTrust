@@ -13,7 +13,7 @@
 
 import { create } from 'zustand';
 
-import { ApiError } from '@/src/api/client';
+import { ApiError, SesionCambiadaError } from '@/src/api/client';
 import { listarLotes, obtenerLote, registrarEvento, crearLote } from '@/src/api/lotes';
 import type { EventoCreate, LoteCreate } from '@/src/api/types';
 import {
@@ -27,6 +27,7 @@ import type { AdjuntoLocal } from '@/src/evidencia/types';
 import * as offline from '@/src/offline';
 import type { OperacionPendiente } from '@/src/offline/types';
 import { useAuthStore } from '@/src/store/auth';
+import { registrarLimpiezaSesion } from '@/src/store/sesion';
 
 // Re-exportado para que las pantallas sigan importando desde un único sitio.
 export {
@@ -59,6 +60,7 @@ interface LotesState {
   cargarDetalle: (loteId: string) => Promise<Lote | null>;
   crear: (datos: LoteCreate, adjunto?: AdjuntoLocal | null) => Promise<Lote>;
   avanzar: (loteId: string, evento: EventoCreate, clave: string) => Promise<Lote>;
+  reset: () => void;
 }
 
 function mensajeDe(err: unknown, porDefecto: string): string {
@@ -156,6 +158,7 @@ export const useLotesStore = create<LotesState>((set, get) => ({
       set({ lotes, nextCursor: pagina.next_cursor, isLoading: false });
       if (userId) await offline.guardarRecurso(userId, 'lotes', 'all', lotes);
     } catch (err) {
+      if (err instanceof SesionCambiadaError) return;
       const cacheados =
         userId && esFalloDeRed(err)
           ? await offline.leerRecurso<Lote[]>(userId, 'lotes', 'all')
@@ -192,6 +195,7 @@ export const useLotesStore = create<LotesState>((set, get) => ({
       if (userId) await offline.guardarRecurso(userId, 'lote_detalle', loteId, detalle);
       return detalle;
     } catch (err) {
+      if (err instanceof SesionCambiadaError) return null;
       const cacheado =
         userId && esFalloDeRed(err)
           ? await offline.leerRecurso<Lote>(userId, 'lote_detalle', loteId)
@@ -312,4 +316,18 @@ export const useLotesStore = create<LotesState>((set, get) => ({
     }
     return optimista;
   },
+
+  reset: () =>
+    set({
+      lotes: [],
+      detalles: {},
+      isLoading: false,
+      isLoadingMore: false,
+      error: null,
+      nextCursor: null,
+    }),
 }));
+
+registrarLimpiezaSesion(() => {
+  useLotesStore.getState().reset();
+});

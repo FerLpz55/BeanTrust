@@ -1,7 +1,7 @@
 /** Endpoints de autenticación (§10). */
 
 import { apiRequest } from '@/src/api/client';
-import type { CurrentUser, RecoverResponse, Rol, TokenResponse } from '@/src/api/types';
+import type { CurrentUser, RecoverResponse, TokenResponse } from '@/src/api/types';
 
 export function login(email: string, password: string): Promise<TokenResponse> {
   return apiRequest<TokenResponse>('/v1/auth/login', {
@@ -19,15 +19,15 @@ export function refresh(refreshToken: string): Promise<TokenResponse> {
   });
 }
 
+/** Alta pública: el backend siempre crea un `productor` (sin rol en el cuerpo). */
 export function register(
   email: string,
   password: string,
-  nombre: string,
-  rol: Rol
+  nombre: string
 ): Promise<TokenResponse> {
   return apiRequest<TokenResponse>('/v1/auth/register', {
     method: 'POST',
-    body: { email, password, nombre, rol },
+    body: { email, password, nombre },
     token: null,
   });
 }

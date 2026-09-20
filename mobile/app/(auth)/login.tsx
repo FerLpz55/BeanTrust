@@ -101,13 +101,16 @@ export default function LoginScreen() {
       signature
       footer={
         <View style={styles.footerRow}>
-          {/* El alta pública está cerrada en Supabase (`[auth] enable_signup =
-              false`): las cuentas se entregan ya creadas y con su finca
-              asociada, porque un alta propia se quedaría sin finca y no podría
-              registrar lotes. Sin cuenta, el camino es la cooperativa. */}
+          {/* Alta pública de productores habilitada: la cooperativa del piloto
+              gestiona las ventas de los lotes creados por la cuenta nueva. */}
           <Text style={[typeScale.bodyMedium, { color: onSurfaceVariant }]}>
-            ¿No tienes cuenta? Solicítala a tu cooperativa.
+            ¿No tienes cuenta?
           </Text>
+          <TextLink
+            label="Crear cuenta"
+            onPress={() => router.push('/register')}
+            testID="login-register"
+          />
         </View>
       }
     >

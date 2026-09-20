@@ -13,6 +13,7 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.core.seguridad import LocalAuthProvider, PasswordService
 from app.main import crear_app
 from app.models.dominio import Finca, Rol, Usuario
@@ -131,6 +132,13 @@ def client(
     almacen_evidencia = InMemoryAlmacenEvidencia()
 
     app = crear_app()
+    # El alta de finca asigna la cooperativa del piloto desde la config; en
+    # pruebas se usa la cooperativa sembrada (mismo rol/id que en producción).
+    cooperativa = next(u for u in seed_usuarios if u.rol is Rol.COOPERATIVA)
+    ajustes = get_settings().model_copy(
+        update={"pilot_cooperativa_id": cooperativa.id}
+    )
+    app.dependency_overrides[deps.get_settings] = lambda: ajustes
     # Repos de servicio (auth interna + verificación pública).
     app.dependency_overrides[deps.get_repo_lote] = lambda: InMemoryLoteRepo(memoria)
     app.dependency_overrides[deps.get_repo_qr] = lambda: InMemoryQRRepo(memoria)
@@ -194,6 +202,24 @@ def header_admin(client: TestClient) -> dict[str, str]:
 @pytest.fixture
 def header_comprador(client: TestClient) -> dict[str, str]:
     return login(client, "comprador@beantrust.dev", "Comp123!")
+
+
+@pytest.fixture
+def header_comprador2(client: TestClient, memoria: Memoria) -> dict[str, str]:
+    """Segundo comprador sembrado directamente.
+
+    El alta pública ya solo crea productores, así que los roles privilegiados
+    (comprador, cooperativa, admin) se siembran en la BD como en producción.
+    """
+    usuario = Usuario(
+        uuid.uuid4(),
+        "comprador2@beantrust.dev",
+        Rol.COMPRADOR,
+        "Comprador Dos",
+        PasswordService().hash("Comp123!"),
+    )
+    memoria.usuarios[usuario.id] = usuario
+    return login(client, "comprador2@beantrust.dev", "Comp123!")
 
 FINCA_PRINCIPAL = "11111111-1111-1111-1111-111111111111"
 

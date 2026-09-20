@@ -17,6 +17,7 @@ import { ApiError } from '@/src/api/client';
 import type { VerificarRead } from '@/src/api/types';
 import { verificarCodigo } from '@/src/api/verificar';
 import { aTimeline, type LoteEvento } from '@/src/domain/lote';
+import { registrarLimpiezaSesion } from '@/src/store/sesion';
 
 export interface VerificarData {
   pasaporte: VerificarRead;
@@ -129,3 +130,7 @@ export const useVerificarStore = create<VerificarState>((set) => ({
     });
   },
 }));
+
+registrarLimpiezaSesion(() => {
+  useVerificarStore.getState().reset();
+});

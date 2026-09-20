@@ -13,6 +13,7 @@ import { create } from 'zustand';
 import * as offline from '@/src/offline';
 import { crearCoordinadorFlush } from '@/src/offline/coordinador';
 import type { RegistroCola } from '@/src/offline/types';
+import { registrarLimpiezaSesion } from '@/src/store/sesion';
 import { useLotesStore } from '@/src/store/lotes';
 import { usePerfilStore } from '@/src/store/perfil';
 
@@ -33,6 +34,8 @@ interface SyncState {
 
   inicializar: (userId: string) => Promise<void>;
   limpiar: (userId: string) => Promise<void>;
+  /** Cierra la sesión activa conservando la cola/caché del dueño. */
+  pausar: () => Promise<void>;
   refrescarEstado: () => Promise<void>;
   sincronizarAhora: () => Promise<void>;
   reintentar: (sequence: number) => Promise<void>;
@@ -123,6 +126,21 @@ export const useSyncStore = create<SyncState>((set, get) => {
       });
     },
 
+    pausar: async () => {
+      // No se borra nada: la cola y la caché del dueño quedan en disco.
+      await offline.pausarSesion();
+      usuarioActual = null;
+      set({
+        pendientes: [],
+        conflictos: [],
+        pendingCount: 0,
+        lotesConPendientes: [],
+        eventosPendientes: {},
+        ultimoIntento: null,
+        error: null,
+      });
+    },
+
     refrescarEstado: async () => {
       if (!usuarioActual) return;
       const cola = await offline.listarCola(usuarioActual);
@@ -170,4 +188,9 @@ export const useSyncStore = create<SyncState>((set, get) => {
       await get().refrescarEstado();
     },
   };
+});
+
+// Al cerrar sesión se pausa el motor (no se borra la cola del dueño).
+registrarLimpiezaSesion(async () => {
+  await useSyncStore.getState().pausar();
 });

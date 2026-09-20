@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, apiRequest, configurarSesion } from './client';
+import { ApiError, SesionCambiadaError, apiRequest, configurarSesion } from './client';
 
 const ok = (cuerpo: unknown, status = 200) =>
   new Response(JSON.stringify(cuerpo), { status, headers: { 'Content-Type': 'application/json' } });
@@ -125,5 +125,22 @@ describe('apiRequest', () => {
     await expect(apiRequest('/v1/lotes', { token: null })).rejects.toThrow(
       'No se pudo contactar el servidor.'
     );
+  });
+
+  it('descarta la respuesta si la sesión cambió mientras estaba en vuelo', async () => {
+    let generacion = 1;
+    configurarSesion({
+      getAccessToken: () => 'token-viejo',
+      renovar: async () => 'token-nuevo',
+      cerrarSesion: async () => {},
+      getGeneracion: () => generacion,
+    });
+    const fetchMock = mockFetch();
+    fetchMock.mockImplementationOnce(async () => {
+      generacion = 2; // login/logout ocurrió durante la petición
+      return ok({ id: 'dato-viejo' });
+    });
+
+    await expect(apiRequest('/v1/lotes')).rejects.toBeInstanceOf(SesionCambiadaError);
   });
 });

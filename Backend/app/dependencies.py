@@ -669,8 +669,10 @@ def get_propina_service(
     )
 
 
-def get_finca_service(repo_finca: RepoFincaDep) -> FincaService:
-    return FincaService(repo_finca=repo_finca)
+def get_finca_service(repo_finca: RepoFincaDep, settings: SettingsDep) -> FincaService:
+    return FincaService(
+        repo_finca=repo_finca, pilot_cooperativa_id=settings.pilot_cooperativa_id
+    )
 
 
 def get_mercado_service(

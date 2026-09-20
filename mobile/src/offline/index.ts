@@ -153,6 +153,18 @@ export async function cerrarSesion(userId: string): Promise<void> {
   notificar();
 }
 
+/**
+ * Cierra la sesión activa **sin borrar** los datos del usuario: la caché y la
+ * cola quedan en disco (clave `user_id`) para cuando vuelva a entrar. Solo se
+ * corta cualquier flush en vuelo con una nueva época. Un usuario distinto no
+ * verá ni enviará estas operaciones porque el motor lista por `userId`.
+ */
+export async function pausarSesion(): Promise<void> {
+  contexto = { userId: '', epoch: contexto.epoch + 1 };
+  await obtenerAlmacen();
+  notificar();
+}
+
 export async function guardarOptimista(
   userId: string,
   recursos: RecursoOptimista[],

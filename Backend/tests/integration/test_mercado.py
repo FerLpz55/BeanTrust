@@ -65,23 +65,14 @@ def test_productor_y_cooperativa_tambien_leen(
         assert client.get(f"/v1/mercado/{lote['id']}", headers=header).status_code == 200
 
 
-def test_tercero_no_accede(client, header_productor, header_cooperativa, header_comprador):
+def test_tercero_no_accede(
+    client, header_productor, header_cooperativa, header_comprador, header_comprador2
+):
     """Un comprador que no compró el lote recibe 403 (tenancy ADR-10)."""
     comprador_id = _id_de(client, header_comprador)
     lote = crear_lote_vendido(client, header_productor, header_cooperativa, comprador_id)
 
-    r = client.post(
-        "/v1/auth/register",
-        json={
-            "email": "otro@beantrust.dev",
-            "password": "Otro1234!",
-            "nombre": "Otro Comprador",
-            "rol": "comprador",
-        },
-    )
-    assert r.status_code == 200, r.text
-    otro = {"Authorization": f"Bearer {r.json()['access_token']}"}
-    assert client.get(f"/v1/mercado/{lote['id']}", headers=otro).status_code == 403
+    assert client.get(f"/v1/mercado/{lote['id']}", headers=header_comprador2).status_code == 403
 
 
 def test_lote_sin_venta_devuelve_404(client, header_productor):

@@ -67,9 +67,8 @@ class AuthProvider(ABC):
     def verify(self, token: str) -> Claims: ...
 
     @abstractmethod
-    def register(
-        self, email: str, password: str, nombre: str, rol: Rol
-    ) -> TokenPair: ...
+    def register(self, email: str, password: str, nombre: str) -> TokenPair:
+        """Alta pública: el rol es siempre `productor` (sin privilegios)."""
 
     @abstractmethod
     def emitir_token_recuperacion(self, email: str) -> str | None:
@@ -140,19 +139,15 @@ class LocalAuthProvider(AuthProvider):
             raise CredencialesInvalidas("Credenciales inválidas.")
         return self._emitir_par(usuario)
 
-    def register(
-        self, email: str, password: str, nombre: str, rol: Rol
-    ) -> TokenPair:
+    def register(self, email: str, password: str, nombre: str) -> TokenPair:
         email_norm = email.strip().lower()
         if self._repo_usuarios.buscar_por_email(email_norm) is not None:
-            raise CredencialesInvalidas("Credenciales inválidas.")
-        if rol == Rol.ADMIN:
             raise CredencialesInvalidas("Credenciales inválidas.")
         hasher = self._password_service
         usuario = Usuario(
             id=uuid.uuid4(),
             email=email_norm,
-            rol=rol,
+            rol=Rol.PRODUCTOR,
             nombre=nombre.strip(),
             password_hash=hasher.hash(password),
         )
@@ -364,20 +359,19 @@ class SupabaseAuthProvider(AuthProvider):
             raise CredencialesInvalidas("Credenciales inválidas.") from exc
         return _par_desde_respuesta(respuesta)
 
-    def register(
-        self, email: str, password: str, nombre: str, rol: Rol
-    ) -> TokenPair:
+    def register(self, email: str, password: str, nombre: str) -> TokenPair:
         from supabase import create_client
 
-        if rol == Rol.ADMIN:
-            raise CredencialesInvalidas("Credenciales inválidas.")
         try:
             cliente = create_client(self._url, self._anon_key)
+            # No se envía `rol`: el trigger de Auth fuerza `productor` para toda
+            # alta pública (el rol privilegiado se asigna por procedimiento
+            # administrativo separado, nunca desde metadata del cliente).
             sesion = cliente.auth.sign_up(
                 {
                     "email": email.strip().lower(),
                     "password": password,
-                    "data": {"nombre": nombre.strip(), "rol": rol.value},
+                    "data": {"nombre": nombre.strip()},
                 }
             )
         except Exception as exc:

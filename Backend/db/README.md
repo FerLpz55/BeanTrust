@@ -17,7 +17,11 @@ db/
 │   ├── 007_evidencias_storage_cron.sql           # bucket privado + cron de purga
 │   ├── 008_integridad_evidencias.sql             # double precision + bitácora + RPC atómica de cosecha
 │   ├── 009_fix_rpc_replay.sql                    # idempotencia de la RPC por datos estables
-│   └── 010_integridad_rpc_reparacion.sql         # timestamp canónico del evento + RPC privada/wrapper
+│   ├── 010_integridad_rpc_reparacion.sql         # timestamp canónico del evento + RPC privada/wrapper
+│   ├── 011_blockchain_anchors.sql                # cola de anclaje + trigger de encolado + backfill
+│   ├── 012_blockchain_anchor_hardening.sql       # unicidad QR/lote, ENVIANDO, nonce, lease
+│   ├── 013_blockchain_worker_fencing.sql         # fencing del worker + formato tx_hash
+│   └── 014_registro_productor_y_finca.sql        # alta pública siempre productor + alta de finca con cooperativa del piloto
 └── seed/
     ├── seed.sql                  # usuarios/fincas de desarrollo (ids fijos)
     └── seed_supabase.sql         # seed de un proyecto Supabase real
@@ -73,7 +77,7 @@ Cada usuario ve/escribe solo lo suyo:
 
 | Rol        | Fincas                      | Lotes                       | Pagos                  |
 | ---------- | --------------------------- | --------------------------- | ---------------------- |
-| productor  | propias                     | de sus fincas               | de sus lotes (lectura) |
+| productor  | propias (lectura + alta inicial) | de sus fincas          | de sus lotes (lectura) |
 | cooperativa| propias + de productores    | de sus fincas               | propias (escritura)    |
 | comprador  | — (verificación pública)   | — (verificación pública)    | —                      |
 | admin      | todas                       | todos                       | todos                  |
@@ -83,6 +87,12 @@ tabla de evidencias no recibe grants y `storage.objects` queda con RLS habilitad
 y sin políticas para `anon`/`authenticated`, así que toda lectura devuelve 0
 filas y toda escritura falla. Solo el backend (`service_role`) sube, firma lectura
 y borra objetos.
+
+La migración **014** endurece el alta: toda alta en `auth.users` crea un
+`productor` (ignora el rol de la metadata), `finca_insert` exige el productor
+autenticado y la cooperativa del piloto (`app_private.bean_cooperativa_piloto()`),
+y un trigger `before update` impide cambiar `productor_id`/`cooperativa_id` de una
+finca existente (salvo admin).
 
 ## Evidencias: bucket privado, cron y secretos de Vault
 

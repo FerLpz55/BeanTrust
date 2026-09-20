@@ -18,20 +18,6 @@ def _login(client, email: str, password: str) -> tuple[dict, str]:
     return {"Authorization": f"Bearer {token}"}, me.json()["id"]
 
 
-def _registrar_comprador2(client) -> dict:
-    r = client.post(
-        "/v1/auth/register",
-        json={
-            "email": "comprador2@beantrust.dev",
-            "password": "Comp123!",
-            "nombre": "Comprador Dos",
-            "rol": "comprador",
-        },
-    )
-    assert r.status_code == 200, r.text
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
-
-
 def test_propina_happy_path(client, header_productor, header_cooperativa, header_admin):
     """El comprador de la venta puede dar propina (201, idempotente) y los dueños leerla."""
     comprador, comprador_id = _login(client, "comprador@beantrust.dev", "Comp123!")
@@ -61,10 +47,12 @@ def test_propina_happy_path(client, header_productor, header_cooperativa, header
         assert [p["id"] for p in lista.json()] == [propina["id"]]
 
 
-def test_propina_solo_comprador_de_la_venta(client, header_productor, header_cooperativa):
+def test_propina_solo_comprador_de_la_venta(
+    client, header_productor, header_cooperativa, header_comprador2
+):
     """Un comprador ajeno no puede dar propina ni leer propinas del lote."""
     comprador_id = _login(client, "comprador@beantrust.dev", "Comp123!")[1]
-    comprador2 = _registrar_comprador2(client)
+    comprador2 = header_comprador2
     lote = crear_lote_vendido(client, header_productor, header_cooperativa, comprador_id)
 
     r = client.post(

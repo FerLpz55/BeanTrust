@@ -46,7 +46,6 @@ export default function AjustesScreen() {
   const logout = useAuthStore((s) => s.logout);
   const email = useAuthStore((s) => s.email);
   const rol = useAuthStore((s) => s.rol);
-  const usuarioId = useAuthStore((s) => s.usuarioId);
   const {
     isOnline,
     sincronizando,
@@ -57,7 +56,6 @@ export default function AjustesScreen() {
     sincronizarAhora,
     reintentar,
     descartar,
-    limpiar,
   } = useSyncStore();
   const fincas = usePerfilStore((s) => s.fincas);
   const cargarFincas = usePerfilStore((s) => s.cargarFincas);
@@ -96,29 +94,25 @@ export default function AjustesScreen() {
   const surfaceContainerHigh = useThemeColor('surfaceContainerHigh');
 
   const cerrarSesion = useCallback(async () => {
-    // Al salir se borran caché y cola del usuario: otro usuario no debe verlas.
-    if (usuarioId) await limpiar(usuarioId);
+    // `logout` limpia el estado visible y pausa el motor offline. La cola y la
+    // caché del usuario quedan en disco para cuando vuelva a entrar.
     await logout();
     router.replace('/login');
-  }, [logout, limpiar, usuarioId]);
+  }, [logout]);
 
   const operacionesPendientes = pendientes.length + conflictos.length;
 
   const handleLogout = useCallback(async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     if (operacionesPendientes > 0) {
-      // Nunca se descarta trabajo offline en silencio: se avisa cuánto se pierde.
+      // Nunca se descarta trabajo offline en silencio: se avisa que queda guardado.
       Alert.alert(
         'Operaciones sin sincronizar',
-        `Tienes ${operacionesPendientes} operación(es) pendiente(s). Si cierras sesión ahora se perderán.`,
+        `Tienes ${operacionesPendientes} operación(es) pendiente(s). Quedarán guardadas en este teléfono y se enviarán cuando vuelvas a entrar con esta cuenta.`,
         [
           { text: 'Cancelar', style: 'cancel' },
           { text: 'Sincronizar ahora', onPress: () => void sincronizarAhora() },
-          {
-            text: `Salir y perder ${operacionesPendientes}`,
-            style: 'destructive',
-            onPress: () => void cerrarSesion(),
-          },
+          { text: 'Salir', style: 'destructive', onPress: () => void cerrarSesion() },
         ],
       );
       return;

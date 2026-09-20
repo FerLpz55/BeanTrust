@@ -129,6 +129,12 @@ class EventoDuplicado(ErrorDeDominio):
     status_code = 409
 
 
+class FincaDuplicada(ErrorDeDominio):
+    """El `id` de finca ya existe (reintento con datos distintos o carrera)."""
+
+    status_code = 409
+
+
 class CertificadoNoEncontrado(ErrorDeDominio):
     status_code = 404
 

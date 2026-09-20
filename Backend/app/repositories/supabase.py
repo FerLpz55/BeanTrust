@@ -28,6 +28,7 @@ from app.models.dominio import (
     EvidenciaYaAdjunta,
     FencingPerdido,
     Finca,
+    FincaDuplicada,
     Lote,
     LoteEvento,
     NoAutorizado,
@@ -842,6 +843,30 @@ class SupabaseFincaRepo:
         except APIError as exc:
             raise RepoError("No se pudieron consultar las fincas.") from exc
         return [fila_a_finca(fila) for fila in (resp.data or [])]
+
+    def guardar(self, finca: Finca) -> Finca:
+        fila = {
+            "id": str(finca.id),
+            "productor_id": str(finca.productor_id),
+            "cooperativa_id": str(finca.cooperativa_id),
+            "nombre": finca.nombre,
+            "municipio": finca.municipio,
+            "organica": finca.organica,
+            "altitud_min": finca.altitud_min,
+            "altitud_max": finca.altitud_max,
+        }
+        try:
+            resp = self._cliente.table("finca").insert(fila).execute()
+        except APIError as exc:
+            # Si la fila ya existe (PK repetida por una carrera) se trata como
+            # duplicado; cualquier otro fallo (RLS, red) es error de repositorio.
+            if self.buscar_por_id(finca.id) is not None:
+                raise FincaDuplicada("La finca ya existe.") from exc
+            raise RepoError("No se pudo crear la finca.") from exc
+        datos = resp.data or []
+        if not datos:
+            raise RepoError("No se pudo crear la finca.")
+        return fila_a_finca(datos[0])
 
 
 class SupabaseUsuarioRepo:

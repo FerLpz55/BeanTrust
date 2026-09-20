@@ -29,6 +29,7 @@ from app.models.dominio import (
     EvidenciaYaAdjunta,
     FencingPerdido,
     Finca,
+    FincaDuplicada,
     Lote,
     LoteEvento,
     NoAutorizado,
@@ -276,6 +277,12 @@ class InMemoryFincaRepo:
 
     def listar_todas(self) -> list[Finca]:
         return list(self._memoria.fincas.values())
+
+    def guardar(self, finca: Finca) -> Finca:
+        if finca.id in self._memoria.fincas:
+            raise FincaDuplicada("La finca ya existe.")
+        self._memoria.fincas[finca.id] = finca
+        return finca
 
 
 class InMemoryUsuarioRepo:
