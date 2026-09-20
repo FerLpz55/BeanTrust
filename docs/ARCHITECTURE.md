@@ -1066,22 +1066,22 @@ sequenceDiagram
 
 ## 9. Blockchain: anclaje del Pasaporte y pagos (Solidity / EVM)
 
-> **Estado v1 MVP (2026-09-17)**: el **anclaje on-chain del Pasaporte (ADR-11)
-> está implementado y desplegado en Base Sepolia**. Contrato `CoffeeTraceability`
-> en `0x083475298d32724d85E17Dd48f9a9Bd2550035C9` (deploy tx
+> **Estado v1 MVP (2026-09-20)**: el **anclaje on-chain del Pasaporte (ADR-11)
+> está implementado, desplegado y activo en Base Sepolia**. Contrato
+> `CoffeeTraceability` en `0x083475298d32724d85E17Dd48f9a9Bd2550035C9` (deploy tx
 > `0xd6f1990f6e25f7a493a38e246b2684b6dd0f5e633c1a03bf52f0c7af3d3d8110`, bloque
 > `46926492`, runtime `0x07746f4c…def3d8`); la cola `blockchain_anclas`
-> (migraciones 011/012/**013**, la 013 pendiente de `supabase db push`) y el
-> worker de reconciliación (`GET /v1/blockchain/reconciliar`, disparado por
-> Vercel Cron) la confirman. El gateway se endureció: normalización de hashes con
+> (migraciones 011/012/**013** aplicadas) y el worker de reconciliación (`GET
+> /v1/blockchain/reconciliar`, disparado por Vercel Cron) la confirman. El gateway se endureció: normalización de hashes con
 > `Web3.to_hex`, preflight de contrato no pausado/dirección derivada/roles de
 > privilegio mínimo, private key como `SecretStr`, política EIP-1559 con techos,
 > separación `preparar_ancla`/`transmitir_ancla` (el `tx_hash` se persiste antes
 > del broadcast) y fencing real en `bean_reclamar_ancla` (013). `GET
-> /v1/verificar/{codigo}` expone `anclaje_onchain` cuando
-> `BEAN_WEB3_MODE=anchor`; hoy Production queda en `disabled` y la wallet
-> caliente **no** está cargada (sin anclas reales todavía; ver
-> `docs/guia-blockchain-testnet.md`). **El flujo de pagos
+> /v1/verificar/{codigo}` expone `anclaje_onchain`; **Production corre con
+> `BEAN_WEB3_MODE=anchor`**, la wallet caliente activa
+> `0x44bA43a9CB64E75B3fb7fAcCf271052f4E6b347B` cargada (la anterior
+> `0x42cC953B…d656` queda obsoleta) y la cola drenada en **9 anclas
+> `CONFIRMADA`** (ver `docs/guia-blockchain-testnet.md`). **El flujo de pagos
 > `CoffeePayments.sol` sigue en pausa** (B7: falta la wallet del productor): el
 > MVP ejecuta `FakeGatewayPagos` (tx determinista `0x<pago.id>` y confirmación
 > simulada) que ya implementa el patrón 3%/97% y el poller
@@ -1171,7 +1171,9 @@ Responsabilidad exclusiva: el pago y la inmutabilidad de la transacción (*únic
 - **Desplegado el 2026-09-16**: `0x083475298d32724d85E17Dd48f9a9Bd2550035C9`
   (bloque `46926492`, runtime `0x07746f4c…def3d8`). Roles verificados:
   `DEFAULT_ADMIN_ROLE` + `PAUSER_ROLE` en `0x032c4f61…c532` y `ANCHOR_ROLE` en la
-  wallet caliente `0x42cC953B…d656` (sin privilegios cruzados, `paused=false`).
+  wallet caliente activa `0x44bA43a9CB64E75B3fb7fAcCf271052f4E6b347B` (sin
+  privilegios cruzados, `paused=false`). La wallet caliente anterior
+  `0x42cC953B…d656` queda **obsoleta** y no se reutiliza.
 - Verificación del contrato en BaseScan y comprobación post-deploy de cadena,
   bytecode y roles (ver `contracts/README.md` y `docs/guia-blockchain-testnet.md`).
 

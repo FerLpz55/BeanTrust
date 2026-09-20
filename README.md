@@ -15,9 +15,10 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
 * `docs/`: Documentación técnica (la arquitectura es la fuente de verdad del diseño).
 * `.opencode/`: Configuración de agentes; `AGENTS.md` guarda la memoria persistente del proyecto y las reglas de alineación docs↔código.
 
-> **Nota:** `contracts/` (Solidity) y `db/` en la raíz **no existen todavía**: el
-> web3 está en pausa (diseño en `docs/06-contratos.md`, simulado por un gateway
-> fake) y la BD vive en `Backend/db/`. La estructura real está descrita en
+> **Nota:** `contracts/` (Foundry, Solidity) contiene `CoffeeTraceability.sol`,
+> desplegado y activo en Base Sepolia (anclaje del Pasaporte, ADR-11); los pagos y
+> propinas siguen simulados (`FakeGatewayPagos`). `db/` en la raíz no existe: la
+> BD vive en `Backend/db/`. La estructura real está descrita en
 > `docs/ARCHITECTURE.md` §3.
 
 ## Documentación
@@ -29,7 +30,7 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
 * **Backend:** Python ≥3.12 (FastAPI, Pydantic)
 * **Base de Datos:** Supabase / PostgreSQL
 * **Frontend:** React Native / Expo Router
-* **Blockchain:** Polygon — **en pausa** (B7); hoy el pago/propina es simulado por un gateway fake
+* **Blockchain:** Base Sepolia (anclaje on-chain real del Pasaporte con `CoffeeTraceability`); pagos y propinas **simulados** por un gateway fake
 * **Entorno de Despliegue:** Vercel (API) + Supabase (BD/Auth)
 
 ## Características del Sistema
@@ -53,7 +54,10 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
 - **Rendimiento:** listas largas virtualizadas con FlashList.
 - **Seguridad (B11 avanza):** RLS efectiva por usuario (JWT por request), rate
   limit compartido en Postgres y refresh rotativo en el proveedor local.
-- **Simulado:** pagos y propinas usan un gateway fake; no hay blockchain (web3 en
-  pausa, B7). No se mueve dinero real.
-- **Pendiente:** smoke de producción/EAS y wallet `public_address` (con web3).
+- **Blockchain (ADR-11):** anclaje real del Pasaporte en Base Sepolia
+  (`CoffeeTraceability`, producción con `BEAN_WEB3_MODE=anchor` y 9 anclas
+  `CONFIRMADA`); los **pagos y propinas siguen simulados** con un gateway fake y
+  no se mueve dinero real.
+- **Pendiente:** verificación del contrato en BaseScan y wallet `public_address`
+  del productor (pagos on-chain, fase posterior).
 - Verificación operativa del flujo: `Backend/scripts/smoke_production.py`.

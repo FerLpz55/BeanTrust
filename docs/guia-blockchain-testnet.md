@@ -1,6 +1,6 @@
 # Guía blockchain de BeanTrust (Base Sepolia)
 
-Fecha de referencia: 2026-09-16.
+Fecha de referencia: 2026-09-20.
 
 Esta guía activa el **anclaje on-chain del Pasaporte de Café** (ADR-11) sin
 gastar dinero. El objetivo es probar en una red de prueba que el contrato
@@ -10,21 +10,23 @@ eventos auditables y conectarse al backend FastAPI sin romper el MVP.
 `CoffeePayments` (pagos 97/3 y propinas on-chain) **no** forma parte de este
 frente: sigue en pausa y el MVP corre con `FakeGatewayPagos`.
 
-## Estado real (2026-09-16)
+## Estado real (2026-09-20)
 
 - `CoffeeTraceability` **desplegado** en Base Sepolia:
   `0x083475298d32724d85E17Dd48f9a9Bd2550035C9` (deploy tx
   `0xd6f1990f6e25f7a493a38e246b2684b6dd0f5e633c1a03bf52f0c7af3d3d8110`, bloque
   `46926492`, runtime `0x07746f4c…def3d8`). El contrato no recibió ETH.
 - Roles verificados on-chain: `DEFAULT_ADMIN_ROLE` + `PAUSER_ROLE` en
-  `0x032c4f61…c532`; `ANCHOR_ROLE` en la wallet caliente `0x42cC953B…d656`
-  (sin privilegios cruzados, `paused=false`).
-- Migraciones `011` y `012` **aplicadas** en el proyecto Supabase
-  (`yvczofwzfljuubxnmakj`); el backfill creó **9 anclas `PENDIENTE`**.
-- Backend en `BEAN_WEB3_MODE=disabled`: no se firma nada. La private key de la
-  wallet caliente **no** está cargada en Vercel.
-- Pendiente: verificación del código fuente en BaseScan y smoke real end-to-end
-  (cargar la wallet caliente, pasar a `anchor` y anclar un lote canario).
+  `0x032c4f61…c532`; `ANCHOR_ROLE` en la wallet caliente activa
+  `0x44bA43a9CB64E75B3fb7fAcCf271052f4E6b347B` (sin privilegios cruzados,
+  `paused=false`). La wallet caliente anterior `0x42cC953B…d656` queda
+  **obsoleta** y no se reutiliza.
+- Migraciones `011`, `012` y `013` **aplicadas** en el proyecto Supabase
+  (`yvczofwzfljuubxnmakj`); la cola quedó drenada en **9 anclas `CONFIRMADA`**
+  (0 `PENDIENTE`/`ENVIANDO`/`ENVIADA`/`FALLIDA`).
+- Backend en producción con `BEAN_WEB3_MODE=anchor` y la private key de la wallet
+  caliente activa cargada en Vercel; `/health` responde `200`.
+- Pendiente: verificación del código fuente en BaseScan.
 
 ## Red elegida y por qué
 
@@ -170,8 +172,8 @@ duplicados, sin borrar trazabilidad), las columnas de hardening, el estado
 `bean_reclamar_ancla`). La **013** exige el lease vigente en `bean_reclamar_ancla`
 (`p_lock_nombre`, `p_lock_token`, `p_lease_segundos`), añade el formato
 `tx_hash ~ '^0x[0-9a-f]{64}$'` y consolida el índice de cola; **no toca las filas
-existentes**. Antes de mutar Supabase: `supabase db push --linked --dry-run`
-debe mostrar solo la 013.
+existentes**. Las tres migraciones (`011`, `012` y `013`) ya están aplicadas:
+`supabase db push --linked --dry-run` no debe proponer nada.
 
 El worker se dispara por Vercel Cron contra el endpoint protegido (Vercel envía
 `Authorization: Bearer $CRON_SECRET`):
@@ -202,6 +204,8 @@ puede reintentar (solo causas reintentables) con
 1. **Verifica el contrato ya desplegado** (no redesplegar):
 
    ```bash
+   # Tercer argumento = ANCHOR_ROLE original del deploy (hoy obsoleta; el rol se
+   # rotó a la wallet caliente activa 0x44bA43a9…347B). No reutilizar esa wallet.
    CONSTRUCTOR_ARGS=$(cast abi-encode "constructor(address,address,address)" \
      0x032c4f6186c394e2eC3671Fe786047C957Edc532 \
      0x032c4f6186c394e2eC3671Fe786047C957Edc532 \
@@ -219,8 +223,8 @@ puede reintentar (solo causas reintentables) con
    `Backend/scripts/smoke_production.py` y confirma `/health`, QR público y cron
    `200` no-op.
 4. **Carga la wallet caliente** en Vercel Production (solo la private key de
-   `0x42cC…d656` y `CRON_SECRET`; nunca la admin `0x032c…c532`) y pon
-   `BEAN_WEB3_MODE=anchor`, `BEAN_WEB3_ANCHOR_ADDRESS=0x42cC…d656`,
+   `0x44bA43a9…347B` y `CRON_SECRET`; nunca la admin `0x032c…c532`) y pon
+   `BEAN_WEB3_MODE=anchor`, `BEAN_WEB3_ANCHOR_ADDRESS=0x44bA43a9…347B`,
    `BEAN_WEB3_MAX_BATCH_SIZE=1`. Redespliega.
 5. **Canario**: confirma por RPC el saldo mínimo (`BEAN_WEB3_MIN_BALANCE_WEI`),
    dispara **una** llamada autorizada al cron, comprueba que se procesó una fila
@@ -244,9 +248,9 @@ Variables nuevas: `BEAN_WEB3_ANCHOR_ADDRESS`, `BEAN_WEB3_MAX_PRIORITY_FEE_GWEI`,
 2. **Cuentas** ✅: wallet admin importada al keystore y wallet caliente creada.
 3. **Deploy** ✅: `CoffeeTraceability` desplegado y roles verificados on-chain.
    Falta publicar el código en BaseScan (requiere `BASESCAN_API_KEY`).
-4. **Activación** (en curso): migraciones `011/012` aplicadas y Vercel con la
-   identidad pública del contrato en `disabled`. Falta cargar la private key de
-   la wallet caliente y pasar a `BEAN_WEB3_MODE=anchor`.
+4. **Activación** ✅: migraciones `011/012/013` aplicadas, Vercel con la
+   identidad pública del contrato, la wallet caliente activa cargada y
+   `BEAN_WEB3_MODE=anchor`; la cola quedó drenada en 9 anclas `CONFIRMADA`.
 
 ## Rollback
 

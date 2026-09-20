@@ -33,12 +33,14 @@ Contrato de **única responsabilidad**: dejar constancia inmutable de
 `0xd6f1990f6e25f7a493a38e246b2684b6dd0f5e633c1a03bf52f0c7af3d3d8110` · bloque
 `46926492` · runtime `0x07746f4c5c883f10bc2904690dd2a4969f1945f91e5be55689a5676e01def3d8`.
 `DEFAULT_ADMIN_ROLE`/`PAUSER_ROLE` en `0x032c4f61…c532` y `ANCHOR_ROLE` en la
-wallet caliente `0x42cC953B…d656` (sin privilegios cruzados). El backend queda
-en `BEAN_WEB3_MODE=disabled`; **la wallet caliente aún no está cargada y no hay
-anclas reales**. El gateway endurecido exige ese privilegio mínimo en el
-preflight, normaliza hashes con `Web3.to_hex` y persiste `ENVIANDO + tx_hash`
-antes del broadcast. La migración **013** (fencing del worker) está lista,
-pendiente de `supabase db push --linked`.
+wallet caliente activa `0x44bA43a9CB64E75B3fb7fAcCf271052f4E6b347B` (sin
+privilegios cruzados). La wallet caliente anterior `0x42cC953B…d656` queda
+**obsoleta** y no se reutiliza. **Producción opera con `BEAN_WEB3_MODE=anchor`**
+y la wallet caliente cargada: la cola quedó drenada en **9 anclas `CONFIRMADA`**
+(0 `PENDIENTE`/`ENVIANDO`/`ENVIADA`/`FALLIDA`). El gateway endurecido exige ese
+privilegio mínimo en el preflight, normaliza hashes con `Web3.to_hex` y persiste
+`ENVIANDO + tx_hash` antes del broadcast. La migración **013** (fencing del
+worker) está **aplicada**.
 
 > **Pagos y propinas siguen simulados** (`FakeGatewayPagos`): no hay
 > transferencias reales ni custodia de dinero. Lo único real on-chain es el
@@ -181,7 +183,7 @@ El anclaje de hitos intermedios por etapa queda como extensión opcional futura.
 | `CoffeeTraceability.sol` (anclaje ADR-11) | ✅ implementado y desplegado | `contracts/src/CoffeeTraceability.sol` |
 | `blockchain_anclas` + trigger + backfill | ✅ aplicado (011) | `Backend/db/migrations/011_blockchain_anchors.sql` |
 | Hardening (unicidad QR/lote, `ENVIANDO`, nonce, fencing) | ✅ aplicado (012) | `Backend/db/migrations/012_blockchain_anchor_hardening.sql` |
-| Fencing real del worker (lease vigente al reclamar, formato `tx_hash`) | 🟡 lista (013, pendiente `db push`) | `Backend/db/migrations/013_blockchain_worker_fencing.sql` |
+| Fencing real del worker (lease vigente al reclamar, formato `tx_hash`) | ✅ aplicado (013) | `Backend/db/migrations/013_blockchain_worker_fencing.sql` |
 | `GatewayTrazabilidad` + worker (preflight de roles/pausa/dirección, `Web3.to_hex`, techos EIP-1559, `preparar_ancla`→`ENVIANDO+tx_hash`→`transmitir_ancla`, tx+recibo+evento+2 confirmaciones, recuperación por hash y logs) | ✅ listo | `Backend/app/services/trazabilidad_service.py`, `Backend/app/repositories/web3_trazabilidad.py` |
 | `CoffeePayments.sol` | ⏸️ pausado | `contracts/` (fase posterior) |
 | Poller de confirmación de pagos | ⏸️ pausado | servicio futuro (listener `PaymentPaid`) |

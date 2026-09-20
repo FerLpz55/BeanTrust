@@ -15,9 +15,10 @@ This repository centralizes the components of the Bean Trust ecosystem:
 * `/docs`: Technical documentation (the architecture is the source of truth for the design).
 * `.opencode/`: Agent configuration; `AGENTS.md` holds the project's persistent memory and docs↔code alignment rules.
 
-> **Note:** `contracts/` (Solidity) and a root `db/` **do not exist yet**: web3 is
-> paused (design in `docs/06-contratos.md`, simulated by a fake gateway) and the
-> DB lives in `Backend/db/`. The real structure is described in
+> **Note:** `contracts/` (Foundry, Solidity) contains `CoffeeTraceability.sol`,
+> deployed and active on Base Sepolia (Coffee Passport anchoring, ADR-11);
+> payments and tips remain simulated (`FakeGatewayPagos`). There is no root `db/`:
+> the DB lives in `Backend/db/`. The real structure is described in
 > `docs/ARCHITECTURE.en.md` §3.
 
 ## Documentation
@@ -29,7 +30,7 @@ This repository centralizes the components of the Bean Trust ecosystem:
 * **Backend:** Python ≥3.12 (FastAPI, Pydantic)
 * **Database:** Supabase / PostgreSQL
 * **Frontend:** React Native / Expo Router
-* **Blockchain:** Polygon — **paused** (B7); payments/tips are simulated by a fake gateway today
+* **Blockchain:** Base Sepolia (real on-chain Coffee Passport anchoring with `CoffeeTraceability`); payments/tips are **simulated** by a fake gateway
 * **Deployment environment:** Vercel (API) + Supabase (DB/Auth)
 
 ## System Features
@@ -53,7 +54,10 @@ This repository centralizes the components of the Bean Trust ecosystem:
 - **Performance:** long lists virtualized with FlashList.
 - **Security (B11 advances):** per-user effective RLS (JWT per request), shared
   rate limit in Postgres, and rotating refresh in the local provider.
-- **Simulated:** payments and tips use a fake gateway; there is no blockchain (web3
-  paused, B7). No real money moves.
-- **Pending:** production/EAS smoke test and the `public_address` wallet (with web3).
+- **Blockchain (ADR-11):** real Coffee Passport anchoring on Base Sepolia
+  (`CoffeeTraceability`, production running `BEAN_WEB3_MODE=anchor` with 9
+  `CONFIRMADA` anchors); **payments and tips remain simulated** with a fake
+  gateway and no real money moves.
+- **Pending:** BaseScan contract verification and the producer's `public_address`
+  wallet (on-chain payments, later phase).
 - Operational flow verification: `Backend/scripts/smoke_production.py`.

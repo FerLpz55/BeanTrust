@@ -1,5 +1,10 @@
 # Reporte · Anclaje blockchain del Pasaporte (Fase A)
 
+> **Estado vigente (2026-09-20):** el bloque **«Cierre Production · 2026-09-20»**
+> al final de este documento describe el estado actual y **prevalece sobre
+> cualquier sección anterior**. Las secciones previas se conservan como historial
+> del despliegue y de la puesta en marcha.
+
 Fecha: 2026-09-16 · Estado: **contrato desplegado en Base Sepolia; backend preparado en `disabled`** (checkpoint seguro: sin wallet caliente cargada y sin anclas reales)
 
 Este reporte resume el trabajo de la base de anclaje del Pasaporte de Café
