@@ -27,3 +27,8 @@ enable_confirmations = false
 # rechaza cualquier petición sin ese secreto.
 [functions.purge-staged-evidence]
 verify_jwt = false
+
+# Vector buckets deshabilitados (requieren plan de pago y no se usan). Se declara
+# para que `config push` no intente habilitarlos y falle con 402.
+[storage.vector]
+enabled = false
