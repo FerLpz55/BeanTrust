@@ -22,7 +22,14 @@ from app.schemas.auth import CurrentUser
 
 class PropinaService:
     def __init__(
-        self, repo_propina, repo_lote, repo_finca, repo_usuario, repo_pago, gateway
+        self,
+        repo_propina,
+        repo_lote,
+        repo_finca,
+        repo_usuario,
+        repo_pago,
+        gateway,
+        repo_propina_sistema=None,
     ) -> None:
         self._repo_propina = repo_propina
         self._repo_lote = repo_lote
@@ -30,6 +37,10 @@ class PropinaService:
         self._repo_usuario = repo_usuario
         self._repo_pago = repo_pago
         self._gateway = gateway
+        # La confirmación simula el poller on-chain: es una tarea de sistema, no
+        # del comprador (que no tiene UPDATE sobre `propina`), así que usa el
+        # cliente de servicio. En memoria coincide con el repo normal.
+        self._repo_propina_sistema = repo_propina_sistema or repo_propina
 
     def _autorizar_propina(self, usuario: CurrentUser, lote) -> None:
         """Solo el comprador (o admin) puede dar propina en un lote vendido."""
@@ -128,7 +139,7 @@ class PropinaService:
 
     def confirmar_propina(self, lote_id: uuid.UUID) -> Propina:
         """Simula el poller de confirmación (REGISTRADA -> CONFIRMADA)."""
-        propinas = self._repo_propina.buscar_por_lote(lote_id)
+        propinas = self._repo_propina_sistema.buscar_por_lote(lote_id)
         if not propinas:
             raise LoteNoEncontrado("No existe una propina para este lote.")
         propina = propinas[0]  # Tomar la primera (más reciente)
@@ -143,7 +154,7 @@ class PropinaService:
         )
         if propina.estado_propina is EstadoPropina.CONFIRMADA:
             propina.confirmar()
-        self._repo_propina.guardar_propina(propina)
+        self._repo_propina_sistema.guardar_propina(propina)
         return propina
 
     def obtener_saldo_productor(self, usuario: CurrentUser) -> dict:

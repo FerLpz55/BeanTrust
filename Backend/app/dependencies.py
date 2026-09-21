@@ -658,6 +658,7 @@ def get_propina_service(
     repo_usuario: RepoUsuarioAutenticadoDep,
     repo_pago: RepoPagoDep,
     gateway: Annotated[GatewayPagos, Depends(get_gateway_pagos)],
+    repo_propina_sistema: Annotated[RepositorioPropina, Depends(get_repo_propina)],
 ) -> PropinaService:
     return PropinaService(
         repo_propina=repo_propina,
@@ -666,6 +667,8 @@ def get_propina_service(
         repo_usuario=repo_usuario,
         repo_pago=repo_pago,
         gateway=gateway,
+        # Confirmación del poller (tarea de sistema): cliente de servicio.
+        repo_propina_sistema=repo_propina_sistema,
     )
 
 
