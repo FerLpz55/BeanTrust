@@ -21,7 +21,8 @@ db/
 │   ├── 011_blockchain_anchors.sql                # cola de anclaje + trigger de encolado + backfill
 │   ├── 012_blockchain_anchor_hardening.sql       # unicidad QR/lote, ENVIANDO, nonce, lease
 │   ├── 013_blockchain_worker_fencing.sql         # fencing del worker + formato tx_hash
-│   └── 014_registro_productor_y_finca.sql        # alta pública siempre productor + alta de finca con cooperativa del piloto
+│   ├── 014_registro_productor_y_finca.sql        # alta pública siempre productor + alta de finca con cooperativa del piloto
+│   └── 015_comercio_justo_comprador.sql          # el comprador lee solo el lote que compró y su finca (panel/propina)
 └── seed/
     ├── seed.sql                  # usuarios/fincas de desarrollo (ids fijos)
     └── seed_supabase.sql         # seed de un proyecto Supabase real
@@ -79,7 +80,7 @@ Cada usuario ve/escribe solo lo suyo:
 | ---------- | --------------------------- | --------------------------- | ---------------------- |
 | productor  | propias (lectura + alta inicial) | de sus fincas          | de sus lotes (lectura) |
 | cooperativa| propias + de productores    | de sus fincas               | propias (escritura)    |
-| comprador  | — (verificación pública)   | — (verificación pública)    | —                      |
+| comprador  | de fincas de lotes comprados (lectura) | de lotes comprados (lectura) | propios (lectura)      |
 | admin      | todas                       | todos                       | todos                  |
 
 `public.evidencias` y `storage.objects` **no tienen acceso de usuarios**: la
@@ -93,6 +94,12 @@ La migración **014** endurece el alta: toda alta en `auth.users` crea un
 autenticado y la cooperativa del piloto (`app_private.bean_cooperativa_piloto()`),
 y un trigger `before update` impide cambiar `productor_id`/`cooperativa_id` de una
 finca existente (salvo admin).
+
+La migración **015** da al **comprador** lectura de solo el lote que compró y su
+finca (panel de comercio justo y propina), que en producción fallaba con 404 por
+la RLS. Usa `app_private.bean_comprador_de_lote`/`bean_comprador_de_finca`
+(`security definer`, `search_path` fijo) para evitar la recursión de políticas
+`lotes` ↔ `pago`. No amplía escritura: la propina se inserta en `propina`.
 
 ## Evidencias: bucket privado, cron y secretos de Vault
 

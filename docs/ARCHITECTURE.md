@@ -1312,8 +1312,8 @@ sequenceDiagram
 |---|---|---|---|---|
 | `usuarios` | propia (lectura) | propia (lectura) | propia (lectura) | todo |
 | `cooperativa` | — | — | — | lectura |
-| `finca` | propias (lectura + alta inicial) | propias + de sus productores (lectura) | — | todo |
-| `lotes` | de sus fincas | de sus fincas | — (solo `/verificar`) | todo |
+| `finca` | propias (lectura + alta inicial) | propias + de sus productores (lectura) | de las fincas de lotes que compró (lectura) | todo |
+| `lotes` | de sus fincas | de sus fincas | de los lotes que compró (lectura, comercio justo) | todo |
 | `lote_eventos` | de sus lotes (append-only) | de sus lotes (append-only) | — | todo |
 | `qr_certificado` | de sus lotes | de sus lotes | — | todo |
 | `pago` | de sus lotes (lectura) | propias (escritura) | lectura (comercio justo del lote) | todo |
@@ -1325,7 +1325,7 @@ sequenceDiagram
 
 **Aislamiento de tenant:** toda política RLS se resuelve **siempre** desde `auth.uid()` → `USUARIOS.id` del JWT (nunca desde un ID enviado por el cliente), mediante `app_private.bean_rol()` (security definer). La política de `PROPINA` es **propia** de su tabla: insertar solo si el JWT corresponde a `comprador_id`, y leer solo si el usuario es `comprador_id`, `productor_id`, cooperativa del lote o admin.
 
-La matriz está implementada en `Backend/db/migrations/002_rls.sql` y **recreada** por `006_hardening_storage_rls_rate_limit.sql` (que además mueve el helper a `app_private`, ajusta los grants y protege `storage.objects`); la `014_registro_productor_y_finca.sql` endurece el alta pública (siempre `productor`), restringe `finca_insert` a la cooperativa del piloto y bloquea por trigger el cambio de `productor_id`/`cooperativa_id`; es la misma regla que replica la capa de servicio en FastAPI (doble control, §12).
+La matriz está implementada en `Backend/db/migrations/002_rls.sql` y **recreada** por `006_hardening_storage_rls_rate_limit.sql` (que además mueve el helper a `app_private`, ajusta los grants y protege `storage.objects`); la `014_registro_productor_y_finca.sql` endurece el alta pública (siempre `productor`), restringe `finca_insert` a la cooperativa del piloto y bloquea por trigger el cambio de `productor_id`/`cooperativa_id`; la `015_comercio_justo_comprador.sql` da al comprador lectura de **solo** el lote que compró y su finca (panel de comercio justo y propina), con funciones `security definer` para evitar recursión; es la misma regla que replica la capa de servicio en FastAPI (doble control, §12).
 
 ---
 

@@ -1118,8 +1118,8 @@ Roles are modeled in the **`USERS.role`** table (`producer | cooperative | buyer
 |---|---|---|---|---|
 | `usuarios` | own (read) | own (read) | own (read) | all |
 | `cooperativa` | — | — | — | read |
-| `finca` | own (read + initial create) | own + their producers' (read) | — | all |
-| `lotes` | their farms' | their farms' | — (only `/verificar`) | all |
+| `finca` | own (read + initial create) | own + their producers' (read) | farms of lots they bought (read) | all |
+| `lotes` | their farms' | their farms' | lots they bought (read, fair trade) | all |
 | `lote_eventos` | their lots' (append-only) | their lots' (append-only) | — | all |
 | `qr_certificado` | their lots' | their lots' | — | all |
 | `pago` | their lots' (read) | own (write) | read (lot's fair trade) | all |
@@ -1130,7 +1130,7 @@ Roles are modeled in the **`USERS.role`** table (`producer | cooperative | buyer
 
 **Tenant isolation:** every RLS policy is resolved **always** from `auth.uid()` → `USERS.id` of the JWT (never from a client-supplied ID), through `app_private.bean_rol()` (security definer). The `PROPINA` policy is **its own**: insert only if the JWT matches `comprador_id`, and read only if the user is `comprador_id`, `productor_id`, the lot's cooperative, or admin.
 
-The matrix is implemented in `Backend/db/migrations/002_rls.sql` and **recreated** by `006_hardening_storage_rls_rate_limit.sql` (which also moves the helper to `app_private`, adjusts grants and protects `storage.objects`); `014_registro_productor_y_finca.sql` hardens public sign-up (always `productor`), restricts `finca_insert` to the pilot cooperative, and blocks changes to `productor_id`/`cooperativa_id` via trigger; it is the same rule the service layer replicates in FastAPI (double control, §12).
+The matrix is implemented in `Backend/db/migrations/002_rls.sql` and **recreated** by `006_hardening_storage_rls_rate_limit.sql` (which also moves the helper to `app_private`, adjusts grants and protects `storage.objects`); `014_registro_productor_y_finca.sql` hardens public sign-up (always `productor`), restricts `finca_insert` to the pilot cooperative, and blocks changes to `productor_id`/`cooperativa_id` via trigger; `015_comercio_justo_comprador.sql` grants the buyer read access to **only** the lot they bought and its farm (fair-trade panel and tip), using `security definer` functions to avoid policy recursion; it is the same rule the service layer replicates in FastAPI (double control, §12).
 
 ---
 

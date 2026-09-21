@@ -87,8 +87,10 @@ class PropinaService:
         # Emitir on-chain (gateway fake en desarrollo)
         propina.tx_hash = self._gateway.emitir_pago(propina)
         self._repo_propina.guardar_propina(propina)
+        # La propina vive en su propia tabla (fuente de verdad); `lote.propinas`
+        # es una vista en memoria y el comprador no tiene escritura sobre `lotes`
+        # (RLS), así que no se persiste el lote.
         lote.asociar_propina(propina)
-        self._repo_lote.guardar(lote)
         return propina
 
     def autorizar_lectura_lote(self, usuario: CurrentUser, lote_id: uuid.UUID):
