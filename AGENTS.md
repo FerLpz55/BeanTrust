@@ -115,7 +115,10 @@ cd mobile && pnpm exec tsc --noEmit && pnpm exec expo lint
   keys hayan aparecido en chat.
 - Deudas clave: pagos on-chain reales siguen en pausa; resta smoke/manual final
   de Expo Go/EAS si se quiere validar el piloto Android. El rate limit en memoria
-  queda solo para dev/CI.
+  queda solo para dev/CI. En Supabase Auth siguen pendientes la protección de
+  contraseñas filtradas y las opciones de MFA (advisors
+  `auth_leaked_password_protection`/`auth_insufficient_mfa_options`); la migración
+  016 ya resolvió los advisors de funciones.
 
 ## Skills útiles
 

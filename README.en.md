@@ -42,8 +42,11 @@ This repository centralizes the components of the Bean Trust ecosystem:
 
 ## MVP Status (honest)
 
-- The backend runs on Supabase/PostgreSQL in production (closed Android pilot);
-  **public sign-up is disabled** and pilot accounts are created via Auth Admin.
+- The backend runs on Supabase/PostgreSQL in production (Android pilot);
+  **public producer sign-up is enabled** (`enable_signup=true`, hardened by
+  migration 014): the app creates the account and onboarding creates the initial
+  farm (`POST /v1/fincas`). Privileged roles (cooperative, buyer, admin) are
+  still created via Auth Admin.
 - The mobile app covers login/recovery, farms, lot creation, event registration
   (F11), traceability, a verifiable Coffee Passport with QR, and the fair-trade panel.
 - **Offline-first field mode:** local SQLite cache, FIFO sync queue with
@@ -61,3 +64,16 @@ This repository centralizes the components of the Bean Trust ecosystem:
 - **Pending:** BaseScan contract verification and the producer's `public_address`
   wallet (on-chain payments, later phase).
 - Operational flow verification: `Backend/scripts/smoke_production.py`.
+
+### Known limitations (MVP)
+
+- **Simulated payments and tips.** They run through `FakeGatewayPagos`; there is
+  no payment gateway and no real money. On-chain payments/tips are a later phase.
+- **Blockchain on Base Sepolia (testnet).** Coffee Passport anchoring is real but
+  on a valueless test network; BaseScan verification and a mainnet deployment are
+  not part of this MVP.
+- **Auth hardening pending.** Supabase Auth leaked-password protection
+  (HaveIBeenPwned) and MFA options remain disabled (advisors
+  `auth_leaked_password_protection` and `auth_insufficient_mfa_options`).
+  Migration 016 resolves the function advisors (`search_path` of
+  `set_actualizado_en` and `EXECUTE` of `rls_auto_enable`).

@@ -42,8 +42,11 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
 
 ## Estado del MVP (honesto)
 
-- El backend corre sobre Supabase/PostgreSQL en producción (piloto Android cerrado);
-  el **alta pública está deshabilitada** y las cuentas piloto se crean por Auth Admin.
+- El backend corre sobre Supabase/PostgreSQL en producción (piloto Android);
+  el **registro público de productores está habilitado** (`enable_signup=true`,
+  endurecido por la migración 014): la app crea la cuenta y el onboarding crea la
+  finca inicial (`POST /v1/fincas`). Los roles privilegiados (cooperativa,
+  comprador, admin) se siguen creando por Auth Admin.
 - La app móvil cubre login/recuperación, fincas, alta de lote, registro de eventos
   (F11), trazabilidad, Pasaporte de Café con QR verificable y panel de comercio justo.
 - **Modo campo offline-first:** caché local en SQLite, cola de sincronización
@@ -61,3 +64,17 @@ Este repositorio centraliza los componentes del ecosistema Bean Trust:
 - **Pendiente:** verificación del contrato en BaseScan y wallet `public_address`
   del productor (pagos on-chain, fase posterior).
 - Verificación operativa del flujo: `Backend/scripts/smoke_production.py`.
+
+### Limitaciones conocidas (MVP)
+
+- **Pagos y propinas simulados.** Corren por `FakeGatewayPagos`; no hay pasarela
+  ni dinero real. La integración on-chain de pagos/propinas queda para una fase
+  posterior.
+- **Blockchain en Base Sepolia (testnet).** El anclaje del Pasaporte es real
+  pero sobre una red de prueba sin valor; la verificación en BaseScan y el
+  despliegue a mainnet no forman parte de este MVP.
+- **Auth pendiente de endurecer.** La protección de contraseñas filtradas
+  (HaveIBeenPwned) y las opciones de MFA de Supabase Auth siguen deshabilitadas
+  (advisors `auth_leaked_password_protection` y `auth_insufficient_mfa_options`).
+  La migración 016 resuelve los advisors de funciones (`search_path` de
+  `set_actualizado_en` y `EXECUTE` de `rls_auto_enable`).

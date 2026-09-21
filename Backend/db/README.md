@@ -22,7 +22,8 @@ db/
 │   ├── 012_blockchain_anchor_hardening.sql       # unicidad QR/lote, ENVIANDO, nonce, lease
 │   ├── 013_blockchain_worker_fencing.sql         # fencing del worker + formato tx_hash
 │   ├── 014_registro_productor_y_finca.sql        # alta pública siempre productor + alta de finca con cooperativa del piloto
-│   └── 015_comercio_justo_comprador.sql          # el comprador lee solo el lote que compró y su finca (panel/propina)
+│   ├── 015_comercio_justo_comprador.sql          # el comprador lee solo el lote que compró y su finca (panel/propina)
+│   └── 016_endurecer_funciones_advisors.sql      # search_path de set_actualizado_en + revoca EXECUTE de rls_auto_enable
 └── seed/
     ├── seed.sql                  # usuarios/fincas de desarrollo (ids fijos)
     └── seed_supabase.sql         # seed de un proyecto Supabase real
@@ -101,6 +102,13 @@ la RLS. Usa `app_private.bean_comprador_de_lote`/`bean_comprador_de_finca`
 (`security definer`, `search_path` fijo) para evitar la recursión de políticas
 `lotes` ↔ `pago`. No amplía escritura: la propina se inserta en `propina`.
 
+La migración **016** cierra los advisors de funciones: fija `search_path = ''`
+en `public.set_actualizado_en()` (solo usa `now()`, de `pg_catalog`) y revoca
+`EXECUTE` de `public.rls_auto_enable()` para `public`/`anon`/`authenticated`,
+dejándola solo para `service_role`/`postgres`. Quedan pendientes los advisors de
+Auth (`auth_leaked_password_protection`, `auth_insufficient_mfa_options`), que
+se activan desde la configuración de Supabase y no con SQL.
+
 ## Evidencias: bucket privado, cron y secretos de Vault
 
 - La migración **007** crea el bucket privado `evidencias-lotes` (5 MB, JPEG/PNG/WebP)
@@ -156,7 +164,7 @@ de tipo error:
 
 ```sh
 supabase start          # levanta el stack local
-supabase db reset       # aplica 001–007 + seed desde cero
+supabase db reset       # aplica 001–016 + seed desde cero
 supabase test db        # pgTAP: RLS, Storage y rate limit (supabase/tests/)
 supabase db advisors --local --fail-on error
 ```

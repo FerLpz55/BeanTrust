@@ -66,9 +66,11 @@ Notas que no son obvias:
   un `.env`. En `production` la config **exige** Supabase para auth y datos, y
   además `BEAN_SUPABASE_ANON_KEY` y `BEAN_RATE_LIMIT_HMAC_SECRET` (ver abajo).
 - `BEAN_CORS_ORIGINS` admite lista separada por comas (`a,b`) o JSON.
-- Las mismas cuatro credenciales de la tabla de arriba son las únicas válidas en
-  producción: el alta pública está cerrada en Supabase, así que
-  `POST /v1/auth/register` responde 401.
+- En producción el **registro público de productores está habilitado**
+  (`enable_signup=true`): `POST /v1/auth/register` siempre crea `productor` (la
+  migración 014 fuerza el rol aunque la metadata pida otro) y el onboarding crea
+  la finca inicial con `POST /v1/fincas`. Los roles privilegiados (cooperativa,
+  comprador, admin) se siguen creando por Auth Admin.
 - **Secretos de Vault** (no son variables de entorno): la migración 007 programa
   el cron `purge-staged-evidence-daily`, que lee de Vault `purge_evidence_url`
   (URL de la Edge Function `purge-staged-evidence`) y `purge_evidence_secret`
@@ -104,6 +106,11 @@ Todas llevan prefijo `BEAN_` (ver `.env.example`). Las nuevas del hardening:
 - **Storage.** Las fotos viven en el bucket **privado** `evidencias-lotes`; el
   backend sube/firma/borra con `service_role` y la tabla `public.evidencias` no
   tiene grants para `anon`/`authenticated`. El móvil nunca habla con Storage.
+- **Advisors de base de datos.** La migración 016 fija el `search_path` de
+  `public.set_actualizado_en` y revoca `EXECUTE` de `public.rls_auto_enable` para
+  `public`/`anon`/`authenticated`. Quedan pendientes, por ser ajustes de Supabase
+  Auth y no del esquema, la protección de contraseñas filtradas y las opciones de
+  MFA (`auth_leaked_password_protection`, `auth_insufficient_mfa_options`).
 
 ## Endpoints (`/v1`)
 

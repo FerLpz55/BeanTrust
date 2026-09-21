@@ -1270,17 +1270,21 @@ de ser el único guardián teórico y `auth.uid()` es de verdad el `USUARIOS.id`
   no implementa `guardar()`). El trigger **nunca** concede `admin` desde la
   metadata del cliente —se asigna en la BD— ni acepta un rol desconocido: cae a
   `productor`, el de menor privilegio.
-- **El alta pública está cerrada** (`supabase/config.toml`, `[auth] enable_signup
-  = false`): las únicas credenciales válidas son las cuatro de demo. Un alta
-  propia se quedaría sin finca asociada y no podría registrar lotes, así que
-  `POST /v1/auth/register` responde 401 y la pantalla de registro del móvil ya
-  no se ofrece desde el login.
+- **El alta pública está habilitada** (`supabase/config.toml`, `[auth]
+  enable_signup = true`): `POST /v1/auth/register` siempre crea `productor` (la
+  migración 014 fuerza el rol aunque la metadata pida otro; los roles
+  privilegiados se crean por Auth Admin) y el onboarding crea la finca inicial
+  con `POST /v1/fincas` (exclusivo de productor, idempotente por el `id` del
+  móvil y con la cooperativa del piloto).
 - Desde el hardening (migración 006 + clientes por request), el backend deja de
   hablar con Supabase **solo** por *service key*: los endpoints autenticados
   adjuntan el JWT del usuario por operación y la RLS se evalúa de verdad. La
   `service_role` queda acotada a auth interna, verificación pública y Storage de
-  evidencias (que no tiene acceso de usuarios). La deuda B11 restante es la
-  wallet `public_address` y los advisors/observabilidad.
+  evidencias (que no tiene acceso de usuarios). La migración 016 resuelve los
+  advisors de funciones (`search_path` de `set_actualizado_en` y `EXECUTE` de
+  `rls_auto_enable`); la deuda B11 restante es la wallet `public_address`, los
+  advisors de Auth (protección de contraseñas filtradas y MFA) y la
+  observabilidad.
 
 ### Flujo de autenticación (diagrama de secuencia)
 

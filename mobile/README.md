@@ -21,8 +21,9 @@ a `.env`). Por defecto apunta a `http://localhost:8000` (ver `src/config.ts`);
 **en dispositivo físico debe ser la IP LAN de tu máquina**, no localhost.
 
 En el piloto Android el `.env` apunta a `https://beantrust-api.vercel.app`
-(backend en Vercel sobre Supabase real). El registro público está cerrado: las
-cuentas piloto las crea Auth Admin, no la pantalla de registro.
+(backend en Vercel sobre Supabase real). El **registro público de productores
+está habilitado**: la pantalla de registro crea la cuenta y el onboarding
+configura la finca inicial.
 
 ## Verificación
 
@@ -97,7 +98,8 @@ pnpm lint             # ESLint
 ```
 
 > El dinero de pagos y propinas es **simulado** (`FakeGatewayPagos`): no hay
-> pasarela ni blockchain (web3 en pausa, B7).
+> pasarela ni dinero real. El anclaje del Pasaporte sí es real, sobre **Base
+> Sepolia** (testnet, sin valor).
 
 ### Convenciones
 
