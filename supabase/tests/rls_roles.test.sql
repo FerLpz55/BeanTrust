@@ -12,7 +12,7 @@
 
 begin;
 
-select plan(38);
+select plan(40);
 
 -- ------------------------------------------------------------------ fixtures
 -- Como `postgres` la RLS no aplica (BYPASSRLS): se siembra el escenario.
@@ -125,10 +125,18 @@ reset role;
 set local "request.jwt.claims" = '{"sub":"00000000-0000-0000-0000-000000000005","role":"authenticated"}';
 set local role authenticated;
 
-select is((select count(*)::int from public.lotes), 0,
-  'comprador: no lee lotes');
-select is((select count(*)::int from public.finca), 0,
-  'comprador: no lee fincas');
+select is(
+  (select count(*)::int from public.lotes where id = '00000000-0000-0000-0000-000000000021'),
+  1, 'comprador: lee el lote que compró');
+select is(
+  (select count(*)::int from public.lotes where id = '00000000-0000-0000-0000-000000000022'),
+  0, 'comprador: no lee lote ajeno');
+select is(
+  (select count(*)::int from public.finca where id = '00000000-0000-0000-0000-000000000011'),
+  1, 'comprador: lee la finca de su lote');
+select is(
+  (select count(*)::int from public.finca where id = '00000000-0000-0000-0000-000000000012'),
+  0, 'comprador: no lee finca ajena');
 select is(
   (select count(*)::int from public.usuarios where id = '00000000-0000-0000-0000-000000000005'),
   1, 'comprador: lee su propio usuario');
