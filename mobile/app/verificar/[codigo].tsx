@@ -28,10 +28,14 @@ import { useAuthStore } from '@/src/store/auth';
 import { LoteEstado } from '@/src/store/lotes';
 import type { AnclajeOnchain } from '@/src/api/types';
 import { debeConsultarAnclaje } from '@/src/domain/anclaje';
+import { esCargaInicialPasaporte } from '@/src/domain/pasaporte';
 import { esUrlExplorerPermitida } from '@/src/utils/explorer';
 import { useLocalSearchParams, router, useFocusEffect, type Href } from 'expo-router';
 
-const POLLING_MS = 10_000;
+// El anclaje puede tardar (cron diario): el sondeo arranca en 10 s y duplica
+// hasta 60 s para no golpear el backend cada 10 s durante horas.
+const POLLING_BASE_MS = 10_000;
+const POLLING_MAX_MS = 60_000;
 
 interface LocalParams {
   codigo: string;
@@ -61,12 +65,14 @@ function AnclajeCard({
 }) {
   const onSurface = useThemeColor('onSurface');
   const onSurfaceVariant = useThemeColor('onSurfaceVariant');
-  const primary = useThemeColor('primary');
   const tertiary = useThemeColor('tertiary');
   const surfaceContainerLow = useThemeColor('surfaceContainerLow');
 
   const confirmada = anclaje?.estado === 'CONFIRMADA';
-  const enEspera = anclaje?.estado === 'PENDIENTE' || anclaje?.estado === 'ENVIANDO' || anclaje?.estado === 'ENVIADA';
+  const pendiente =
+    anclaje?.estado === 'PENDIENTE' ||
+    anclaje?.estado === 'ENVIANDO' ||
+    anclaje?.estado === 'ENVIADA';
   const enlaceValido =
     confirmada && !!anclaje?.tx_hash && !!anclaje?.bloque && esUrlExplorerPermitida(anclaje?.explorer_url);
 
@@ -77,7 +83,7 @@ function AnclajeCard({
         ? `Anclado en ${anclaje.red_nombre}`
         : anclaje.estado === 'FALLIDA'
           ? 'El Pasaporte sigue siendo válido'
-          : 'Anclaje en curso';
+          : 'Pendiente de confirmación';
 
   const detalle =
     anclaje === null
@@ -86,7 +92,7 @@ function AnclajeCard({
         ? 'La raíz SHA-256 quedó registrada de forma inmutable en la cadena.'
         : anclaje.estado === 'FALLIDA'
           ? 'Evidencia on-chain pendiente de revisión; el Pasaporte conserva su validez.'
-          : 'El certificado ya es válido; la confirmación en la cadena puede tardar.';
+          : 'El certificado ya es válido sin conexión; la confirmación en la cadena puede tardar (hasta 24 h).';
 
   return (
     <View style={[styles.sectionCard, { backgroundColor: surfaceContainerLow }]}>
@@ -99,20 +105,21 @@ function AnclajeCard({
         ) : null}
       </View>
       <View style={styles.anchorRow}>
-        {enEspera ? (
-          <ActivityIndicator size="small" color={primary} />
-        ) : (
-          <IconSymbol
-            size={20}
-            name={confirmada ? 'verified' : 'link'}
-            color={confirmada ? tertiary : onSurfaceVariant}
-          />
-        )}
+        <IconSymbol
+          size={20}
+          name={confirmada ? 'verified' : pendiente ? 'schedule' : 'link'}
+          color={confirmada ? tertiary : onSurfaceVariant}
+        />
         <Text style={[typeScale.bodyMedium, { color: onSurface, flex: 1 }]}>{titulo}</Text>
       </View>
       <Text style={[typeScale.bodySmall, { color: onSurfaceVariant }, styles.anchorDetail]}>
         {detalle}
       </Text>
+      {pendiente && anclaje?.hash_raiz ? (
+        <View style={styles.datosOnchain}>
+          <DatoOnchain etiqueta="HASH A ANCLAR" valor={`${anclaje.hash_raiz.slice(0, 18)}…`} />
+        </View>
+      ) : null}
       {enlaceValido ? (
         <>
           <View style={styles.datosOnchain}>
@@ -171,12 +178,25 @@ export default function VerificarCodigoScreen() {
   const enCurso = debeConsultarAnclaje(estadoAnclaje);
 
   // Polling solo mientras el anclaje está en curso y la pantalla tiene foco.
+  // Con backoff: no reemplaza el contenido (el fix de arriba) y baja la frecuencia.
   useEffect(() => {
     if (!enCurso || !enfocado || !params.codigo) return;
-    const timer = setInterval(() => {
-      void buscarPorCodigo(params.codigo);
-    }, POLLING_MS);
-    return () => clearInterval(timer);
+    let cancelado = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let delay = POLLING_BASE_MS;
+    const programar = () => {
+      timer = setTimeout(async () => {
+        if (cancelado) return;
+        await buscarPorCodigo(params.codigo);
+        delay = Math.min(delay * 2, POLLING_MAX_MS);
+        if (!cancelado) programar();
+      }, delay);
+    };
+    programar();
+    return () => {
+      cancelado = true;
+      clearTimeout(timer);
+    };
   }, [enCurso, enfocado, params.codigo, buscarPorCodigo]);
 
   const abrirExplorer = useCallback(async () => {
@@ -197,7 +217,9 @@ export default function VerificarCodigoScreen() {
     }
   }, [data]);
 
-  if (isLoading || (!data && !error)) {
+  // Loader de pantalla completa SOLO en la carga inicial: durante un refresco o
+  // el polling el Pasaporte sigue visible (antes se "recargaba" cada 10 s).
+  if (esCargaInicialPasaporte(Boolean(data), isLoading, Boolean(error))) {
     return (
       <SafeAreaView style={[styles.loadingRoot, { backgroundColor: background }]}>
         <View style={styles.loadingContent}>
@@ -208,7 +230,9 @@ export default function VerificarCodigoScreen() {
     );
   }
 
-  if (error || !data) {
+  // Sin datos y con error: pantalla de error. Si ya hay datos, se conserva el
+  // Pasaporte y el fallo del refresco se muestra como aviso no bloqueante.
+  if (!data) {
     return (
       <SafeAreaView style={[styles.root, { backgroundColor: background }]}>
         <EmptyState
@@ -234,6 +258,16 @@ export default function VerificarCodigoScreen() {
           <RefreshControl refreshing={isLoading} onRefresh={refrescar} tintColor={primary} />
         }
       >
+        {/* Fallo de un refresco con datos ya visibles: aviso, no reemplazo. */}
+        {error ? (
+          <View style={[styles.refreshError, { backgroundColor: surfaceContainerLow }]}>
+            <IconSymbol size={16} name="error-outline" color={onSurfaceVariant} />
+            <Text style={[typeScale.bodySmall, styles.refreshErrorText, { color: onSurfaceVariant }]}>
+              {error}
+            </Text>
+          </View>
+        ) : null}
+
         {/* Cabecera / Sello */}
         <View style={styles.headerSection}>
           <VerifiedSeal />
@@ -389,6 +423,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xxl,
     gap: spacing.xl,
+  },
+  refreshError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radii.medium,
+  },
+  refreshErrorText: {
+    flex: 1,
   },
   headerSection: {
     alignItems: 'center',
