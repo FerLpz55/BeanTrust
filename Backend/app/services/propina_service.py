@@ -39,11 +39,12 @@ class PropinaService:
             raise NoAutorizado("Solo los compradores pueden dar propinas.")
         if lote.estado.value != "VENDIDO":
             raise TransicionInvalida("Solo se puede dar propina en lotes vendidos.")
-        # Verificar que el comprador sea el que compró el lote
-        evento_venta = next((e for e in lote.historial if e.tipo.value == "VENTA"), None)
-        if evento_venta is None:
+        # El comprador no puede leer `lote_eventos` (RLS), así que la venta se
+        # comprueba por el `pago` del lote, que sí puede leer (§10).
+        pago = self._repo_pago.buscar_por_lote(lote.id)
+        if pago is None:
             raise TransicionInvalida("El lote no tiene una venta registrada.")
-        if evento_venta.comprador_id != usuario.id:
+        if pago.comprador_id != usuario.id:
             raise NoAutorizado("No es el comprador de este lote.")
 
     def registrar_propina(
@@ -113,8 +114,10 @@ class PropinaService:
         if usuario.rol is Rol.COOPERATIVA and finca and finca.cooperativa_id == usuario.id:
             return lote, finca
         if usuario.rol is Rol.COMPRADOR:
-            evento_venta = next((e for e in lote.historial if e.tipo.value == "VENTA"), None)
-            if evento_venta and evento_venta.comprador_id == usuario.id:
+            # El comprador no lee `lote_eventos`; la venta se resuelve por el
+            # `pago` del lote (que sí puede leer, matriz §10).
+            pago = self._repo_pago.buscar_por_lote(lote.id)
+            if pago is not None and pago.comprador_id == usuario.id:
                 return lote, finca
         raise NoAutorizado("No tiene acceso a la información de este lote.")
 
